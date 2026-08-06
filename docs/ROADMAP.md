@@ -1,4 +1,4 @@
-# Roadmap — GameTranslatorOverlay
+﻿# Roadmap — GameTranslatorOverlay
 
 Etapy realizowane sekwencyjnie; każdy etap ma jednoznaczne kryterium ukończenia. Wersjonowanie SemVer, start 0.1.0. Pierwsze MVP = ukończony Etap 6.
 
@@ -6,49 +6,49 @@ Statusy: ✅ zrobione · 🔨 w trakcie · ⬜ planowane
 
 ## Etapy
 
-### Etap 0 — Analiza i dokumenty 🔨 (w trakcie)
+### Etap 0 — Analiza i dokumenty ✅
 
 Specyfikacja produktu, wizja, roadmapa, dokumentacja architektury, bezpieczeństwa i prywatności w `docs/`.
 
 **Kryterium ukończenia:** komplet dokumentów w `docs/` opisuje produkt, ograniczenia, architekturę i plan tak, że można realizować kolejne etapy bez wracania do ustaleń.
 
-### Etap 1 — Szkielet rozwiązania 🔨 (w trakcie)
+### Etap 1 — Szkielet rozwiązania ✅
 
 Struktura projektów: `src/GameTranslatorOverlay.Core` (czysta logika, bez zależności Windows), `src/GameTranslatorOverlay.Infrastructure` (SQLite cache, DeepL, DPAPI, pliki profili/słowników), `src/GameTranslatorOverlay.App` (WPF: UI, capture, OCR, nakładka, skróty globalne), `tests/GameTranslatorOverlay.Core.Tests`, `tests/GameTranslatorOverlay.Infrastructure.Tests` (xUnit). TFM aplikacji `net10.0-windows10.0.19041.0`. DI przez Microsoft.Extensions.Hosting. CI na GitHub Actions (windows-latest): restore → build → test.
 
 **Kryterium ukończenia:** `dotnet build` i `dotnet test` przechodzą lokalnie i w CI; solution ma docelowy układ projektów; CI zielone bez żadnych sekretów.
 
-### Etap 2 — Przechwytywanie obrazu ⬜
+### Etap 2 — Przechwytywanie obrazu ✅
 
 Capture przez GDI: lista okien z wyborem okna gry, screenshot okna (`PrintWindow` z PW_RENDERFULLCONTENT + fallback na crop ekranu), zrzut wskazanego regionu ekranu (`CopyFromScreen`/BitBlt).
 
 **Kryterium ukończenia:** aplikacja wyświetla listę okien, użytkownik wybiera okno, aplikacja poprawnie zrzuca obraz okna oraz dowolnego regionu ekranu (okna i borderless fullscreen; exclusive fullscreen udokumentowany jako nieobsługiwany).
 
-### Etap 3 — OCR systemowy ⬜
+### Etap 3 — OCR systemowy ✅
 
 `Windows.Media.Ocr.OcrEngine` jako `WindowsOcrProvider` za interfejsem `IOcrProvider`. Normalizacja i filtr śmieci na poziomie tekstu (API nie daje per-słowo confidence). Obsługa braku pakietu językowego: czytelny komunikat + instrukcja doinstalowania języka w ustawieniach Windows.
 
 **Kryterium ukończenia:** tekst z przechwyconego obrazu jest rozpoznawany lokalnie; brak pakietu językowego kończy się zrozumiałym komunikatem, nie wyjątkiem.
 
-### Etap 4 — Tłumaczenie przez API ⬜
+### Etap 4 — Tłumaczenie przez API ✅
 
 Interfejs `ITranslationProvider`; implementacje: `DeepLTranslationProvider` (api-free.deepl.com dla kluczy `:fx`, api.deepl.com dla pro; `/v2/translate` z batchem do 50 tekstów; `/v2/usage` do testu połączenia i licznika; obsługa 403 = zły klucz, 456 = limit wyczerpany, 429 = rate limit z ograniczonym retry, timeout, brak sieci) oraz `MockTranslationProvider` (deterministyczny, do testów i pracy bez klucza). Klucz API przez DPAPI (CurrentUser) w `%LOCALAPPDATA%\GameTranslatorOverlay`.
 
 **Kryterium ukończenia:** tekst EN wraca jako PL przez DeepL; każdy scenariusz błędu (zły klucz, limit, rate limit, timeout, brak sieci) daje czytelny komunikat; testy jednostkowe przechodzą na Mocku bez sieci i sekretów.
 
-### Etap 5 — SQLite cache ⬜
+### Etap 5 — SQLite cache ✅
 
 Cache przez Microsoft.Data.Sqlite, migracje przez `PRAGMA user_version`. Priorytet wyników: ręczna korekta > wpis profilu gry > cache globalny > API. Deduplikacja zapytań in-flight. Tryb Cache-only.
 
 **Kryterium ukończenia:** ten sam tekst nie idzie drugi raz do API; równoległe zapytania o ten sam tekst wykonują jedno wywołanie; w trybie Cache-only nic nie wychodzi do sieci.
 
-### Etap 6 — Ręczne tłumaczenie regionu (PIERWSZE MVP) ⬜
+### Etap 6 — Ręczne tłumaczenie regionu (PIERWSZE MVP) ✅ (do potwierdzenia testem ręcznym w realnej grze)
 
 Globalny skrót `Ctrl+Shift+T` → zaznaczenie regionu → pipeline capture → OCR → słownik → cache → API → panel wyniku. Skrót steruje wyłącznie tłumaczem, nigdy grą.
 
 **Kryterium ukończenia:** pełna ścieżka użytkownika działa end-to-end w realnej grze: skrót w trakcie gry, zaznaczenie regionu, przetłumaczony tekst w panelu wyniku, bez utraty sterowania grą.
 
-### Etap 7 — Nakładka (overlay) ⬜
+### Etap 7 — Nakładka (overlay) ✅ (wersja podstawowa; testy ręczne DPI/multi-monitor w toku)
 
 Okno WPF z `WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`, Topmost, per-monitor DPI (manifest PerMonitorV2), poprawne działanie multi-monitor.
 
@@ -66,13 +66,13 @@ Tryby wyświetlania zbudowane na silniku live: Tooltip Mode (tłumaczenie toolti
 
 **Kryterium ukończenia:** trzy strategie działają na wspólnym silniku i można się między nimi przełączać bez restartu aplikacji.
 
-### Etap 10 — Słowniki, korekty, import/eksport ⬜
+### Etap 10 — Słowniki, korekty, import/eksport 🔨 (rdzeń działa: korekty, + Słownik, priorytety; brakuje edytora i importu/eksportu w GUI)
 
 Słowniki wg schematu `glossaries/<id>/en-pl.json` (dopasowanie całych słów/fraz, dłuższe frazy przed krótszymi, priorytety, wykrywanie konfliktów ten sam source → różne targety). Ręczne korekty tłumaczeń użytkownika (najwyższy priorytet). Import/eksport słowników i korekt.
 
 **Kryterium ukończenia:** użytkownik dodaje termin do słownika i poprawia tłumaczenie z poziomu UI; korekta wygrywa z każdym innym źródłem; słownik da się wyeksportować i zaimportować bez utraty danych; konflikty są raportowane.
 
-### Etap 11 — Profile gier + profil PoE2 ⬜
+### Etap 11 — Profile gier + profil PoE2 🔨 (profile i słowniki działają; brakuje walidacji wersji aplikacji i UX wyboru)
 
 Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po nazwie procesu/tytule okna, parametry OCR i detekcji zmian, powiązany słownik, `minAppVersion`). Pierwszy dostarczony profil: Path of Exile 2 wraz ze słownikiem terminów.
 
@@ -143,3 +143,4 @@ Przy każdym konflikcie decyzyjnym rozstrzyga niższy numer:
 8. Tryb live.
 9. Profile gier.
 10. Wyjaśnianie mechanik (opcjonalny LLM, domyślnie OFF).
+
