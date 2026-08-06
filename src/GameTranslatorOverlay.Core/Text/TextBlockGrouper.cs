@@ -4,6 +4,20 @@ namespace GameTranslatorOverlay.Core.Text;
 
 public sealed record TextBlock(string Text, RectPx Box, IReadOnlyList<OcrLine> Lines);
 
+public static class TextBlockMetrics
+{
+    /// <summary>
+    /// Mediana wysokości linii bloku (px) — pozwala nakładce dobrać rozmiar czcionki
+    /// tłumaczenia do rozmiaru oryginalnego tekstu.
+    /// </summary>
+    public static int MedianLineHeight(TextBlock block)
+    {
+        if (block.Lines.Count == 0) return block.Box.Height;
+        var heights = block.Lines.Select(static l => l.Box.Height).OrderBy(static h => h).ToList();
+        return heights[heights.Count / 2];
+    }
+}
+
 public sealed record GroupingOptions(double MaxVerticalGapFactor = 1.0, double MaxHorizontalGapFactor = 2.0)
 {
     public static readonly GroupingOptions Default = new();

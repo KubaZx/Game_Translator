@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace GameTranslatorOverlay.App.Services;
 
-public sealed record LiveDisplayBlock(string Key, RectPx ScreenBox, string TranslatedText);
+public sealed record LiveDisplayBlock(string Key, RectPx ScreenBox, string TranslatedText, int LineHeight = 0);
 
 public sealed record LiveUpdate(
     string StatusLine,
@@ -48,7 +48,7 @@ public sealed class LiveTranslationSession(
 {
     private const int MaxConsecutiveFailures = 5;
 
-    private sealed record DisplayedBlock(RectPx WindowRelativeBox, string TranslatedText, string NormalizedTranslation);
+    private sealed record DisplayedBlock(RectPx WindowRelativeBox, string TranslatedText, string NormalizedTranslation, int LineHeight);
 
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<string, DisplayedBlock> _displayed = [];
@@ -87,7 +87,8 @@ public sealed class LiveTranslationSession(
             .Select(kv => new LiveDisplayBlock(
                 kv.Key,
                 kv.Value.WindowRelativeBox.Offset(bounds.X, bounds.Y),
-                kv.Value.TranslatedText))
+                kv.Value.TranslatedText,
+                kv.Value.LineHeight))
             .ToList();
 
     private async Task LoopAsync(CancellationToken cancellationToken)
@@ -327,7 +328,8 @@ public sealed class LiveTranslationSession(
             next[key] = new DisplayedBlock(
                 keyed[i].Block.Box,
                 translated,
-                TextNormalizer.Normalize(translated));
+                TextNormalizer.Normalize(translated),
+                TextBlockMetrics.MedianLineHeight(keyed[i].Block));
             if (!_displayed.ContainsKey(key))
             {
                 freshKeys.Add(key);

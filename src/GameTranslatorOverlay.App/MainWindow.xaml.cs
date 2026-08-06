@@ -129,6 +129,10 @@ public partial class MainWindow : Window
             _ => 0,
         };
 
+        CmbFont.ItemsSource = new[] { "Segoe UI", "Georgia", "Palatino Linotype", "Cambria", "Book Antiqua", "Times New Roman" };
+        CmbFont.SelectedItem = _settings.OverlayFontFamily;
+        if (CmbFont.SelectedItem is null) CmbFont.SelectedIndex = 0;
+
         TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         ChkCacheOnly.IsChecked = _settings.CacheOnlyMode;
         ChkPrivate.IsChecked = _settings.PrivateMode;
@@ -412,7 +416,7 @@ public partial class MainWindow : Window
         {
             var translated = result.Blocks
                 .Where(static b => b.Outcome.TranslatedText is not null)
-                .Select(static b => (b.Block.Box, b.Outcome.TranslatedText!))
+                .Select(static b => (b.Block.Box, b.Outcome.TranslatedText!, Core.Text.TextBlockMetrics.MedianLineHeight(b.Block)))
                 .ToList();
             if (translated.Count > 0)
             {
@@ -514,7 +518,7 @@ public partial class MainWindow : Window
             .FirstOrDefault(p => p.Name == selectedProfileName)?.Id;
 
         if (double.TryParse(TxtFontSize.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var fontSize)
-            && fontSize is >= 9 and <= 48)
+            && (fontSize == 0 || fontSize is >= 9 and <= 48))
         {
             _settings.OverlayFontSize = fontSize;
         }
@@ -522,6 +526,8 @@ public partial class MainWindow : Window
         {
             TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         }
+
+        _settings.OverlayFontFamily = CmbFont.SelectedItem as string ?? "Segoe UI";
 
         _settingsStore.Save(_settings);
         _orchestrator.RebuildPipeline();

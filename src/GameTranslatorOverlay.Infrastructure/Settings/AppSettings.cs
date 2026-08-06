@@ -17,7 +17,13 @@ public sealed class AppSettings
 
     /// <summary>panel | overlay</summary>
     public string ResultDisplayMode { get; set; } = "panel";
-    public double OverlayFontSize { get; set; } = 15;
+
+    /// <summary>0 = auto: rozmiar dopasowany do wysokości oryginalnego tekstu z OCR.</summary>
+    public double OverlayFontSize { get; set; }
+
+    /// <summary>Krój czcionki nakładki (nazwa czcionki systemowej).</summary>
+    public string OverlayFontFamily { get; set; } = "Segoe UI";
+
     public double OverlayBackgroundOpacity { get; set; } = 0.85;
     public int ResultAutoHideSeconds { get; set; } = 30;
 

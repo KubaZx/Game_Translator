@@ -89,15 +89,31 @@ public partial class OverlayWindow : Window
     private static bool IsBackgroundless(AppSettings settings) =>
         settings.OverlayBackgroundOpacity < 0.05;
 
-    private static TextBlock CreateBlockText(string text, AppSettings settings)
+    /// <summary>
+    /// Rozmiar czcionki: jawny z ustawień albo (przy 0 = auto) dopasowany do wysokości
+    /// oryginalnej linii tekstu z OCR — tłumaczenie wygląda wtedy jak tekst gry.
+    /// </summary>
+    private static double ResolveFontSize(AppSettings settings, int lineHeightPx, double scale)
+    {
+        if (settings.OverlayFontSize >= 9) return settings.OverlayFontSize;
+        if (lineHeightPx > 0) return Math.Clamp(lineHeightPx / scale * 0.75, 9, 48);
+        return 15;
+    }
+
+    private static TextBlock CreateBlockText(string text, AppSettings settings, double fontSize)
     {
         var textBlock = new TextBlock
         {
             Text = text,
             Foreground = Brushes.White,
-            FontSize = Math.Max(9, settings.OverlayFontSize),
+            FontSize = fontSize,
             TextWrapping = TextWrapping.Wrap,
         };
+
+        if (!string.IsNullOrWhiteSpace(settings.OverlayFontFamily))
+        {
+            textBlock.FontFamily = new FontFamily(settings.OverlayFontFamily);
+        }
 
         // Bez tła tekst dostaje czarną poświatę — inaczej ginąłby na jasnych scenach.
         if (IsBackgroundless(settings))
@@ -114,7 +130,7 @@ public partial class OverlayWindow : Window
         return textBlock;
     }
 
-    private Border CreateBlockElement(string text, AppSettings settings)
+    private Border CreateBlockElement(string text, AppSettings settings, double scale, int lineHeightPx)
     {
         Brush background;
         if (IsBackgroundless(settings))
@@ -131,12 +147,20 @@ public partial class OverlayWindow : Window
                 (byte)Math.Clamp(opacity * 255, 0, 255), 0x0B, 0x0E, 0x11));
         }
 
+        var textBlock = CreateBlockText(text, settings, ResolveFontSize(settings, lineHeightPx, scale));
+        if (IsCoverPlacement(settings))
+        {
+            // W trybie zakrywania tekst centruje się w prostokącie oryginału.
+            textBlock.VerticalAlignment = VerticalAlignment.Center;
+        }
+
         return new Border
         {
             Background = background,
             CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(7, 4, 7, 4),
-            Child = CreateBlockText(text, settings),
+            // Bez tła liczy się precyzyjne trafienie w pole oryginału — zero odstępu.
+            Padding = IsBackgroundless(settings) ? new Thickness(0) : new Thickness(7, 4, 7, 4),
+            Child = textBlock,
         };
     }
 
@@ -189,7 +213,7 @@ public partial class OverlayWindow : Window
     }
 
     /// <summary>Jednorazowe wyświetlenie bloków z tłumaczenia ręcznego (auto-ukrywane).</summary>
-    public void ShowBlocks(IReadOnlyList<(RectPx Box, string Text)> blocks, AppSettings settings)
+    public void ShowBlocks(IReadOnlyList<(RectPx Box, string Text, int LineHeight)> blocks, AppSettings settings)
     {
         if (blocks.Count == 0) return;
 
@@ -200,9 +224,9 @@ public partial class OverlayWindow : Window
         ClearManualBlocks();
         _hiddenByUser = false;
 
-        foreach (var (box, text) in blocks)
+        foreach (var (box, text, lineHeight) in blocks)
         {
-            var element = CreateBlockElement(text, settings);
+            var element = CreateBlockElement(text, settings, monitor.Scale, lineHeight);
             PositionBlockElement(element, box, monitor, settings);
             _manualElements.Add(element);
             RootCanvas.Children.Add(element);
@@ -256,7 +280,7 @@ public partial class OverlayWindow : Window
             }
             else
             {
-                element = CreateBlockElement(block.TranslatedText, settings);
+                element = CreateBlockElement(block.TranslatedText, settings, monitor.Scale, block.LineHeight);
                 _liveElements[block.Key] = element;
                 RootCanvas.Children.Add(element);
             }
@@ -280,7 +304,8 @@ public partial class OverlayWindow : Window
 
         if (_subtitleElement is null)
         {
-            var subtitleContent = CreateBlockText(string.Empty, settings);
+            var subtitleFontSize = settings.OverlayFontSize >= 9 ? settings.OverlayFontSize + 2 : 18;
+            var subtitleContent = CreateBlockText(string.Empty, settings, subtitleFontSize);
             subtitleContent.TextAlignment = TextAlignment.Center;
             _subtitleElement = new Border
             {
@@ -297,7 +322,7 @@ public partial class OverlayWindow : Window
 
         var subtitleText = (TextBlock)_subtitleElement.Child;
         subtitleText.Text = text;
-        subtitleText.FontSize = Math.Max(12, settings.OverlayFontSize + 2);
+        subtitleText.FontSize = settings.OverlayFontSize >= 9 ? settings.OverlayFontSize + 2 : 18;
         PositionSubtitle(gameWindowBounds, monitor);
 
         CoverMonitor(monitor);
