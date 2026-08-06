@@ -9,7 +9,7 @@ i nie blokuje kliknięć.
 > ani pamięci; nie wysyła do gry żadnych kliknięć ani klawiszy. Pracuje wyłącznie na obrazie,
 > który i tak widzisz na ekranie. Szczegóły: [docs/SECURITY.md](docs/SECURITY.md).
 
-## Status projektu (v0.1.0)
+## Status projektu (v0.2.0)
 
 | Etap | Zakres | Status |
 |---|---|---|
@@ -19,8 +19,14 @@ i nie blokuje kliknięć.
 | 4 | Tłumaczenie: DeepL + Mock, klucz w DPAPI | ✅ |
 | 5 | Cache SQLite (priorytet ręcznych korekt, eksport/import) | ✅ |
 | 6 | **MVP: Ctrl+Shift+T → region → polski wynik w panelu** | ✅ |
-| 7 | Nakładka click-through (podstawowa) | ✅ |
-| 8–12 | Tryb live, strategie Tooltip/Subtitle, edytor słowników, wydanie | 🔜 [docs/ROADMAP.md](docs/ROADMAP.md) |
+| 7 | Nakładka click-through + wykluczenie z przechwytywania | ✅ |
+| 8 | Tryb live: wykrywanie zmian, stabilizacja, latest-frame-wins | ✅ |
+| 9 | Strategie: przy oryginale / napisy na dole (auto-tooltip — plan) | 🔨 |
+| 10 | Edytor słownika, import/eksport JSON, konflikty | ✅ |
+| 11 | Profile gier + autodetekcja po procesie (PoE2 w zestawie) | ✅ |
+| 12 | Wersja produkcyjna: portable zip, tray, instrukcje, licencje | 🔨 |
+
+Szczegóły: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 Funkcje wymagające prawdziwego pulpitu (skróty globalne, nakładka, DPI, multi-monitor) mają
 scenariusze testów ręcznych w [docs/MANUAL_TESTING.md](docs/MANUAL_TESTING.md).
@@ -98,13 +104,20 @@ wysyłany jest **wyłącznie rozpoznany tekst** — nigdy obraz. Program nie zap
 i nie nagrywa rozgrywki. Dane (cache, ustawienia, logi) trzyma w
 `%LOCALAPPDATA%\GameTranslatorOverlay`. Pełna polityka: [docs/PRIVACY.md](docs/PRIVACY.md).
 
-## Znane ograniczenia (v0.1.0)
+## Znane ograniczenia (v0.2.0)
 
 - Gry w trybie **exclusive fullscreen** nie są obsługiwane (użyj borderless/okienkowego).
 - Zaznaczanie regionu działa na monitorze, na którym stoi kursor.
-- Tryb live (automatyczna analiza ekranu), ikona zasobnika i edytor słowników — w kolejnych
-  etapach ([docs/ROADMAP.md](docs/ROADMAP.md)).
+- Tryb live opiera się na PrintWindow/GDI — dla części gier DX/Vulkan podgląd okna może być
+  czarny (tryb regionu działa mimo to); Windows Graphics Capture w planach.
+- Nakładka jest wykluczona z przechwytywania ekranu — nie zobaczysz jej na nagraniach OBS
+  (to celowe: OCR nie może czytać własnych tłumaczeń).
+- Automatyczna detekcja tooltipów (bez zaznaczania) — planowana; dziś tooltipy tłumaczy
+  tryb ręczny.
 - Jakość OCR zależy od czcionki gry; małe/ozdobne czcionki mogą wymagać większego regionu.
+
+Instrukcja użytkownika: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) • Pakowanie wydania:
+`tools/package.ps1` → `dist/GameTranslatorOverlay-vX.Y.Z-win-x64.zip`.
 
 ## Dokumentacja
 

@@ -38,6 +38,9 @@ internal static class NativeMethods
 
     public const uint PW_RENDERFULLCONTENT = 2;
 
+    /// <summary>Okno niewidoczne dla przechwytywania ekranu (Windows 10 2004+).</summary>
+    public const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
+
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT
     {
@@ -130,4 +133,7 @@ internal static class NativeMethods
 
     [DllImport("gdi32.dll")]
     public static extern bool DeleteObject(IntPtr hObject);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
 }

@@ -150,6 +150,28 @@ public static class ScreenCapture
         }
     }
 
+    /// <summary>
+    /// Zredukowana siatka jasności klatki do taniego wykrywania zmian w trybie live —
+    /// próbkuje piksele bez kopiowania całej bitmapy.
+    /// </summary>
+    public static Core.Vision.LuminanceGrid ComputeLuminanceGrid(Bitmap bitmap)
+    {
+        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            // Próbkujemy tylko wiersze potrzebne siatce zamiast kopiować całą klatkę.
+            var stride = Math.Abs(data.Stride);
+            var buffer = new byte[stride * bitmap.Height];
+            System.Runtime.InteropServices.Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
+            return Core.Vision.LuminanceGrid.FromBgra32(buffer, bitmap.Width, bitmap.Height, stride);
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+    }
+
     /// <summary>Heurystyka „czarnego” zrzutu z PrintWindow — próbkuje siatkę pikseli.</summary>
     public static bool LooksBlank(Bitmap bitmap)
     {

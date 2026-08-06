@@ -54,31 +54,31 @@ Okno WPF z `WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWIN
 
 **Kryterium ukończenia:** wynik tłumaczenia wyświetla się nad grą; kliknięcia przechodzą przez nakładkę do gry; nakładka nigdy nie przejmuje fokusu; pozycjonowanie poprawne przy różnych DPI i na wielu monitorach.
 
-### Etap 8 — Tryb live ⬜
+### Etap 8 — Tryb live ✅ (wykrywanie zmian + stabilizacja + latest-frame-wins; WGC pozostaje możliwym ulepszeniem)
 
 Windows Graphics Capture dla ciągłego przechwytywania. Analiza 3–6 fps, OCR tylko przy wykrytej zmianie obrazu, latest-frame-wins (nieaktualne zadania anulowane przez CancellationToken), debounce niestabilnego tekstu.
 
 **Kryterium ukończenia:** obserwowany obszar tłumaczy się automatycznie po zmianie treści; niezmieniony obraz nie generuje OCR ani wywołań API; UI nie jest nigdy blokowane.
 
-### Etap 9 — Strategie Tooltip / Subtitle / Universal ⬜
+### Etap 9 — Strategie Tooltip / Subtitle / Universal 🔨 (Manual/Universal-live/Subtitle działają; automatyczna detekcja tooltipów — planowana)
 
 Tryby wyświetlania zbudowane na silniku live: Tooltip Mode (tłumaczenie tooltipów w miejscu wyświetlania), Subtitle Mode (stały pas dialogów), Universal Live Mode (dowolny obszar).
 
 **Kryterium ukończenia:** trzy strategie działają na wspólnym silniku i można się między nimi przełączać bez restartu aplikacji.
 
-### Etap 10 — Słowniki, korekty, import/eksport 🔨 (rdzeń działa: korekty, + Słownik, priorytety; brakuje edytora i importu/eksportu w GUI)
+### Etap 10 — Słowniki, korekty, import/eksport ✅ (edytor słownika, import/eksport JSON, konflikty, priorytety)
 
 Słowniki wg schematu `glossaries/<id>/en-pl.json` (dopasowanie całych słów/fraz, dłuższe frazy przed krótszymi, priorytety, wykrywanie konfliktów ten sam source → różne targety). Ręczne korekty tłumaczeń użytkownika (najwyższy priorytet). Import/eksport słowników i korekt.
 
 **Kryterium ukończenia:** użytkownik dodaje termin do słownika i poprawia tłumaczenie z poziomu UI; korekta wygrywa z każdym innym źródłem; słownik da się wyeksportować i zaimportować bez utraty danych; konflikty są raportowane.
 
-### Etap 11 — Profile gier + profil PoE2 🔨 (profile i słowniki działają; brakuje walidacji wersji aplikacji i UX wyboru)
+### Etap 11 — Profile gier + profil PoE2 ✅ (autodetekcja profilu po procesie gry; walidacja minAppVersion — planowana)
 
 Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po nazwie procesu/tytule okna, parametry OCR i detekcji zmian, powiązany słownik, `minAppVersion`). Pierwszy dostarczony profil: Path of Exile 2 wraz ze słownikiem terminów.
 
 **Kryterium ukończenia:** aplikacja wykrywa uruchomione PoE2 i proponuje profil; profil ustawia parametry i słownik; usunięcie profilu nie zmienia działania aplikacji dla innych gier.
 
-### Etap 12 — Wersja produkcyjna ⬜
+### Etap 12 — Wersja produkcyjna 🔨 (portable zip + tools/package.ps1 + USER_GUIDE + licencje + tray; do zrobienia: publikacja releasu)
 
 Release: `dotnet publish` win-x64, aplikacja portable. Instrukcje użytkownika, `MANUAL_TESTING.md` (testy wymagające pulpitu Windows: OCR na żywo, nakładka, skróty — wyłącznie ręczne), licencje zależności, polityka prywatności, disclaimer. Artefakt Release z CI na tag lub manualnie.
 
@@ -143,4 +143,5 @@ Przy każdym konflikcie decyzyjnym rozstrzyga niższy numer:
 8. Tryb live.
 9. Profile gier.
 10. Wyjaśnianie mechanik (opcjonalny LLM, domyślnie OFF).
+
 

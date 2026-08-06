@@ -60,6 +60,8 @@ public partial class ResultPanelWindow : Window
         base.OnSourceInitialized(e);
         _hwnd = new WindowInteropHelper(this).Handle;
         SetNoActivate(true);
+        // Panel nie może trafiać do przechwytywanego obrazu (OCR czytałby własne wyniki).
+        NativeMethods.SetWindowDisplayAffinity(_hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
     }
 
     private void SetNoActivate(bool enabled)

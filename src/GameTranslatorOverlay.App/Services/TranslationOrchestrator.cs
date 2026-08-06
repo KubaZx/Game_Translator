@@ -266,4 +266,18 @@ public sealed class TranslationOrchestrator(
 
     public Task<ProviderStatus> TestActiveProviderAsync(CancellationToken cancellationToken = default) =>
         ActiveProvider.TestConnectionAsync(cancellationToken);
+
+    /// <summary>
+    /// Tłumaczy gotowe teksty przez AKTUALNY pipeline (słownik → cache → API).
+    /// Używane przez tryb live — każdy cykl bierze świeży pipeline, więc zmiana
+    /// ustawień (dostawca, tryb prywatny) obowiązuje od następnej klatki.
+    /// </summary>
+    public Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
+        IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+    {
+        var pipeline = _pipeline ?? throw new InvalidOperationException("Pipeline tłumaczenia nie został zbudowany.");
+        return pipeline.TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, cancellationToken);
+    }
+
+    public string SourceLanguage => settings.SourceLanguage;
 }

@@ -149,6 +149,22 @@ public sealed class UserGlossaryStore(AppPaths paths)
         }
     }
 
+    /// <summary>Zastępuje cały słownik pary językowej (używane przez edytor słownika).</summary>
+    public void ReplaceAll(GlossaryDocument document, string sourceLanguage, string targetLanguage)
+    {
+        lock (_gate)
+        {
+            document.SourceLanguage = sourceLanguage;
+            document.TargetLanguage = targetLanguage;
+            if (string.IsNullOrWhiteSpace(document.Name))
+            {
+                document.Name = "user";
+            }
+            paths.EnsureCreated();
+            File.WriteAllText(paths.GetUserGlossaryPath(sourceLanguage, targetLanguage), GlossarySerializer.ToJson(document));
+        }
+    }
+
     private static GlossaryDocument CreateEmpty(string sourceLanguage, string targetLanguage) => new()
     {
         Name = "user",

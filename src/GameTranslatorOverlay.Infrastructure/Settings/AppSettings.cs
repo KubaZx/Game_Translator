@@ -20,6 +20,10 @@ public sealed class AppSettings
     public double OverlayFontSize { get; set; } = 15;
     public double OverlayBackgroundOpacity { get; set; } = 0.85;
     public int ResultAutoHideSeconds { get; set; } = 30;
+
+    /// <summary>at-source (przy oryginale) | subtitle (napisy na dole).</summary>
+    public string LiveDisplayMode { get; set; } = "at-source";
+    public int SubtitleSeconds { get; set; } = 8;
     public string? ActiveProfileId { get; set; }
 
     /// <summary>0 = automatyczny dobór powiększenia obrazu przed OCR.</summary>

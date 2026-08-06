@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -10,10 +11,13 @@ using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.App.Ui;
 using GameTranslatorOverlay.Core.Ocr;
 using GameTranslatorOverlay.Infrastructure.Caching;
+using GameTranslatorOverlay.Infrastructure.Content;
 using GameTranslatorOverlay.Infrastructure.Secrets;
 using GameTranslatorOverlay.Infrastructure.Settings;
+using GameTranslatorOverlay.Infrastructure.Storage;
 using GameTranslatorOverlay.Core.Usage;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32;
 
 namespace GameTranslatorOverlay.App;
 
@@ -29,11 +33,15 @@ public partial class MainWindow : Window
     private readonly IOcrProvider _ocr;
     private readonly SqliteTranslationCache _persistentCache;
     private readonly HotkeyManager _hotkeys;
+    private readonly UserGlossaryStore _userGlossaryStore;
+    private readonly AppPaths _paths;
     private readonly ILogger<MainWindow> _logger;
+    private LiveTranslationSession? _liveSession;
 
     private readonly OverlayWindow _overlay = new();
     private readonly ResultPanelWindow _panel = new();
     private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private H.NotifyIcon.TaskbarIcon? _trayIcon;
 
     private System.Drawing.Bitmap? _previewBitmap;
     private bool _previewBusy;
@@ -50,6 +58,8 @@ public partial class MainWindow : Window
         IOcrProvider ocr,
         SqliteTranslationCache persistentCache,
         HotkeyManager hotkeys,
+        UserGlossaryStore userGlossaryStore,
+        AppPaths paths,
         ILogger<MainWindow> logger)
     {
         _orchestrator = orchestrator;
@@ -60,6 +70,8 @@ public partial class MainWindow : Window
         _ocr = ocr;
         _persistentCache = persistentCache;
         _hotkeys = hotkeys;
+        _userGlossaryStore = userGlossaryStore;
+        _paths = paths;
         _logger = logger;
 
         InitializeComponent();
@@ -93,6 +105,9 @@ public partial class MainWindow : Window
         CmbDisplayMode.ItemsSource = new[] { "Panel obok regionu", "Nakładka na ekranie" };
         CmbDisplayMode.SelectedIndex = _settings.ResultDisplayMode == "overlay" ? 1 : 0;
 
+        CmbLiveStyle.ItemsSource = new[] { "Przy oryginale", "Napisy na dole" };
+        CmbLiveStyle.SelectedIndex = _settings.LiveDisplayMode == "subtitle" ? 1 : 0;
+
         TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         ChkCacheOnly.IsChecked = _settings.CacheOnlyMode;
         ChkPrivate.IsChecked = _settings.PrivateMode;
@@ -118,7 +133,78 @@ public partial class MainWindow : Window
             _logger.LogWarning("{Warning}", warning);
         }
 
+        InitializeTrayIcon();
         _statusTimer.Start();
+    }
+
+    private void InitializeTrayIcon()
+    {
+        try
+        {
+            var menu = new ContextMenu();
+            menu.Items.Add(CreateMenuItem("Pokaż okno", RestoreFromTray));
+            menu.Items.Add(CreateMenuItem("Przetłumacz region  (Ctrl+Shift+T)", () => _ = TranslateRegionInteractiveAsync()));
+            menu.Items.Add(CreateMenuItem("Ukryj / pokaż nakładkę  (Ctrl+Shift+H)", _overlay.ToggleVisibility));
+            menu.Items.Add(new Separator());
+            menu.Items.Add(CreateMenuItem("Zakończ", Close));
+
+            _trayIcon = new H.NotifyIcon.TaskbarIcon
+            {
+                ToolTipText = "GameTranslatorOverlay",
+                Icon = CreateTrayIconImage(),
+                ContextMenu = menu,
+            };
+            _trayIcon.TrayLeftMouseUp += (_, _) => RestoreFromTray();
+        }
+        catch (Exception ex)
+        {
+            // Brak ikony w zasobniku nie może blokować aplikacji.
+            _logger.LogWarning(ex, "Nie udało się utworzyć ikony zasobnika");
+        }
+    }
+
+    private static MenuItem CreateMenuItem(string header, Action action)
+    {
+        var item = new MenuItem { Header = header };
+        item.Click += (_, _) => action();
+        return item;
+    }
+
+    private static System.Drawing.Icon CreateTrayIconImage()
+    {
+        using var bitmap = new System.Drawing.Bitmap(32, 32);
+        using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+        {
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            graphics.Clear(System.Drawing.Color.Transparent);
+            using var background = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(30, 136, 229));
+            graphics.FillEllipse(background, 1, 1, 30, 30);
+            using var font = new System.Drawing.Font("Segoe UI", 14, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Pixel);
+            var format = new System.Drawing.StringFormat
+            {
+                Alignment = System.Drawing.StringAlignment.Center,
+                LineAlignment = System.Drawing.StringAlignment.Center,
+            };
+            graphics.DrawString("GT", font, System.Drawing.Brushes.White, new System.Drawing.RectangleF(0, 1, 32, 30), format);
+        }
+        return System.Drawing.Icon.FromHandle(bitmap.GetHicon());
+    }
+
+    private void RestoreFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    protected override void OnStateChanged(EventArgs e)
+    {
+        base.OnStateChanged(e);
+        if (WindowState == WindowState.Minimized && _trayIcon is not null)
+        {
+            // Minimalizacja chowa okno do zasobnika — tłumacz dalej działa w tle.
+            Hide();
+        }
     }
 
     private async Task RefreshWindowsAsync()
@@ -379,6 +465,7 @@ public partial class MainWindow : Window
         _settings.TargetLanguage = CmbTargetLang.SelectedItem as string ?? "pl";
         _settings.Provider = CmbProvider.SelectedItem as string ?? "DeepL";
         _settings.ResultDisplayMode = CmbDisplayMode.SelectedIndex == 1 ? "overlay" : "panel";
+        _settings.LiveDisplayMode = CmbLiveStyle.SelectedIndex == 1 ? "subtitle" : "at-source";
         _settings.CacheOnlyMode = ChkCacheOnly.IsChecked == true;
         _settings.PrivateMode = ChkPrivate.IsChecked == true;
 
@@ -438,9 +525,193 @@ public partial class MainWindow : Window
         TxtStatus.Text = message;
     }
 
+    private void OnWindowSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingUi || WindowsList.SelectedItem is not TargetWindow window) return;
+
+        // Autodetekcja profilu po nazwie procesu — tylko gdy użytkownik nie wybrał
+        // żadnego profilu ręcznie (nie nadpisujemy jego decyzji).
+        if (CmbProfile.SelectedItem as string != NoProfileLabel) return;
+
+        var match = _orchestrator.Profiles.FirstOrDefault(p =>
+            p.ProcessNames.Any(name => name.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase)));
+        if (match is not null)
+        {
+            CmbProfile.SelectedItem = match.Name;
+            SetStatus($"Wykryto grę „{match.Name}” — profil włączony automatycznie.");
+        }
+    }
+
+    private void OnStartLiveClick(object sender, RoutedEventArgs e)
+    {
+        if (_liveSession is not null) return;
+        if (WindowsList.SelectedItem is not TargetWindow window)
+        {
+            SetStatus("Najpierw wybierz okno gry z listy po lewej.");
+            return;
+        }
+
+        var profile = _orchestrator.ActiveProfile;
+        var options = new LiveSessionOptions
+        {
+            Fps = profile?.ChangeDetection?.Fps ?? 4,
+            ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.02,
+            OcrUpscale = profile?.Ocr?.Upscale ?? _settings.OcrUpscale,
+        };
+
+        _liveSession = new LiveTranslationSession(
+            _orchestrator, _ocr, window.Handle, options,
+            update => Dispatcher.BeginInvoke(() => HandleLiveUpdate(update)),
+            _logger);
+        _liveSession.Start();
+
+        BtnStartLive.IsEnabled = false;
+        BtnStopLive.IsEnabled = true;
+        SetStatus($"Tryb live uruchomiony dla „{window.Title}” ({options.Fps:0.#} analiz/s).");
+    }
+
+    private void HandleLiveUpdate(LiveUpdate update)
+    {
+        TxtLiveStatus.Text = update.StatusLine;
+
+        if (update.ClearOverlay)
+        {
+            _overlay.ClearBlocks();
+        }
+        if (update.Stopped)
+        {
+            StopLiveSession();
+            return;
+        }
+
+        if (update.Blocks is { } blocks)
+        {
+            if (_settings.LiveDisplayMode == "subtitle")
+            {
+                if (update.SubtitleText is { Length: > 0 } subtitle)
+                {
+                    _overlay.ShowSubtitle(subtitle, update.WindowBounds, _settings);
+                }
+            }
+            else
+            {
+                _overlay.UpdateLiveBlocks(blocks, _settings);
+            }
+        }
+    }
+
+    private void StopLiveSession()
+    {
+        _liveSession?.Dispose();
+        _liveSession = null;
+        BtnStartLive.IsEnabled = true;
+        BtnStopLive.IsEnabled = false;
+    }
+
+    private void OnStopLiveClick(object sender, RoutedEventArgs e)
+    {
+        StopLiveSession();
+        _overlay.ClearBlocks();
+        TxtLiveStatus.Text = "Tryb live zatrzymany.";
+        SetStatus("Tryb live zatrzymany.");
+    }
+
+    private void OnOpenGlossaryEditorClick(object sender, RoutedEventArgs e)
+    {
+        var editor = new GlossaryEditorWindow(
+            _userGlossaryStore, _orchestrator, _settings.SourceLanguage, _settings.TargetLanguage)
+        {
+            Owner = this,
+        };
+        editor.ShowDialog();
+    }
+
+    private async void OnClearCacheClick(object sender, RoutedEventArgs e)
+    {
+        var confirmed = MessageBox.Show(
+            "Usunąć wszystkie automatyczne wpisy z cache tłumaczeń?\n\nRęczne korekty zostaną zachowane.",
+            "GameTranslatorOverlay", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (confirmed != MessageBoxResult.Yes) return;
+
+        try
+        {
+            var removed = await _persistentCache.ClearAsync(keepManualCorrections: true);
+            SetStatus($"Wyczyszczono cache: usunięto {removed} wpisów (ręczne korekty zachowane).");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Błąd czyszczenia cache");
+            SetStatus("Nie udało się wyczyścić cache — szczegóły w logu diagnostycznym.");
+        }
+    }
+
+    private async void OnExportCacheClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Filter = "Eksport cache JSON|*.json",
+            FileName = "gametranslator-cache.json",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        try
+        {
+            var json = await _persistentCache.ExportJsonAsync();
+            await File.WriteAllTextAsync(dialog.FileName, json);
+            SetStatus($"Wyeksportowano cache do: {dialog.FileName}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Błąd eksportu cache");
+            SetStatus("Nie udało się wyeksportować cache — szczegóły w logu diagnostycznym.");
+        }
+    }
+
+    private async void OnImportCacheClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { Filter = "Eksport cache JSON|*.json" };
+        if (dialog.ShowDialog(this) != true) return;
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(dialog.FileName);
+            var imported = await _persistentCache.ImportJsonAsync(json);
+            SetStatus($"Zaimportowano {imported} wpisów do cache.");
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or FormatException)
+        {
+            SetStatus("Ten plik nie wygląda na eksport cache GameTranslatorOverlay.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Błąd importu cache");
+            SetStatus("Nie udało się zaimportować cache — szczegóły w logu diagnostycznym.");
+        }
+    }
+
+    private void OnOpenDataFolderClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = _paths.RootDirectory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Nie udało się otworzyć folderu danych");
+            SetStatus($"Folder danych: {_paths.RootDirectory}");
+        }
+    }
+
     private void OnClosedHandler(object? sender, EventArgs e)
     {
         _statusTimer.Stop();
+        _trayIcon?.Dispose();
+        StopLiveSession();
         _orchestrator.CancelActiveOperation();
         _hotkeys.Dispose();
         RegionSelectWindow.CloseActive();
