@@ -2,6 +2,31 @@
 
 Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
+## [0.2.1] — 2026-08-06
+
+### Gry ze statycznym obrazem (dialogi „co 2 kwestie")
+
+- **Czułość na małe zmiany**: każda komórka siatki z realną zmianą jasności budzi
+  przetwarzanie — krótkie linijki dialogów (kilka komórek) nie są już pomijane
+  (dawny próg 2% siatki wymagał ~26 zmienionych komórek).
+- **Powtórka po czknięciu OCR**: gdy silnik OCR zgubi tekst na niezmienionej scenie,
+  pętla sama wymusza do 2 ponownych przebiegów — przegapiona kwestia odzyskuje się
+  w niecałą sekundę (wcześniej przepadała na zawsze, bo statyczna scena nie budziła pętli).
+- **Pełny przebieg bezpieczeństwa co 4 s** na scenach bez ruchu — łapie zmiany zbyt
+  subtelne dla siatki jasności.
+- Profil uniwersalny: próg 0 i 6 analiz/s.
+
+### Wtapianie tłumaczeń w oryginał (tryb „Na oryginale (zakrywa)")
+
+- Łatka tłumaczenia maluje się **prawdziwym kolorem tła gry** spod tekstu (próbkowanie
+  dwóch kolorów bloku: znaków i tła) — na oknach dialogowych i tooltipach wygląda
+  jak natywny napis, nie naklejka.
+- Poprawny kolor czcionki także dla **ciemnego tekstu na jasnych oknach** (visual novele).
+- Bez dymkowych rogów i paddingu; 3 px zapasu na krawędzie antyaliasingu oryginału.
+- Czcionka jednoliniowych napisów **kurczy się do pola oryginału** (polski bywa ~20%
+  dłuższy) zamiast rozpychać łatkę po interfejsie gry.
+- Gwarancja kontrastu: kolor tekstu musi odstawać od tła łatki, inaczej czerń/biel.
+
 ## [0.2.0] — 2026-08-06
 
 Pierwsze publiczne wydanie z kompletnym trybem live.
