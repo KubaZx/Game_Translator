@@ -161,6 +161,7 @@
               <Button Content="Eksport cache…" Click="OnExportCacheClick" Margin="8,0,0,0" />
               <Button Content="Import cache…" Click="OnImportCacheClick" Margin="8,0,0,0" />
               <Button Content="Folder danych" Click="OnOpenDataFolderClick" Margin="8,0,0,0" />
+              <Button Content="ⓘ Zastrzeżenie" Click="OnDisclaimerClick" Margin="8,0,0,0" />
             </StackPanel>
           </GroupBox>
 

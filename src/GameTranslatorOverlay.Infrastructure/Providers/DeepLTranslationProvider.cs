@@ -110,8 +110,19 @@ public sealed class DeepLTranslationProvider(
             {
                 if (response.IsSuccessStatusCode)
                 {
-                    var payload = await response.Content.ReadFromJsonAsync<DeepLTranslateResponse>(cancellationToken)
-                        .ConfigureAwait(false);
+                    DeepLTranslateResponse? payload;
+                    try
+                    {
+                        payload = await response.Content.ReadFromJsonAsync<DeepLTranslateResponse>(cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is System.Text.Json.JsonException or NotSupportedException)
+                    {
+                        // HTTP 200 z nie-JSON-owym ciałem: captive portal hotelowego Wi-Fi
+                        // albo proxy — to błąd sieci, nie surowy wyjątek deserializacji.
+                        throw new TranslationException(TranslationFailureKind.NetworkError,
+                            "DeepL zwrócił odpowiedź w nieoczekiwanym formacie (przechwycenie przez portal/proxy sieci?).", ex);
+                    }
                     var translations = payload?.Translations?.Select(static t => t.Text ?? string.Empty).ToList();
 
                     if (translations is null || translations.Count != chunk.Length)

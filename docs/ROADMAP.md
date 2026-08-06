@@ -145,3 +145,20 @@ Przy każdym konflikcie decyzyjnym rozstrzyga niższy numer:
 10. Wyjaśnianie mechanik (opcjonalny LLM, domyślnie OFF).
 
 
+
+## Backlog po audycie #3 (2026-08-06, znaleziska LOW odłożone świadomie)
+
+- `OcrScaling.ComputeUpscale`: wartość 1.0 z profilu jest nieodróżnialna od „nie ustawiono"
+  (profil nie może jawnie WYŁĄCZYĆ auto-powiększenia małych regionów) — wymaga pola nullable
+  w profilu, zmiana kontraktu.
+- `GlossaryService`: termin case-sensitive zawsze wygrywa z case-insensitive niezależnie od
+  Priority (priorytet działa tylko wewnątrz jednej mapy).
+- `GlossaryService`: klucze terminów są tylko Trim(), a wejście jest normalizowane
+  (NBSP/wielokrotne spacje) — termin z podwójną spacją w JSON nigdy nie trafi.
+- `RectPx.Scale`: zaokrąglanie X i Width osobno dryfuje krawędź do 1 px od prawdziwej
+  przeskalowanej — poprawka wymaga przeliczenia oczekiwań w testach skalowania.
+- Ctrl+Shift+T podczas OTWARTEGO selektora regionu jest ignorowany (latest-wins nie obejmuje
+  fazy zaznaczania) — wymaga anulowania RegionSelectWindow z zewnątrz.
+- Windows Graphics Capture jako alternatywna ścieżka capture — wg pomiarów na PoE2 (audyt #3
+  i diagnoza live) GDI/PrintWindow działa dobrze (25–48 ms, zero fallbacku), więc WGC to
+  ulepszenie „nice to have", nie naprawa.

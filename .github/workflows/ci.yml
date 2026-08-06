@@ -48,13 +48,23 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # Artefakt musi być identyczny z paczką z tools/package.ps1: embedded PDB
+      # (osobne PDB-y zawierają lokalne ścieżki dewelopera), komplet dokumentów i licencji.
       - name: Publish portable win-x64
         run: >
           dotnet publish src/GameTranslatorOverlay.App -c Release -r win-x64
           --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=embedded
           -o publish
+
+      - name: Strip stray PDBs and bundle docs
+        shell: pwsh
+        run: |
+          Get-ChildItem publish -Filter *.pdb | Remove-Item -Force
+          Copy-Item README.md, THIRD-PARTY-NOTICES.md, CHANGELOG.md -Destination publish -Force
+          Copy-Item docs/USER_GUIDE.md, docs/PRIVACY.md, docs/SECURITY.md -Destination publish -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

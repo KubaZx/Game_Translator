@@ -11,7 +11,7 @@ na ekranie**. Program:
 
 1. przechwytuje obraz wybranego okna lub regionu ekranu oficjalnymi mechanizmami Windows
    (GDI: `CopyFromScreen`/BitBlt dla regionu, `PrintWindow` z `PW_RENDERFULLCONTENT` dla okna;
-   w przyszłości Windows Graphics Capture — Etap 8),
+   Windows Graphics Capture pozostaje możliwym przyszłym ulepszeniem),
 2. rozpoznaje tekst lokalnie systemowym OCR (`Windows.Media.Ocr`),
 3. tłumaczy rozpoznany tekst,
 4. wyświetla wynik we **własnym, osobnym oknie** nad grą.

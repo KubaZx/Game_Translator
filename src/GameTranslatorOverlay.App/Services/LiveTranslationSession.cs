@@ -93,6 +93,7 @@ public sealed class LiveTranslationSession(
     private byte[]? _gridBuffer;
     private LuminanceGrid? _previousGrid;
     private RectPx? _pendingDirtyRegion;
+    private double _peakChangedFraction;
     private RectPx _lastEmittedBounds;
     private bool _warnedAboutScreenFallback;
     private int _consecutiveFailures;
@@ -195,9 +196,18 @@ public sealed class LiveTranslationSession(
                             cancellationToken);
                     }
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     throw;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Przebudowa pipeline'u (zmiana ustawień w trakcie tłumaczenia) anulowała
+                    // epokę — to NIE jest stop sesji. Pomijamy klatkę; następny cykl pójdzie
+                    // już przez nowy pipeline. Bez tego rozróżnienia każda zmiana comboboxa
+                    // podczas live po cichu zabijała całą pętlę.
+                    Emit(new LiveUpdate("Live: ustawienia zmienione w trakcie klatki — wznawiam z nowym pipeline'em."),
+                        cancellationToken);
                 }
                 catch (Exception ex)
                 {
@@ -278,6 +288,12 @@ public sealed class LiveTranslationSession(
             strongFraction = analysis.StrongChangedFraction;
             _previousGrid = grid;
 
+            // Cięcie sceny ocenia się po SZCZYCIE zmian od ostatniego przetworzenia,
+            // nie po klatce, która akurat trafiła do OCR — po twardym cięciu przetwarzana
+            // jest już spokojna klatka nowej sceny (zmiana ~0%), a wysoka zmiana samego
+            // cięcia przepadała i duchy starych bloków przeżywały okres łaski.
+            _peakChangedFraction = Math.Max(_peakChangedFraction, changedFraction);
+
             var frameChanged = changedFraction > options.ChangeThreshold;
             var forceProcess = false;
 
@@ -338,18 +354,27 @@ public sealed class LiveTranslationSession(
                 if (dirty is { } dirtyRegion)
                 {
                     // Region rozszerzamy o zapas i o wyświetlane bloki, które na niego
-                    // nachodzą — inaczej ucięlibyśmy tekst przecinający granicę regionu.
+                    // nachodzą — do PUNKTU STAŁEGO: unia z blokiem może dosunąć region do
+                    // kolejnego bloku (łańcuch), a blok objęty tylko częściowo zostałby
+                    // ucięty w OCR i zdublowany na nakładce.
                     var expanded = dirtyRegion.Inflate(24).Intersect(frameRect);
-                    for (var pass = 0; pass < 2; pass++)
+                    bool grew;
+                    do
                     {
+                        grew = false;
                         foreach (var displayed in _displayed.Values)
                         {
                             if (displayed.WindowRelativeBox.IntersectsWith(expanded))
                             {
-                                expanded = expanded.Union(displayed.WindowRelativeBox);
+                                var union = expanded.Union(displayed.WindowRelativeBox);
+                                if (union != expanded)
+                                {
+                                    expanded = union;
+                                    grew = true;
+                                }
                             }
                         }
-                    }
+                    } while (grew);
                     expanded = expanded.Intersect(frameRect);
 
                     // Częściowy OCR opłaca się tylko dla wyraźnie mniejszego wycinka.
@@ -391,7 +416,9 @@ public sealed class LiveTranslationSession(
 
         if (frameForOcr is not null)
         {
-            await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, captureMs, changedFraction, cancellationToken)
+            var peakChanged = _peakChangedFraction;
+            _peakChangedFraction = 0;
+            await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, captureMs, peakChanged, cancellationToken)
                 .ConfigureAwait(false);
             return (changedFraction, strongFraction, true);
         }
@@ -413,7 +440,7 @@ public sealed class LiveTranslationSession(
 
     private async Task ProcessFrameAsync(
         OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr,
-        long captureMs, double changedFraction, CancellationToken cancellationToken)
+        long captureMs, double peakChangedFraction, CancellationToken cancellationToken)
     {
         var ocrWatch = Stopwatch.StartNew();
         var ocrResult = await ocrProvider.RecognizeAsync(frame, orchestrator.SourceLanguage, cancellationToken)
@@ -463,8 +490,11 @@ public sealed class LiveTranslationSession(
                     $"Live: diagnostyka — pusty wynik OCR ({rawLineCount} linii surowych), zrzut: {dumpPath}"),
                     cancellationToken);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                or System.Runtime.InteropServices.ExternalException or ArgumentException)
             {
+                // GDI+ zgłasza błędy zapisu (pełny dysk, enkoder) jako ExternalException —
+                // diagnostyka nie może ubić diagnozowanej sesji licznikiem awarii.
                 logger.LogWarning(ex, "Nie udało się zapisać diagnostycznego zrzutu klatki");
             }
         }
@@ -562,7 +592,7 @@ public sealed class LiveTranslationSession(
         // Okres łaski: bloki, których ten przebieg nie widział, nie znikają od razu —
         // Windows OCR miewa puste przebiegi na niezmienionej scenie, a bez łaski każde
         // takie czknięcie zdejmowało i przywracało całą nakładkę (miganie).
-        var sceneCut = changedFraction >= options.SceneCutThreshold;
+        var sceneCut = peakChangedFraction >= options.SceneCutThreshold;
         var survivors = LiveBlockSurvival.Survivors(
             _displayed,
             next.Keys.ToHashSet(StringComparer.Ordinal),

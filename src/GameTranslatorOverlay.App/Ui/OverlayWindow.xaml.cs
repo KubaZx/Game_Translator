@@ -69,10 +69,18 @@ public partial class OverlayWindow : Window
     private void CoverMonitor(MonitorArea monitor)
     {
         var hwnd = new WindowInteropHelper(this).EnsureHandle();
+        // Gdy użytkownik ukrył nakładkę (Ctrl+Shift+H), pozycjonujemy BEZ SWP_SHOWWINDOW —
+        // natywne pokazanie obchodziłoby WPF-owe Hide() i przybijało nad grą zamrożoną
+        // klatkę sprzed ukrycia. Pokazywaniem zarządza wyłącznie ShowIfAllowed()/Show().
+        var flags = NativeMethods.SWP_NOACTIVATE;
+        if (!_hiddenByUser)
+        {
+            flags |= NativeMethods.SWP_SHOWWINDOW;
+        }
         NativeMethods.SetWindowPos(
             hwnd, NativeMethods.HWND_TOPMOST,
             monitor.Bounds.X, monitor.Bounds.Y, monitor.Bounds.Width, monitor.Bounds.Height,
-            NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOACTIVATE);
+            flags);
     }
 
     private void ShowIfAllowed()
@@ -438,18 +446,21 @@ public partial class OverlayWindow : Window
 
     public void ToggleVisibility()
     {
-        if (IsVisible)
-        {
-            _hiddenByUser = true;
-            Hide();
-        }
-        else
+        // Rozstrzygamy po DECYZJI użytkownika, nie po IsVisible — okno bywa ukryte
+        // automatycznie (ruch sceny) albo pokazane natywnie poza wiedzą WPF,
+        // a skrót ma zawsze przełączać intencję: „chcę widzieć / nie chcę widzieć”.
+        if (_hiddenByUser)
         {
             _hiddenByUser = false;
             if (RootCanvas.Children.Count > 0)
             {
                 Show();
             }
+        }
+        else
+        {
+            _hiddenByUser = true;
+            Hide();
         }
     }
 }

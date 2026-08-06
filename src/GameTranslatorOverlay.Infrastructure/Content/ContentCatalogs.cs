@@ -138,14 +138,14 @@ public sealed class UserGlossaryStore(AppPaths paths)
     {
         lock (_gate)
         {
-            var document = Load(sourceLanguage, targetLanguage);
+            var document = LoadForWrite(sourceLanguage, targetLanguage);
             document.SourceLanguage = sourceLanguage;
             document.TargetLanguage = targetLanguage;
             document.Terms.RemoveAll(t =>
                 t.Source.Equals(term.Source, StringComparison.OrdinalIgnoreCase) && t.CaseSensitive == term.CaseSensitive);
             document.Terms.Add(term);
             paths.EnsureCreated();
-            File.WriteAllText(paths.GetUserGlossaryPath(sourceLanguage, targetLanguage), GlossarySerializer.ToJson(document));
+            WriteAtomic(paths.GetUserGlossaryPath(sourceLanguage, targetLanguage), GlossarySerializer.ToJson(document));
         }
     }
 
@@ -161,8 +161,54 @@ public sealed class UserGlossaryStore(AppPaths paths)
                 document.Name = "user";
             }
             paths.EnsureCreated();
-            File.WriteAllText(paths.GetUserGlossaryPath(sourceLanguage, targetLanguage), GlossarySerializer.ToJson(document));
+            WriteAtomic(paths.GetUserGlossaryPath(sourceLanguage, targetLanguage), GlossarySerializer.ToJson(document));
         }
+    }
+
+    /// <summary>
+    /// Wariant odczytu dla ścieżki ZAPISU: przejściowy błąd IO (plik zablokowany przez
+    /// antywirus/backup/drugą instancję) musi przerwać operację — Load() zwróciłby pusty
+    /// dokument i najbliższy zapis skasowałby cały słownik użytkownika. Plik uszkodzony
+    /// (nie-JSON) odkładamy jako kopię .corrupt.bak zamiast po cichu nadpisywać.
+    /// </summary>
+    private GlossaryDocument LoadForWrite(string sourceLanguage, string targetLanguage)
+    {
+        var path = paths.GetUserGlossaryPath(sourceLanguage, targetLanguage);
+        if (!File.Exists(path))
+        {
+            return CreateEmpty(sourceLanguage, targetLanguage);
+        }
+
+        try
+        {
+            var document = GlossarySerializer.FromJson(File.ReadAllText(path));
+            if (!document.SourceLanguage.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase)
+                || !document.TargetLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase))
+            {
+                return CreateEmpty(sourceLanguage, targetLanguage);
+            }
+            return document;
+        }
+        catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException)
+        {
+            try
+            {
+                File.Copy(path, path + ".corrupt.bak", overwrite: true);
+            }
+            catch (IOException)
+            {
+                // Kopia jest tylko ułatwieniem diagnostyki.
+            }
+            return CreateEmpty(sourceLanguage, targetLanguage);
+        }
+    }
+
+    /// <summary>Zapis przez plik tymczasowy + atomową podmianę — crash nie zostawia uciętego słownika.</summary>
+    private static void WriteAtomic(string path, string content)
+    {
+        var temp = path + ".tmp";
+        File.WriteAllText(temp, content);
+        File.Move(temp, path, overwrite: true);
     }
 
     private static GlossaryDocument CreateEmpty(string sourceLanguage, string targetLanguage) => new()

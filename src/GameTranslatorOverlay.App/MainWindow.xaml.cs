@@ -160,7 +160,31 @@ public partial class MainWindow : Window
 
         InitializeTrayIcon();
         _statusTimer.Start();
+
+        // Obowiązkowe zastrzeżenie (SECURITY.md): raz przy pierwszym uruchomieniu,
+        // a stale dostępne pod przyciskiem „Zastrzeżenie”.
+        if (!_settings.DisclaimerAcknowledged)
+        {
+            ShowDisclaimer();
+            _settings.DisclaimerAcknowledged = true;
+            _settingsStore.Save(_settings);
+        }
     }
+
+    private const string DisclaimerText =
+        "Zastrzeżenie: GameTranslatorOverlay jest zewnętrzną nakładką tłumaczącą tekst widoczny " +
+        "na ekranie. Program w żaden sposób nie modyfikuje gry — nie ingeruje w jej proces, pamięć, " +
+        "pliki ani ruch sieciowy i nie automatyzuje rozgrywki. Mimo to nie gwarantujemy zgodności " +
+        "z regulaminem każdej gry — zasady poszczególnych gier i ich systemów anty-cheat różnią się " +
+        "i mogą się zmieniać. Przed użyciem sprawdź regulamin gry, w której chcesz korzystać " +
+        "z nakładki. Używasz programu na własną odpowiedzialność. Projekt nie jest powiązany " +
+        "z twórcami ani wydawcami żadnej gry.";
+
+    private void ShowDisclaimer() =>
+        MessageBox.Show(this, DisclaimerText, "GameTranslatorOverlay — zastrzeżenie",
+            MessageBoxButton.OK, MessageBoxImage.Information);
+
+    private void OnDisclaimerClick(object sender, RoutedEventArgs e) => ShowDisclaimer();
 
     private void InitializeTrayIcon()
     {

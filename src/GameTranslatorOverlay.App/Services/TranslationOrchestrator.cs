@@ -50,7 +50,14 @@ public sealed class TranslationOrchestrator(
 {
     private readonly ILogger _logger = loggerFactory.CreateLogger<TranslationOrchestrator>();
 
-    private TranslationPipeline? _pipeline;
+    /// <summary>
+    /// Niemutowalna para pipeline + token jego epoki, publikowana JEDNYM zapisem —
+    /// wołający z wątku tła nie może skleić starego pipeline'u z nowym tokenem
+    /// (wyścig groził np. zapisem na dysk już po włączeniu trybu prywatnego).
+    /// </summary>
+    private sealed record PipelineState(TranslationPipeline Pipeline, CancellationToken EpochToken);
+
+    private PipelineState? _pipelineState;
     private InMemoryTranslationCache? _privateCache;
     private CancellationTokenSource? _activeCts;
     private CancellationTokenSource _pipelineEpoch = new();
@@ -119,7 +126,7 @@ public sealed class TranslationOrchestrator(
 
         usage.SessionCharacterLimit = settings.SessionCharacterLimit;
 
-        _pipeline = new TranslationPipeline(
+        var pipeline = new TranslationPipeline(
             glossaryService,
             CurrentCache,
             ActiveProvider,
@@ -130,6 +137,7 @@ public sealed class TranslationOrchestrator(
                 GameProfile = ActiveProfile?.Id ?? string.Empty,
             },
             loggerFactory.CreateLogger<TranslationPipeline>());
+        Volatile.Write(ref _pipelineState, new PipelineState(pipeline, _pipelineEpoch.Token));
 
         ContentWarnings = warnings;
         _logger.LogInformation(
@@ -155,7 +163,8 @@ public sealed class TranslationOrchestrator(
 
     public async Task<RegionTranslationResult> TranslateRegionAsync(RectPx region, CancellationToken externalToken = default)
     {
-        var pipeline = _pipeline ?? throw new InvalidOperationException("Pipeline tłumaczenia nie został zbudowany.");
+        var pipeline = (Volatile.Read(ref _pipelineState)
+            ?? throw new InvalidOperationException("Pipeline tłumaczenia nie został zbudowany.")).Pipeline;
 
         var cts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
         var previous = Interlocked.Exchange(ref _activeCts, cts);
@@ -302,14 +311,27 @@ public sealed class TranslationOrchestrator(
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
         IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
     {
-        var pipeline = _pipeline ?? throw new InvalidOperationException("Pipeline tłumaczenia nie został zbudowany.");
-
         // Token epoki: zmiana ustawień (np. włączenie trybu prywatnego/Cache-only)
         // przerywa także tłumaczenia live będące w locie — stary pipeline nie może
         // dokończyć zapisu na dysk ani wysyłki do API na starych regułach.
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _pipelineEpoch.Token);
-        return await pipeline.TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, linked.Token)
-            .ConfigureAwait(false);
+        // Pipeline i token bierzemy z JEDNEJ migawki, a po zlinkowaniu sprawdzamy,
+        // czy przebudowa nie weszła między odczyt a linkowanie — inaczej stary
+        // pipeline pojechałby pod nowym, nieanulowanym tokenem.
+        while (true)
+        {
+            var state = Volatile.Read(ref _pipelineState)
+                ?? throw new InvalidOperationException("Pipeline tłumaczenia nie został zbudowany.");
+
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, state.EpochToken);
+            if (!ReferenceEquals(state, Volatile.Read(ref _pipelineState)))
+            {
+                continue;
+            }
+
+            return await state.Pipeline
+                .TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, linked.Token)
+                .ConfigureAwait(false);
+        }
     }
 
     public string SourceLanguage => settings.SourceLanguage;

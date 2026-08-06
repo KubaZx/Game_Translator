@@ -8,8 +8,9 @@ lokalnie, i mówimy wprost, co opuszcza komputer**.
 
 - Program przechwytuje obraz **wyłącznie wybranego przez użytkownika okna lub zaznaczonego
   regionu ekranu** — nigdy całego pulpitu „w tle" ani innych okien.
-- Przechwytywanie odbywa się oficjalnymi mechanizmami Windows (GDI; w przyszłości Windows
-  Graphics Capture — Etap 8) i dzieje się tylko wtedy, gdy użytkownik tego zażąda
+- Przechwytywanie odbywa się oficjalnymi mechanizmami Windows (GDI:
+  `PrintWindow`/`CopyFromScreen`; Windows Graphics Capture pozostaje możliwym przyszłym
+  ulepszeniem) i dzieje się tylko wtedy, gdy użytkownik tego zażąda
   (skrót/tryb tłumaczenia). Program niczego nie nagrywa.
 
 ## OCR działa lokalnie
@@ -33,12 +34,13 @@ korzysta z żadnych chmurowych ani lokalnych modeli AI (brak LLM, brak zewnętrz
 
 ## Screenshoty i zrzuty debugowe
 
-- Domyślnie program **nie zapisuje żadnych zrzutów ekranu na dysk** i żadnych nie wysyła.
-  Przechwycony obraz żyje tylko w pamięci na czas OCR.
-- Zrzuty debugowe (do diagnozowania problemów z OCR) można włączyć **wyłącznie jawnie**
-  w ustawieniach. Po włączeniu trafiają do wyraźnie oznaczonego folderu w
-  `%LOCALAPPDATA%\GameTranslatorOverlay`, a w ustawieniach dostępny jest przycisk
-  **szybkiego usunięcia** całej zawartości tego folderu. Opcja nie włącza się nigdy sama.
+- Aplikacja **nigdy nie zapisuje żadnych zrzutów ekranu na dysk** i żadnych nie wysyła.
+  Przechwycony obraz żyje tylko w pamięci na czas OCR. W aplikacji nie ma żadnej opcji,
+  która by to zmieniała.
+- Wyjątkiem jest wyłącznie **deweloperskie narzędzie diagnostyczne** `LiveDiag`
+  (`tools/GameTranslatorOverlay.LiveDiag`, nie wchodzi w skład wydawanej paczki):
+  przy nieudanym przebiegu OCR zapisuje klatkę PNG do `%TEMP%\gto-livediag-frames`
+  w celu diagnozy. Katalog jest czyszczony przy każdym starcie narzędzia.
 
 ## Tryb prywatny
 
@@ -64,7 +66,6 @@ Wszystkie dane programu leżą w `%LOCALAPPDATA%\GameTranslatorOverlay`:
 | cache SQLite | pary tekst źródłowy → tłumaczenie | pomijany w trybie prywatnym (cache tylko w pamięci) |
 | klucz API | zaszyfrowany Windows DPAPI (`CurrentUser`) | odczyta go tylko ten sam użytkownik Windows na tej maszynie |
 | logi (Serilog, rolling) | zdarzenia techniczne, błędy (stack trace tylko do logu) | nigdy kluczy API; bez treści tłumaczeń w trybie prywatnym |
-| zrzuty debugowe | obrazy do diagnostyki OCR | tylko po jawnym włączeniu; przycisk szybkiego usunięcia |
 | profile i słowniki | pliki JSON (`profiles/`, `glossaries/`) | dane statyczne, bez treści użytkownika |
 
 Usunięcie folderu `%LOCALAPPDATA%\GameTranslatorOverlay` usuwa wszystkie dane programu.

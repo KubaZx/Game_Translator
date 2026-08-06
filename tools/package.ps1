@@ -23,7 +23,7 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish zakonczyl sie bledem ($LASTEXIT
 # PDB-y zawieraja lokalne sciezki dewelopera — nie dystrybuujemy ich.
 Get-ChildItem "$root\publish" -Filter *.pdb | Remove-Item -Force
 
-Copy-Item "$root\README.md", "$root\THIRD-PARTY-NOTICES.md" -Destination "$root\publish" -Force
+Copy-Item "$root\README.md", "$root\THIRD-PARTY-NOTICES.md", "$root\CHANGELOG.md" -Destination "$root\publish" -Force
 Copy-Item "$root\docs\USER_GUIDE.md", "$root\docs\PRIVACY.md", "$root\docs\SECURITY.md" -Destination "$root\publish" -Force
 
 New-Item -ItemType Directory -Force "$root\dist" | Out-Null

@@ -92,8 +92,11 @@ internal static class Program
             new WindowsOcrProvider(), new UsageTracker(), loggerFactory);
         orchestrator.Initialize();
 
+        // Zrzuty mogą zawierać treść dowolnego podpiętego okna — katalog czyścimy na
+        // starcie, żeby klatki z poprzednich sesji nie zalegały w temp bezterminowo.
         var frameDumpDir = Path.Combine(Path.GetTempPath(), "gto-livediag-frames");
-        Console.WriteLine($"== zrzuty klatek przy whiffach OCR: {frameDumpDir} ==");
+        try { Directory.Delete(frameDumpDir, recursive: true); } catch (IOException) { }
+        Console.WriteLine($"== zrzuty klatek przy whiffach OCR: {frameDumpDir} (czyszczone przy starcie) ==");
 
         var started = DateTime.UtcNow;
         using var session = new LiveTranslationSession(
@@ -123,6 +126,9 @@ internal static class Program
         Thread.Sleep(500);
         Console.WriteLine("== LiveDiag koniec ==");
 
+        // Pula połączeń SQLite trzyma uchwyt do cache.db po Dispose — bez wyczyszczenia
+        // puli Directory.Delete cicho zawodzi i baza z OCR-owanym tekstem zostaje na dysku.
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         try { Directory.Delete(tempRoot, recursive: true); } catch (IOException) { }
         return 0;
     }
@@ -147,14 +153,19 @@ internal static class Program
         Canvas.SetLeft(body, 60);
         Canvas.SetTop(body, 170);
 
+        // Jednolita plama nie ruszała detektora (wnętrze ma identyczną jasność klatka
+        // w klatkę — zmieniały się tylko krawędzie, ~2,5% komórek). Gradient sprawia,
+        // że przesuw zmienia jasność KAŻDEJ komórki pod prostokątem, jak prawdziwy
+        // przesuw świata — dopiero to ćwiczy ścieżkę ruchu (próg 12% mocnych zmian).
         var mover = new Border
         {
-            Width = 260,
-            Height = 140,
-            Background = new SolidColorBrush(Color.FromRgb(210, 70, 40)),
+            Width = 460,
+            Height = 300,
+            Background = new LinearGradientBrush(
+                Color.FromRgb(250, 240, 220), Color.FromRgb(20, 10, 5), 0.0),
             Visibility = Visibility.Collapsed,
         };
-        Canvas.SetTop(mover, 330);
+        Canvas.SetTop(mover, 280);
 
         var ambient = new System.Windows.Shapes.Rectangle
         {
@@ -209,7 +220,9 @@ internal static class Program
             if (t is > 24 and < 30)
             {
                 mover.Visibility = Visibility.Visible;
-                Canvas.SetLeft(mover, 40 + (t - 24) * 120);
+                // 360 px/s: między próbkami (6 fps) gradient przesuwa się o ~60 px,
+                // czyli delta jasności komórek ~30 — powyżej progu MOCNEJ zmiany (25).
+                Canvas.SetLeft(mover, 40 + (t - 24) * 360 % 380);
             }
             else if (t >= 30 && mover.Visibility == Visibility.Visible)
             {

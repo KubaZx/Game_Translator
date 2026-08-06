@@ -261,9 +261,12 @@ public sealed class TranslationPipeline(
                 // Automatyczne wyniki z API lądują w cache GLOBALNYM — ten sam tekst w innej grze
                 // (albo bez profilu) nie może być drugi raz bilingowany. Klucz profilu jest
                 // zarezerwowany dla ręcznych korekt i wpisów dostarczanych z profilem.
+                // Zapis idzie BEZ tokena operacji: znaki są już zbilingowane, a anulowanie
+                // (latest-wins, przebudowa pipeline'u) tuż po odpowiedzi API gubiłoby
+                // opłacone tłumaczenie i wymuszało ponowny biling tego samego tekstu.
                 await cache.StoreAsync(
                     new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage, translated, provider.Name, GameProfile: string.Empty),
-                    cancellationToken).ConfigureAwait(false);
+                    CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

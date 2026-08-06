@@ -371,3 +371,91 @@ czas trwania trybu; po wyłączeniu trybu brakujący tekst normalnie idzie do AP
 **Logi i zgłoszenie:** w logu szukaj decyzji pipeline (cache-hit / cache-miss w trybie
 cache-only) i braku wywołań providera API. Jakiekolwiek wyjście do sieci w cache-only
 zgłoś jako błąd o wysokim priorytecie (to obietnica prywatności/kosztów).
+
+## M17 — Tryb live: start, tłumaczenie, stop
+
+Dotyczy od: Etap 8.
+
+**Warunki wstępne:** uruchomiona gra w trybie okienkowym/borderless (albo okno testowe
+LiveDiag: `dotnet run --project tools/GameTranslatorOverlay.LiveDiag -- 36`).
+
+**Kroki:**
+1. Wybierz okno gry z listy i kliknij „▶ Start live".
+2. Poczekaj, aż na ekranie pojawią się dymki tłumaczeń nad tekstem gry.
+3. Wywołaj w grze nowy tekst (dialog, tooltip przedmiotu).
+4. Kliknij „⏹ Stop".
+
+**Oczekiwany wynik:** pierwsze tłumaczenia w ~1 s od startu; nowy tekst tłumaczy się
+w poniżej sekundy; bloki NIE migają przy statycznej scenie (okres łaski maskuje czknięcia
+OCR — pasek statusu może pokazywać „podtrzymane N"); po Stop nakładka znika w całości.
+
+**Logi i zgłoszenie:** status live pokazuje kadencję (klatka/OCR/tłum. w ms). Miganie
+bloków na nieruchomej scenie zgłoś z fragmentem statusów (liczby bloków między przebiegami).
+
+## M18 — Tryb live: zmiana ustawień W TRAKCIE sesji
+
+Dotyczy od: Etap 8 (regresja audytu #3 — cicha śmierć pętli).
+
+**Kroki:**
+1. Uruchom tryb live na oknie z widocznym tekstem.
+2. W trakcie działania zmień kolejno: dostawcę (DeepL↔Mock), profil gry, styl czcionki,
+   tło dymków; kliknij też inne okno na liście okien.
+3. Obserwuj pasek statusu live przez ~10 s po każdej zmianie.
+
+**Oczekiwany wynik:** sesja live NIGDY nie zamiera — po każdej zmianie tłumaczenie
+kontynuuje z nowymi ustawieniami (najwyżej jedna klatka pominięta ze statusem
+„ustawienia zmienione w trakcie klatki"); przyciski Start/Stop odzwierciedlają stan.
+
+**Logi i zgłoszenie:** zamarcie nakładki przy aktywnym „⏹ Stop" = błąd HIGH (regresja).
+
+## M19 — Tryb live: ukrycie nakładki skrótem (Ctrl+Shift+H)
+
+Dotyczy od: Etap 8 (regresja audytu #3 — SWP_SHOWWINDOW obchodził ukrycie).
+
+**Kroki:**
+1. Uruchom tryb live, poczekaj na dymki.
+2. Naciśnij Ctrl+Shift+H i odczekaj ≥5 s przy zmieniającym się tekście gry.
+3. Naciśnij Ctrl+Shift+H ponownie.
+
+**Oczekiwany wynik:** po ukryciu nakładka NIE wraca sama (nawet gdy sesja dalej
+tłumaczy w tle) i nie pokazuje zamrożonych dymków; po ponownym skrócie wraca
+z AKTUALNYMI tłumaczeniami; skrót nigdy nie działa „odwrotnie".
+
+## M20 — Tryb live: bieg przez mapę i cięcie sceny
+
+Dotyczy od: Etap 8.
+
+**Kroki:**
+1. Uruchom tryb live w grze z nazwami NPC/obiektów na ekranie.
+2. Biegnij przez lokację ~10 s, potem zatrzymaj się.
+3. Zrób twarde przejście sceny (teleport/wejście do miasta/loading).
+
+**Oczekiwany wynik:** podczas biegu dymki podążają za tekstem (mogą lekko „gonić"
+pozycje, do ~1 przebiegu opóźnienia); po zatrzymaniu stabilizują się w ≤1 s; po twardym
+przejściu sceny stare dymki znikają najpóźniej po jednym przebiegu (bez „duchów"
+wiszących nad nową sceną dłużej niż ~1 s).
+
+## M21 — Tryb live: strategia napisów
+
+Dotyczy od: Etap 10.
+
+**Kroki:**
+1. Przełącz „Styl live" na „Napisy na dole" i uruchom tryb live.
+2. Wywołaj w grze dialog z kilkoma kolejnymi linijkami.
+
+**Oczekiwany wynik:** nowe teksty pojawiają się jako pasek napisów u dołu okna gry;
+kolejna linia ZASTĘPUJE poprzednią (bez dublowania); pasek znika po skonfigurowanym
+czasie; przesunięcie okna gry dosuwa pasek bez ponownego OCR.
+
+## M22 — Tryb live: minimalizacja i zamknięcie okna gry
+
+Dotyczy od: Etap 8.
+
+**Kroki:**
+1. Uruchom tryb live, poczekaj na dymki.
+2. Zminimalizuj okno gry na ~5 s i przywróć.
+3. Zamknij okno gry przy aktywnym trybie live.
+
+**Oczekiwany wynik:** przy minimalizacji nakładka znika, status mówi o czekaniu; po
+przywróceniu tłumaczenia wracają bez restartu trybu; po zamknięciu gry tryb live
+zatrzymuje się z komunikatem, przyciski wracają do stanu wyjściowego.

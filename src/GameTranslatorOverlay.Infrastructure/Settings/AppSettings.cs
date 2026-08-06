@@ -13,6 +13,9 @@ public sealed class AppSettings
     public string ToggleOverlayHotkey { get; set; } = "Ctrl+Shift+H";
     public bool CacheOnlyMode { get; set; }
     public bool PrivateMode { get; set; }
+
+    /// <summary>Czy użytkownik zobaczył już obowiązkowe zastrzeżenie (SECURITY.md) przy pierwszym starcie.</summary>
+    public bool DisclaimerAcknowledged { get; set; }
     public long? SessionCharacterLimit { get; set; }
 
     /// <summary>panel | overlay</summary>
@@ -78,6 +81,11 @@ public sealed class JsonSettingsStore(AppPaths paths)
     public void Save(AppSettings settings)
     {
         paths.EnsureCreated();
-        File.WriteAllText(paths.SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        // Zapis przez plik tymczasowy + atomowa podmiana: przerwanie w trakcie (crash,
+        // zanik zasilania) nie może zostawić uciętego JSON-a, który przy starcie po cichu
+        // resetuje wszystkie ustawienia do domyślnych.
+        var temp = paths.SettingsPath + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(settings, JsonOptions));
+        File.Move(temp, paths.SettingsPath, overwrite: true);
     }
 }
