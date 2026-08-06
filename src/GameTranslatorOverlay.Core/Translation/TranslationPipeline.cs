@@ -83,6 +83,15 @@ public sealed class TranslationPipeline(
             var cached = await cache.LookupAsync(normalized, sourceLanguage, targetLanguage, options.GameProfile, cancellationToken)
                 .ConfigureAwait(false);
 
+            // Testowe wpisy Mocka („[PL] …”) nie mogą udawać prawdziwych tłumaczeń
+            // po przełączeniu na rzeczywistego dostawcę.
+            if (cached is { IsManual: false }
+                && cached.Provider.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase)
+                && !provider.Name.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase))
+            {
+                cached = null;
+            }
+
             // Ręczna korekta użytkownika ma absolutne pierwszeństwo — także przed słownikiem.
             if (cached is { IsManual: true })
             {

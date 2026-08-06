@@ -219,6 +219,34 @@ public class TranslationPipelineTests
     }
 
     [Fact]
+    public async Task Wpisy_Mocka_nie_udaja_tlumaczen_po_przelaczeniu_na_prawdziwego_dostawce()
+    {
+        var (pipeline, provider, cache, _, _) = CreatePipeline();
+        await cache.StoreAsync(new NewCacheEntry("Hello", "Hello", "en", "pl", "[PL] Hello", MockTranslationProvider.ProviderName));
+
+        var outcomes = await pipeline.TranslateAsync(["Hello"], "en", "pl");
+
+        var outcome = Assert.Single(outcomes);
+        Assert.Equal(TranslationOrigin.Provider, outcome.Origin);
+        Assert.Equal("PL:Hello", outcome.TranslatedText);
+        Assert.Equal(1, provider.CallCount);
+    }
+
+    [Fact]
+    public async Task Wpisy_Mocka_dalej_dzialaja_gdy_Mock_jest_aktywnym_dostawca()
+    {
+        var glossary = new GlossaryService();
+        var cache = new InMemoryTranslationCache();
+        var usage = new UsageTracker();
+        var pipeline = new TranslationPipeline(glossary, cache, new MockTranslationProvider(), usage, new TranslationPipelineOptions());
+        await cache.StoreAsync(new NewCacheEntry("Hello", "Hello", "en", "pl", "[PL] Hello", MockTranslationProvider.ProviderName));
+
+        var outcomes = await pipeline.TranslateAsync(["Hello"], "en", "pl");
+
+        Assert.Equal(TranslationOrigin.Cache, outcomes[0].Origin);
+    }
+
+    [Fact]
     public async Task Mock_provider_dziala_deterministycznie()
     {
         var mock = new MockTranslationProvider();
