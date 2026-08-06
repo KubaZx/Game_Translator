@@ -122,6 +122,67 @@ public class VisionTests
     }
 
     [Fact]
+    public void Analyze_wskazuje_prostokat_zmiany_w_pikselach_klatki()
+    {
+        var previous = new LuminanceGrid(4, 2, new float[8]);
+        var cells = new float[8];
+        cells[1] = 200;
+        var current = new LuminanceGrid(4, 2, cells);
+
+        var analysis = FrameChangeDetector.Analyze(previous, current, 400, 200);
+
+        Assert.Equal(new RectPx(100, 0, 100, 100), analysis.ChangedRegion);
+        Assert.Equal(1.0 / 8, analysis.ChangedFraction, 3);
+    }
+
+    [Fact]
+    public void Analyze_bez_zmian_nie_zwraca_regionu()
+    {
+        var grid = new LuminanceGrid(4, 2, new float[8]);
+
+        var analysis = FrameChangeDetector.Analyze(grid, grid, 400, 200);
+
+        Assert.Null(analysis.ChangedRegion);
+        Assert.Equal(0.0, analysis.ChangedFraction);
+    }
+
+    [Fact]
+    public void Sampler_zwraca_kolor_jasnego_tekstu()
+    {
+        const int width = 20;
+        const int height = 10;
+        const int stride = width * 4;
+        var pixels = new byte[stride * height];
+        for (var y = 3; y < 7; y++)
+        {
+            for (var x = 4; x < 12; x++)
+            {
+                var offset = y * stride + x * 4;
+                pixels[offset] = 40;
+                pixels[offset + 1] = 40;
+                pixels[offset + 2] = 230;
+                pixels[offset + 3] = 255;
+            }
+        }
+
+        var color = TextColorSampler.SampleTextColorRgb(pixels, width, height, stride, new RectPx(0, 0, width, height), minLuminance: 90);
+
+        Assert.True(color >= 0, "Próbkowanie powinno znaleźć jasny tekst");
+        Assert.True(((color >> 16) & 0xFF) > 200, "Kolor powinien być czerwonawy");
+        Assert.True((color & 0xFF) < 80, "Niebieski kanał powinien być niski");
+    }
+
+    [Fact]
+    public void Sampler_bez_jasnego_tekstu_zwraca_minus_jeden()
+    {
+        const int width = 16;
+        const int height = 8;
+        var pixels = new byte[width * 4 * height];
+
+        Assert.Equal(-1, TextColorSampler.SampleTextColorRgb(pixels, width, height, width * 4, new RectPx(0, 0, width, height)));
+    }
+
+    [Fact]
     public void Keyer_rozroznia_powtorzenia_tego_samego_tekstu()
     {
         var blocks = new[]

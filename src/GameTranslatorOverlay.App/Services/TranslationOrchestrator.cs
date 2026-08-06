@@ -16,7 +16,7 @@ using Microsoft.Extensions.Logging;
 
 namespace GameTranslatorOverlay.App.Services;
 
-public sealed record TranslatedBlock(Core.Text.TextBlock Block, TranslationOutcome Outcome);
+public sealed record TranslatedBlock(Core.Text.TextBlock Block, TranslationOutcome Outcome, int TextColorRgb = -1);
 
 public sealed record PipelineTimings(long CaptureMs, long OcrMs, long TranslateMs, long TotalMs)
 {
@@ -164,12 +164,15 @@ public sealed class TranslationOrchestrator(
 
         var totalWatch = Stopwatch.StartNew();
 
-        var (ocrResult, captureMs, ocrMs) = await Task.Run(async () =>
+        var (ocrResult, sampleFrame, captureMs, ocrMs) = await Task.Run(async () =>
         {
             var captureWatch = Stopwatch.StartNew();
             using var bitmap = ScreenCapture.CaptureScreenRegion(region);
             var captureElapsed = captureWatch.ElapsedMilliseconds;
             cancellationToken.ThrowIfCancellationRequested();
+
+            // Kopia pikseli oryginału do próbkowania koloru tekstu (przed skalowaniem).
+            var pixelsForColor = ScreenCapture.ToOcrBitmap(bitmap);
 
             var preferredUpscale = ActiveProfile?.Ocr?.Upscale ?? settings.OcrUpscale;
             var upscale = OcrScaling.ComputeUpscale(bitmap.Width, bitmap.Height, ocrProvider.MaxImageDimension, preferredUpscale);
@@ -198,7 +201,7 @@ public sealed class TranslationOrchestrator(
                     };
                 }
 
-                return (result, captureElapsed, ocrWatch.ElapsedMilliseconds);
+                return (result, pixelsForColor, captureElapsed, ocrWatch.ElapsedMilliseconds);
             }
             finally
             {
@@ -237,7 +240,15 @@ public sealed class TranslationOrchestrator(
             cancellationToken).ConfigureAwait(false);
         var translateMs = translateWatch.ElapsedMilliseconds;
 
-        var translated = blocks.Zip(outcomes, static (block, outcome) => new TranslatedBlock(block, outcome)).ToList();
+        var translated = new List<TranslatedBlock>(blocks.Count);
+        for (var i = 0; i < blocks.Count; i++)
+        {
+            // Kolor tekstu próbkowany z oryginału (np. kolor rzadkości przedmiotu w PoE2).
+            var colorRgb = Core.Vision.TextColorSampler.SampleTextColorRgb(
+                sampleFrame.PixelsBgra32, sampleFrame.Width, sampleFrame.Height, sampleFrame.Stride,
+                blocks[i].Box.Offset(-region.X, -region.Y));
+            translated.Add(new TranslatedBlock(blocks[i], outcomes[i], colorRgb));
+        }
         var firstError = translated.FirstOrDefault(static t => t.Outcome.ErrorMessage is not null)?.Outcome.ErrorMessage;
 
         return new RegionTranslationResult(

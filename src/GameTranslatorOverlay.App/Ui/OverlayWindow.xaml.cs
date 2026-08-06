@@ -100,12 +100,25 @@ public partial class OverlayWindow : Window
         return 15;
     }
 
-    private static TextBlock CreateBlockText(string text, AppSettings settings, double fontSize)
+    private static TextBlock CreateBlockText(string text, AppSettings settings, double fontSize, int colorRgb = -1)
     {
+        Brush foreground = Brushes.White;
+        if (colorRgb >= 0)
+        {
+            var r = (byte)(colorRgb >> 16);
+            var g = (byte)(colorRgb >> 8);
+            var b = (byte)colorRgb;
+            // Zbyt ciemny kolor (nieudane próbkowanie) psułby czytelność — zostaje biały.
+            if (0.299 * r + 0.587 * g + 0.114 * b >= 90)
+            {
+                foreground = new SolidColorBrush(Color.FromRgb(r, g, b));
+            }
+        }
+
         var textBlock = new TextBlock
         {
             Text = text,
-            Foreground = Brushes.White,
+            Foreground = foreground,
             FontSize = fontSize,
             TextWrapping = TextWrapping.Wrap,
         };
@@ -130,7 +143,7 @@ public partial class OverlayWindow : Window
         return textBlock;
     }
 
-    private Border CreateBlockElement(string text, AppSettings settings, double scale, int lineHeightPx)
+    private Border CreateBlockElement(string text, AppSettings settings, double scale, int lineHeightPx, int colorRgb = -1)
     {
         Brush background;
         if (IsBackgroundless(settings))
@@ -147,14 +160,14 @@ public partial class OverlayWindow : Window
                 (byte)Math.Clamp(opacity * 255, 0, 255), 0x0B, 0x0E, 0x11));
         }
 
-        var textBlock = CreateBlockText(text, settings, ResolveFontSize(settings, lineHeightPx, scale));
+        var textBlock = CreateBlockText(text, settings, ResolveFontSize(settings, lineHeightPx, scale), colorRgb);
         if (IsCoverPlacement(settings))
         {
             // W trybie zakrywania tekst centruje się w prostokącie oryginału.
             textBlock.VerticalAlignment = VerticalAlignment.Center;
         }
 
-        return new Border
+        var element = new Border
         {
             Background = background,
             CornerRadius = new CornerRadius(4),
@@ -162,6 +175,10 @@ public partial class OverlayWindow : Window
             Padding = IsBackgroundless(settings) ? new Thickness(0) : new Thickness(7, 4, 7, 4),
             Child = textBlock,
         };
+
+        // Płynne pojawianie zamiast wyskakiwania.
+        element.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
+        return element;
     }
 
     private void PositionBlockElement(Border element, RectPx box, MonitorArea monitor, AppSettings settings)
@@ -213,7 +230,7 @@ public partial class OverlayWindow : Window
     }
 
     /// <summary>Jednorazowe wyświetlenie bloków z tłumaczenia ręcznego (auto-ukrywane).</summary>
-    public void ShowBlocks(IReadOnlyList<(RectPx Box, string Text, int LineHeight)> blocks, AppSettings settings)
+    public void ShowBlocks(IReadOnlyList<(RectPx Box, string Text, int LineHeight, int ColorRgb)> blocks, AppSettings settings)
     {
         if (blocks.Count == 0) return;
 
@@ -224,9 +241,9 @@ public partial class OverlayWindow : Window
         ClearManualBlocks();
         _hiddenByUser = false;
 
-        foreach (var (box, text, lineHeight) in blocks)
+        foreach (var (box, text, lineHeight, colorRgb) in blocks)
         {
-            var element = CreateBlockElement(text, settings, monitor.Scale, lineHeight);
+            var element = CreateBlockElement(text, settings, monitor.Scale, lineHeight, colorRgb);
             PositionBlockElement(element, box, monitor, settings);
             _manualElements.Add(element);
             RootCanvas.Children.Add(element);
@@ -280,7 +297,7 @@ public partial class OverlayWindow : Window
             }
             else
             {
-                element = CreateBlockElement(block.TranslatedText, settings, monitor.Scale, block.LineHeight);
+                element = CreateBlockElement(block.TranslatedText, settings, monitor.Scale, block.LineHeight, block.ColorRgb);
                 _liveElements[block.Key] = element;
                 RootCanvas.Children.Add(element);
             }

@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace GameTranslatorOverlay.App.Services;
 
-public sealed record LiveDisplayBlock(string Key, RectPx ScreenBox, string TranslatedText, int LineHeight = 0);
+public sealed record LiveDisplayBlock(string Key, RectPx ScreenBox, string TranslatedText, int LineHeight = 0, int ColorRgb = -1);
 
 public sealed record LiveUpdate(
     string StatusLine,
@@ -48,12 +48,14 @@ public sealed class LiveTranslationSession(
 {
     private const int MaxConsecutiveFailures = 5;
 
-    private sealed record DisplayedBlock(RectPx WindowRelativeBox, string TranslatedText, string NormalizedTranslation, int LineHeight);
+    private sealed record DisplayedBlock(
+        RectPx WindowRelativeBox, string TranslatedText, string NormalizedTranslation, int LineHeight, int ColorRgb);
 
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<string, DisplayedBlock> _displayed = [];
     private byte[]? _gridBuffer;
     private LuminanceGrid? _previousGrid;
+    private RectPx? _pendingDirtyRegion;
     private RectPx _lastEmittedBounds;
     private bool _warnedAboutScreenFallback;
     private int _consecutiveFailures;
@@ -88,7 +90,8 @@ public sealed class LiveTranslationSession(
                 kv.Key,
                 kv.Value.WindowRelativeBox.Offset(bounds.X, bounds.Y),
                 kv.Value.TranslatedText,
-                kv.Value.LineHeight))
+                kv.Value.LineHeight,
+                kv.Value.ColorRgb))
             .ToList();
 
     private async Task LoopAsync(CancellationToken cancellationToken)
@@ -201,6 +204,8 @@ public sealed class LiveTranslationSession(
         RectPx bounds;
         OcrBitmap? frameForOcr = null;
         var ocrScaleBack = 1.0;
+        var ocrRegion = default(RectPx);
+        var partialOcr = false;
         double changedFraction;
         long captureMs;
 
@@ -225,39 +230,85 @@ public sealed class LiveTranslationSession(
 
             bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
             var grid = ScreenCapture.ComputeLuminanceGrid(bitmap, ref _gridBuffer);
-            changedFraction = _previousGrid is null
-                ? 1.0
-                : FrameChangeDetector.ChangedFraction(_previousGrid, grid);
+            var frameRect = new RectPx(0, 0, bitmap.Width, bitmap.Height);
+            var analysis = _previousGrid is null
+                ? new ChangeAnalysis(1.0, frameRect)
+                : FrameChangeDetector.Analyze(_previousGrid, grid, bitmap.Width, bitmap.Height);
+            changedFraction = analysis.ChangedFraction;
             _previousGrid = grid;
 
             var frameChanged = changedFraction > options.ChangeThreshold;
+            if (frameChanged && analysis.ChangedRegion is { } changedNow)
+            {
+                // Zmiany kumulują się między klatkami (animacja pojawiania tooltipa) —
+                // do OCR pójdzie unia wszystkiego, co się zmieniło od ostatniego przetworzenia.
+                _pendingDirtyRegion = _pendingDirtyRegion?.Union(changedNow) ?? changedNow;
+            }
+
             if (stabilizer.Update(frameChanged, clock.Elapsed))
             {
-                // Pełną kopię klatki robimy wyłącznie, gdy naprawdę idzie do OCR.
-                // Powiększanie z profilu służy MAŁYM regionom trybu ręcznego — skalowanie
-                // całej klatki 1080p do 4K kosztowałoby sekundę+ na każde przetworzenie.
-                var preferredUpscale = bitmap.Width >= 1000 || bitmap.Height >= 700 ? 0.0 : options.OcrUpscale;
-                var downscale = OcrScaling.ComputeDownscale(bitmap.Width, bitmap.Height, ocrProvider.MaxImageDimension);
+                ocrRegion = frameRect;
+                var dirty = _pendingDirtyRegion;
+                _pendingDirtyRegion = null;
+
+                if (dirty is { } dirtyRegion)
+                {
+                    // Region rozszerzamy o zapas i o wyświetlane bloki, które na niego
+                    // nachodzą — inaczej ucięlibyśmy tekst przecinający granicę regionu.
+                    var expanded = dirtyRegion.Inflate(24).Intersect(frameRect);
+                    for (var pass = 0; pass < 2; pass++)
+                    {
+                        foreach (var displayed in _displayed.Values)
+                        {
+                            if (displayed.WindowRelativeBox.IntersectsWith(expanded))
+                            {
+                                expanded = expanded.Union(displayed.WindowRelativeBox);
+                            }
+                        }
+                    }
+                    expanded = expanded.Intersect(frameRect);
+
+                    // Częściowy OCR opłaca się tylko dla wyraźnie mniejszego wycinka.
+                    if (!expanded.IsEmpty
+                        && (long)expanded.Width * expanded.Height * 2 <= (long)bitmap.Width * bitmap.Height)
+                    {
+                        ocrRegion = expanded;
+                        partialOcr = true;
+                    }
+                }
+
+                using var crop = partialOcr
+                    ? bitmap.Clone(
+                        new System.Drawing.Rectangle(ocrRegion.X, ocrRegion.Y, ocrRegion.Width, ocrRegion.Height),
+                        System.Drawing.Imaging.PixelFormat.Format32bppArgb)
+                    : null;
+                var source = crop ?? bitmap;
+
+                // Powiększanie z profilu służy małym wycinkom — skalowanie całej klatki
+                // 1080p do 4K kosztowałoby sekundę+ na każde przetworzenie.
+                var preferredUpscale = source.Width >= 1000 || source.Height >= 700 ? 0.0 : options.OcrUpscale;
+                var downscale = OcrScaling.ComputeDownscale(source.Width, source.Height, ocrProvider.MaxImageDimension);
                 var factor = downscale < 1.0
                     ? downscale
-                    : OcrScaling.ComputeUpscale(bitmap.Width, bitmap.Height, ocrProvider.MaxImageDimension, preferredUpscale);
+                    : OcrScaling.ComputeUpscale(source.Width, source.Height, ocrProvider.MaxImageDimension, preferredUpscale);
 
                 if (Math.Abs(factor - 1.0) > 0.001)
                 {
-                    using var scaled = ScreenCapture.Rescale(bitmap, factor);
+                    using var scaled = ScreenCapture.Rescale(source, factor);
                     frameForOcr = ScreenCapture.ToOcrBitmap(scaled);
                     ocrScaleBack = 1.0 / factor;
                 }
                 else
                 {
-                    frameForOcr = ScreenCapture.ToOcrBitmap(bitmap);
+                    frameForOcr = ScreenCapture.ToOcrBitmap(source);
                 }
             }
         }
 
         if (frameForOcr is not null)
         {
-            await ProcessFrameAsync(frameForOcr, ocrScaleBack, captureMs, cancellationToken).ConfigureAwait(false);
+            await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, captureMs, cancellationToken)
+                .ConfigureAwait(false);
             return (changedFraction, true);
         }
 
@@ -277,7 +328,8 @@ public sealed class LiveTranslationSession(
     }
 
     private async Task ProcessFrameAsync(
-        OcrBitmap frame, double scaleBack, long captureMs, CancellationToken cancellationToken)
+        OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr,
+        long captureMs, CancellationToken cancellationToken)
     {
         var ocrWatch = Stopwatch.StartNew();
         var ocrResult = await ocrProvider.RecognizeAsync(frame, orchestrator.SourceLanguage, cancellationToken)
@@ -292,6 +344,17 @@ public sealed class LiveTranslationSession(
                     line.Text,
                     line.Box.Scale(scaleBack),
                     line.Words.Select(w => new OcrWord(w.Text, w.Box.Scale(scaleBack))).ToList()))
+                .ToList();
+        }
+
+        // Współrzędne OCR są względem wycinka — przenosimy je na układ okna gry.
+        if (partialOcr && (ocrRegion.X != 0 || ocrRegion.Y != 0))
+        {
+            lines = lines
+                .Select(line => new OcrLine(
+                    line.Text,
+                    line.Box.Offset(ocrRegion.X, ocrRegion.Y),
+                    line.Words.Select(w => new OcrWord(w.Text, w.Box.Offset(ocrRegion.X, ocrRegion.Y))).ToList()))
                 .ToList();
         }
 
@@ -319,17 +382,46 @@ public sealed class LiveTranslationSession(
 
         var freshKeys = new List<string>();
         var next = new Dictionary<string, DisplayedBlock>();
+
+        // Przy częściowym OCR bloki spoza przetworzonego regionu zostają bez zmian.
+        if (partialOcr)
+        {
+            foreach (var (key, displayed) in _displayed)
+            {
+                if (!displayed.WindowRelativeBox.IntersectsWith(ocrRegion))
+                {
+                    next[key] = displayed;
+                }
+            }
+        }
+
         for (var i = 0; i < keyed.Count; i++)
         {
             var outcome = outcomes[i];
             if (outcome.TranslatedText is not { } translated) continue;
 
+            // Kolor tekstu próbkujemy z oryginalnych pikseli (np. kolor rzadkości przedmiotu).
+            var box = keyed[i].Block.Box;
+            var sampleBox = new RectPx(
+                (int)((box.X - ocrRegion.X) / scaleBack),
+                (int)((box.Y - ocrRegion.Y) / scaleBack),
+                Math.Max(1, (int)(box.Width / scaleBack)),
+                Math.Max(1, (int)(box.Height / scaleBack)));
+            var colorRgb = TextColorSampler.SampleTextColorRgb(
+                frame.PixelsBgra32, frame.Width, frame.Height, frame.Stride, sampleBox);
+
             var key = keyed[i].Key;
+            while (next.ContainsKey(key))
+            {
+                key += "'";
+            }
+
             next[key] = new DisplayedBlock(
-                keyed[i].Block.Box,
+                box,
                 translated,
                 TextNormalizer.Normalize(translated),
-                TextBlockMetrics.MedianLineHeight(keyed[i].Block));
+                TextBlockMetrics.MedianLineHeight(keyed[i].Block),
+                colorRgb);
             if (!_displayed.ContainsKey(key))
             {
                 freshKeys.Add(key);
@@ -356,8 +448,9 @@ public sealed class LiveTranslationSession(
         _lastEmittedBounds = bounds;
 
         var firstError = outcomes.FirstOrDefault(static o => o.ErrorMessage is not null)?.ErrorMessage;
+        var scope = partialOcr ? " • wycinek" : string.Empty;
         var status = firstError
-            ?? $"Live: {next.Count} bloków ({freshKeys.Count} nowych) • klatka {captureMs} ms • OCR {ocrMs} ms • tłum. {translateMs} ms";
+            ?? $"Live: {next.Count} bloków ({freshKeys.Count} nowych) • klatka {captureMs} ms • OCR {ocrMs} ms • tłum. {translateMs} ms{scope}";
 
         Emit(new LiveUpdate(status, BuildDisplayList(bounds), subtitle, bounds), cancellationToken);
     }

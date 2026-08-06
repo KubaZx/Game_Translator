@@ -24,6 +24,17 @@ public readonly record struct RectPx(int X, int Y, int Width, int Height)
 
     public RectPx Offset(int dx, int dy) => new(X + dx, Y + dy, Width, Height);
 
+    public RectPx Inflate(int amount) => new(X - amount, Y - amount, Width + 2 * amount, Height + 2 * amount);
+
+    public RectPx Intersect(RectPx other)
+    {
+        var x = Math.Max(X, other.X);
+        var y = Math.Max(Y, other.Y);
+        var right = Math.Min(Right, other.Right);
+        var bottom = Math.Min(Bottom, other.Bottom);
+        return right <= x || bottom <= y ? default : new RectPx(x, y, right - x, bottom - y);
+    }
+
     public RectPx Scale(double factor) => new(
         (int)Math.Round(X * factor),
         (int)Math.Round(Y * factor),

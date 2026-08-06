@@ -416,7 +416,7 @@ public partial class MainWindow : Window
         {
             var translated = result.Blocks
                 .Where(static b => b.Outcome.TranslatedText is not null)
-                .Select(static b => (b.Block.Box, b.Outcome.TranslatedText!, Core.Text.TextBlockMetrics.MedianLineHeight(b.Block)))
+                .Select(static b => (b.Block.Box, b.Outcome.TranslatedText!, Core.Text.TextBlockMetrics.MedianLineHeight(b.Block), b.TextColorRgb))
                 .ToList();
             if (translated.Count > 0)
             {
