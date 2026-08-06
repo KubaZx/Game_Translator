@@ -161,13 +161,21 @@ public partial class MainWindow : Window
             menu.Items.Add(new Separator());
             menu.Items.Add(CreateMenuItem("Zakończ", Close));
 
-            _trayIcon = new H.NotifyIcon.TaskbarIcon
+            var trayIcon = new H.NotifyIcon.TaskbarIcon
             {
                 ToolTipText = "GameTranslatorOverlay",
                 Icon = CreateTrayIconImage(),
                 ContextMenu = menu,
             };
-            _trayIcon.TrayLeftMouseUp += (_, _) => RestoreFromTray();
+            trayIcon.TrayLeftMouseUp += (_, _) => RestoreFromTray();
+
+            // H.NotifyIcon 2.x NIE rejestruje ikony automatycznie przy tworzeniu z kodu —
+            // bez ForceCreate ikona nigdy nie pojawia się w zasobniku.
+            trayIcon.ForceCreate();
+
+            // Pole przypisujemy dopiero po udanej rejestracji: minimalizacja chowa okno
+            // do zasobnika tylko wtedy, gdy ikona naprawdę istnieje.
+            _trayIcon = trayIcon;
         }
         catch (Exception ex)
         {
