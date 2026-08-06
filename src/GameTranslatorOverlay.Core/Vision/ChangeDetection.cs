@@ -9,6 +9,34 @@ public sealed record LuminanceGrid(int Columns, int Rows, float[] Cells)
 {
     public const int DefaultColumns = 48;
     public const int DefaultRows = 27;
+    public const int SamplesPerAxis = 3;
+
+    /// <summary>Współrzędna próbki nr <paramref name="index"/> wewnątrz komórki [start, end).</summary>
+    public static int SampleCoordinate(int cellStart, int cellEnd, int index) =>
+        cellStart + (cellEnd - cellStart) * (2 * index + 1) / (2 * SamplesPerAxis);
+
+    /// <summary>
+    /// Wiersze obrazu faktycznie próbkowane przez <see cref="FromBgra32"/> — pozwala
+    /// wołającemu skopiować z klatki tylko te wiersze zamiast całego obrazu.
+    /// </summary>
+    public static IEnumerable<int> GetSampledRows(int height, int rows = DefaultRows)
+    {
+        rows = Math.Min(rows, height);
+        var seen = new HashSet<int>();
+        for (var row = 0; row < rows; row++)
+        {
+            var cellTop = row * height / rows;
+            var cellBottom = Math.Max(cellTop + 1, (row + 1) * height / rows);
+            for (var sy = 0; sy < SamplesPerAxis; sy++)
+            {
+                var y = SampleCoordinate(cellTop, cellBottom, sy);
+                if (seen.Add(y))
+                {
+                    yield return y;
+                }
+            }
+        }
+    }
 
     /// <summary>Buduje siatkę z surowych pikseli BGRA32, próbkując po kilka punktów na komórkę.</summary>
     public static LuminanceGrid FromBgra32(
@@ -21,7 +49,6 @@ public sealed record LuminanceGrid(int Columns, int Rows, float[] Cells)
         columns = Math.Min(columns, width);
         rows = Math.Min(rows, height);
         var cells = new float[columns * rows];
-        const int samplesPerAxis = 3;
 
         for (var row = 0; row < rows; row++)
         {
@@ -35,12 +62,12 @@ public sealed record LuminanceGrid(int Columns, int Rows, float[] Cells)
 
                 var sum = 0f;
                 var count = 0;
-                for (var sy = 0; sy < samplesPerAxis; sy++)
+                for (var sy = 0; sy < SamplesPerAxis; sy++)
                 {
-                    var y = cellTop + (cellBottom - cellTop) * (2 * sy + 1) / (2 * samplesPerAxis);
-                    for (var sx = 0; sx < samplesPerAxis; sx++)
+                    var y = SampleCoordinate(cellTop, cellBottom, sy);
+                    for (var sx = 0; sx < SamplesPerAxis; sx++)
                     {
-                        var x = cellLeft + (cellRight - cellLeft) * (2 * sx + 1) / (2 * samplesPerAxis);
+                        var x = SampleCoordinate(cellLeft, cellRight, sx);
                         var offset = y * stride + x * 4;
                         var b = pixels[offset];
                         var g = pixels[offset + 1];

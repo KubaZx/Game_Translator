@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private readonly ResultPanelWindow _panel = new();
     private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private H.NotifyIcon.TaskbarIcon? _trayIcon;
+    private IntPtr _trayIconHandle;
 
     private System.Drawing.Bitmap? _previewBitmap;
     private bool _previewBusy;
@@ -170,7 +171,7 @@ public partial class MainWindow : Window
         return item;
     }
 
-    private static System.Drawing.Icon CreateTrayIconImage()
+    private System.Drawing.Icon CreateTrayIconImage()
     {
         using var bitmap = new System.Drawing.Bitmap(32, 32);
         using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
@@ -187,7 +188,10 @@ public partial class MainWindow : Window
             };
             graphics.DrawString("GT", font, System.Drawing.Brushes.White, new System.Drawing.RectangleF(0, 1, 32, 30), format);
         }
-        return System.Drawing.Icon.FromHandle(bitmap.GetHicon());
+
+        // Icon.FromHandle nie przejmuje uchwytu — trzymamy go i niszczymy przy zamknięciu.
+        _trayIconHandle = bitmap.GetHicon();
+        return System.Drawing.Icon.FromHandle(_trayIconHandle);
     }
 
     private void RestoreFromTray()
@@ -711,6 +715,11 @@ public partial class MainWindow : Window
     {
         _statusTimer.Stop();
         _trayIcon?.Dispose();
+        if (_trayIconHandle != IntPtr.Zero)
+        {
+            NativeMethods.DestroyIcon(_trayIconHandle);
+            _trayIconHandle = IntPtr.Zero;
+        }
         StopLiveSession();
         _orchestrator.CancelActiveOperation();
         _hotkeys.Dispose();

@@ -43,6 +43,7 @@ public sealed class LiveTranslationSession(
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<string, LiveDisplayBlock> _displayed = [];
+    private byte[]? _gridBuffer;
     private Task? _loop;
 
     public bool IsRunning => _loop is { IsCompleted: false };
@@ -126,7 +127,7 @@ public sealed class LiveTranslationSession(
                     }
 
                     bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
-                    var grid = ScreenCapture.ComputeLuminanceGrid(bitmap);
+                    var grid = ScreenCapture.ComputeLuminanceGrid(bitmap, ref _gridBuffer);
                     lastChangedFraction = previousGrid is null
                         ? 1.0
                         : FrameChangeDetector.ChangedFraction(previousGrid, grid);

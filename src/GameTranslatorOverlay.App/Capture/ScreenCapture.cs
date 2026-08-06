@@ -151,20 +151,30 @@ public static class ScreenCapture
     }
 
     /// <summary>
-    /// Zredukowana siatka jasności klatki do taniego wykrywania zmian w trybie live —
-    /// próbkuje piksele bez kopiowania całej bitmapy.
+    /// Zredukowana siatka jasności klatki do taniego wykrywania zmian w trybie live.
+    /// Kopiuje z klatki wyłącznie próbkowane wiersze (ok. 80 zamiast ~1080), a bufor
+    /// jest reużywany między klatkami — pętla live nie mieli pamięci.
     /// </summary>
-    public static Core.Vision.LuminanceGrid ComputeLuminanceGrid(Bitmap bitmap)
+    public static Core.Vision.LuminanceGrid ComputeLuminanceGrid(Bitmap bitmap, ref byte[]? reusableBuffer)
     {
         var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
         var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
         try
         {
-            // Próbkujemy tylko wiersze potrzebne siatce zamiast kopiować całą klatkę.
             var stride = Math.Abs(data.Stride);
-            var buffer = new byte[stride * bitmap.Height];
-            System.Runtime.InteropServices.Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
-            return Core.Vision.LuminanceGrid.FromBgra32(buffer, bitmap.Width, bitmap.Height, stride);
+            var required = stride * bitmap.Height;
+            if (reusableBuffer is null || reusableBuffer.Length < required)
+            {
+                reusableBuffer = new byte[required];
+            }
+
+            foreach (var y in Core.Vision.LuminanceGrid.GetSampledRows(bitmap.Height))
+            {
+                System.Runtime.InteropServices.Marshal.Copy(
+                    data.Scan0 + y * data.Stride, reusableBuffer, y * stride, stride);
+            }
+
+            return Core.Vision.LuminanceGrid.FromBgra32(reusableBuffer, bitmap.Width, bitmap.Height, stride);
         }
         finally
         {
