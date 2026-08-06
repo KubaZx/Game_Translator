@@ -85,7 +85,16 @@ public sealed record LuminanceGrid(int Columns, int Rows, float[] Cells)
     }
 }
 
-public sealed record ChangeAnalysis(double ChangedFraction, GameTranslatorOverlay.Core.Ocr.RectPx? ChangedRegion);
+/// <summary>
+/// <paramref name="ChangedFraction"/> — ułamek komórek zmienionych ponad próg bazowy
+/// (łapie też subtelne animacje). <paramref name="StrongChangedFraction"/> — ułamek
+/// komórek zmienionych MOCNO (2,5× progu): przewijanie świata bije w piksele o wiele
+/// silniej niż falująca mgła, więc to on odróżnia bieg gracza od animacji otoczenia.
+/// </summary>
+public sealed record ChangeAnalysis(
+    double ChangedFraction,
+    GameTranslatorOverlay.Core.Ocr.RectPx? ChangedRegion,
+    double StrongChangedFraction = 0);
 
 public static class FrameChangeDetector
 {
@@ -111,7 +120,9 @@ public static class FrameChangeDetector
             return new ChangeAnalysis(1.0, new GameTranslatorOverlay.Core.Ocr.RectPx(0, 0, frameWidth, frameHeight));
         }
 
+        var strongDelta = cellDelta * 2.5;
         var changed = 0;
+        var strongChanged = 0;
         var minColumn = int.MaxValue;
         var maxColumn = -1;
         var minRow = int.MaxValue;
@@ -122,9 +133,11 @@ public static class FrameChangeDetector
             for (var column = 0; column < current.Columns; column++)
             {
                 var index = row * current.Columns + column;
-                if (Math.Abs(previous.Cells[index] - current.Cells[index]) > cellDelta)
+                var delta = Math.Abs(previous.Cells[index] - current.Cells[index]);
+                if (delta > cellDelta)
                 {
                     changed++;
+                    if (delta > strongDelta) strongChanged++;
                     if (column < minColumn) minColumn = column;
                     if (column > maxColumn) maxColumn = column;
                     if (row < minRow) minRow = row;
@@ -145,7 +158,8 @@ public static class FrameChangeDetector
 
         return new ChangeAnalysis(
             (double)changed / current.Cells.Length,
-            new GameTranslatorOverlay.Core.Ocr.RectPx(x0, y0, x1 - x0, y1 - y0));
+            new GameTranslatorOverlay.Core.Ocr.RectPx(x0, y0, x1 - x0, y1 - y0),
+            (double)strongChanged / current.Cells.Length);
     }
 }
 

@@ -30,10 +30,16 @@ public sealed class LiveSessionOptions
     public TimeSpan ForcedProcessInterval { get; init; } = TimeSpan.FromMilliseconds(1000);
 
     /// <summary>
-    /// Powyżej tego ułamka zmienionych komórek scena jest „w ruchu” (gracz biegnie,
-    /// kamera płynie) — tłumaczenie czeka, aż obraz się uspokoi.
+    /// Powyżej tego ułamka MOCNO zmienionych komórek scena jest „w ruchu” (gracz
+    /// biegnie, kamera płynie) — tłumaczenie czeka, aż obraz się uspokoi.
     /// </summary>
     public double MotionThreshold { get; init; } = 0.35;
+
+    /// <summary>
+    /// Bezpiecznik: nawet przy nieprzerwanym „ruchu” (np. powolna panorama z napisami)
+    /// po tym czasie klatka i tak zostaje przetworzona.
+    /// </summary>
+    public TimeSpan MaxMotionPause { get; init; } = TimeSpan.FromMilliseconds(2500);
 
     public double OcrUpscale { get; init; }
 }
@@ -67,6 +73,7 @@ public sealed class LiveTranslationSession(
     private bool _warnedAboutScreenFallback;
     private int _consecutiveFailures;
     private int _motionFrames;
+    private TimeSpan _motionSince;
     private Task? _loop;
 
     public bool IsRunning => _loop is { IsCompleted: false };
@@ -246,26 +253,43 @@ public sealed class LiveTranslationSession(
             _previousGrid = grid;
 
             var frameChanged = changedFraction > options.ChangeThreshold;
+            var forceProcess = false;
 
             // Scena w ruchu (bieg, przesuw kamery): każdy wynik OCR wylądowałby w miejscu,
-            // z którego tekst już odpłynął. Chowamy nakładkę, wstrzymujemy tłumaczenie
-            // i wracamy pełnym OCR-em ~ćwierć sekundy po ustaniu ruchu.
-            if (changedFraction >= options.MotionThreshold)
+            // z którego tekst już odpłynął. Ruch poznajemy po MOCNYCH zmianach pikseli —
+            // falująca mgła/pogoda zmienia komórki subtelnie i ruchem nie jest.
+            if (analysis.StrongChangedFraction >= options.MotionThreshold)
             {
+                if (_motionFrames == 0)
+                {
+                    _motionSince = clock.Elapsed;
+                }
                 _motionFrames++;
                 _pendingDirtyRegion = frameRect;
-                stabilizer.ForceDirty(clock.Elapsed);
-                if (_motionFrames == 2)
+
+                if (clock.Elapsed - _motionSince < options.MaxMotionPause)
                 {
-                    // Scena odpłynęła — stare bloki są nieaktualne, po ruchu budujemy od zera.
-                    _displayed.Clear();
-                    Emit(new LiveUpdate(
-                        "Live: ruch na ekranie — wstrzymuję tłumaczenie do ustania ruchu.",
-                        HideOverlay: true), cancellationToken);
+                    stabilizer.ForceDirty(clock.Elapsed);
+                    if (_motionFrames == 2)
+                    {
+                        // Scena odpłynęła — stare bloki są nieaktualne, po ruchu budujemy od zera.
+                        _displayed.Clear();
+                        Emit(new LiveUpdate(
+                            "Live: ruch na ekranie — wstrzymuję tłumaczenie do ustania ruchu.",
+                            HideOverlay: true), cancellationToken);
+                    }
+                    return (changedFraction, _motionFrames >= 2);
                 }
-                return (changedFraction, _motionFrames >= 2);
+
+                // Bezpiecznik: „ruch” trwa podejrzanie długo (panorama z napisami,
+                // czuły detektor) — przetwarzamy mimo wszystko i liczymy pauzę od nowa.
+                _motionSince = clock.Elapsed;
+                forceProcess = true;
             }
-            _motionFrames = 0;
+            else
+            {
+                _motionFrames = 0;
+            }
 
             if (frameChanged && analysis.ChangedRegion is { } changedNow)
             {
@@ -274,7 +298,12 @@ public sealed class LiveTranslationSession(
                 _pendingDirtyRegion = _pendingDirtyRegion?.Union(changedNow) ?? changedNow;
             }
 
-            if (stabilizer.Update(frameChanged, clock.Elapsed))
+            var shouldProcess = stabilizer.Update(frameChanged, clock.Elapsed) || forceProcess;
+            if (forceProcess)
+            {
+                stabilizer.Reset();
+            }
+            if (shouldProcess)
             {
                 ocrRegion = frameRect;
                 var dirty = _pendingDirtyRegion;

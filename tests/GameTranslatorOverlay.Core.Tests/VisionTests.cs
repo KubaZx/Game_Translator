@@ -147,6 +147,21 @@ public class VisionTests
     }
 
     [Fact]
+    public void Analyze_odroznia_mocne_zmiany_ruchu_od_subtelnych_animacji()
+    {
+        var previous = LuminanceGrid.FromBgra32(SolidBgra(64, 64, 100), 64, 64, 64 * 4);
+        var subtle = LuminanceGrid.FromBgra32(SolidBgra(64, 64, 115), 64, 64, 64 * 4);
+        var strong = LuminanceGrid.FromBgra32(SolidBgra(64, 64, 200), 64, 64, 64 * 4);
+
+        var subtleAnalysis = FrameChangeDetector.Analyze(previous, subtle, 64, 64);
+        var strongAnalysis = FrameChangeDetector.Analyze(previous, strong, 64, 64);
+
+        Assert.Equal(1.0, subtleAnalysis.ChangedFraction);
+        Assert.Equal(0.0, subtleAnalysis.StrongChangedFraction);
+        Assert.Equal(1.0, strongAnalysis.StrongChangedFraction);
+    }
+
+    [Fact]
     public void Sampler_zwraca_kolor_jasnego_tekstu()
     {
         const int width = 20;
