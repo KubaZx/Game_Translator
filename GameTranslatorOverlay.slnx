@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GameTranslatorOverlay.App/GameTranslatorOverlay.App.csproj" />
+    <Project Path="src/GameTranslatorOverlay.Core/GameTranslatorOverlay.Core.csproj" />
+    <Project Path="src/GameTranslatorOverlay.Infrastructure/GameTranslatorOverlay.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GameTranslatorOverlay.Core.Tests/GameTranslatorOverlay.Core.Tests.csproj" />
+    <Project Path="tests/GameTranslatorOverlay.Infrastructure.Tests/GameTranslatorOverlay.Infrastructure.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/GameTranslatorOverlay.SmokeTest/GameTranslatorOverlay.SmokeTest.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,14 @@
+{
+  "id": "generic",
+  "name": "Profil uniwersalny (szablon)",
+  "profileVersion": 1,
+  "author": "GameTranslatorOverlay",
+  "description": "Szablon dla twórców własnych profili gier. Skopiuj ten plik do profiles/<id-twojej-gry>/profile.json, ustaw unikalne id, nazwy procesów (processNames) i tytuły okien (windowTitles), po których aplikacja rozpozna grę. Opcjonalnie dodaj klucz glossary z id słownika z folderu glossaries/ oraz dostrój parametry ocr i changeDetection pod interfejs konkretnej gry. Puste tablice processNames i windowTitles oznaczają, że profil nie dopasuje się automatycznie do żadnego okna.",
+  "processNames": [],
+  "windowTitles": [],
+  "sourceLanguage": "en",
+  "recommendedMode": "manual-region",
+  "ocr": { "upscale": 2.0, "minTextHeight": 10 },
+  "changeDetection": { "threshold": 0.02, "fps": 4 },
+  "minAppVersion": "0.1.0"
+}

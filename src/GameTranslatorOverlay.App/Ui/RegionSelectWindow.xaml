@@ -1,0 +1,30 @@
+<Window x:Class="GameTranslatorOverlay.App.Ui.RegionSelectWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Zaznacz region"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        AllowsTransparency="True"
+        Background="#30000000"
+        Cursor="Cross"
+        Focusable="True"
+        WindowStartupLocation="Manual">
+  <Canvas x:Name="RootCanvas">
+    <Border x:Name="SelectionBorder"
+            Visibility="Collapsed"
+            BorderBrush="#FF4FC3F7"
+            BorderThickness="1.5"
+            Background="#334FC3F7"
+            CornerRadius="2" />
+    <Border x:Name="HintBorder"
+            Background="#CC101418"
+            CornerRadius="6"
+            Padding="14,8">
+      <TextBlock Foreground="White"
+                 FontSize="14"
+                 Text="Zaznacz obszar do przetłumaczenia myszą  •  Esc — anuluj" />
+    </Border>
+  </Canvas>
+</Window>
