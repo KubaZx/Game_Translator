@@ -1,4 +1,4 @@
-{
+﻿{
   "id": "path-of-exile-2",
   "name": "Path of Exile 2",
   "profileVersion": 1,
@@ -15,6 +15,7 @@
   "recommendedMode": "manual-region",
   "glossary": "path-of-exile-2",
   "ocr": { "upscale": 2.0, "minTextHeight": 10 },
-  "changeDetection": { "threshold": 0.02, "fps": 4 },
+  "changeDetection": { "threshold": 0.03, "fps": 6 },
   "minAppVersion": "0.1.0"
 }
+

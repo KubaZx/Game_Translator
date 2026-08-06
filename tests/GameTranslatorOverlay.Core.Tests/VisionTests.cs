@@ -96,6 +96,23 @@ public class VisionTests
     }
 
     [Fact]
+    public void Stabilizer_przetwarza_cyklicznie_przy_animowanym_tle()
+    {
+        var stabilizer = new ChangeStabilizer(
+            TimeSpan.FromMilliseconds(300), maxDirtyDuration: TimeSpan.FromMilliseconds(1000));
+
+        // Obraz zmienia się bez przerwy co 100 ms — stabilizacja nigdy nie nadchodzi,
+        // ale po sekundzie ciągłych zmian klatka i tak musi zostać przetworzona.
+        var fired = 0;
+        for (var ms = 0; ms <= 2200; ms += 100)
+        {
+            if (stabilizer.Update(frameChanged: true, TimeSpan.FromMilliseconds(ms))) fired++;
+        }
+
+        Assert.Equal(2, fired);
+    }
+
+    [Fact]
     public void Stabilizer_ForceDirty_wymusza_ponowne_przetworzenie()
     {
         var stabilizer = new ChangeStabilizer(TimeSpan.FromMilliseconds(100));

@@ -21,9 +21,13 @@ public sealed record LiveUpdate(
 
 public sealed class LiveSessionOptions
 {
-    public double Fps { get; init; } = 4;
+    public double Fps { get; init; } = 6;
     public double ChangeThreshold { get; init; } = 0.02;
-    public TimeSpan StabilityDelay { get; init; } = TimeSpan.FromMilliseconds(300);
+    public TimeSpan StabilityDelay { get; init; } = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>Przy ciągłych zmianach (animowane tło) przetwarzaj mimo braku stabilizacji.</summary>
+    public TimeSpan ForcedProcessInterval { get; init; } = TimeSpan.FromMilliseconds(1000);
+
     public double OcrUpscale { get; init; }
 }
 
@@ -89,7 +93,7 @@ public sealed class LiveTranslationSession(
     private async Task LoopAsync(CancellationToken cancellationToken)
     {
         var clock = Stopwatch.StartNew();
-        var stabilizer = new ChangeStabilizer(options.StabilityDelay);
+        var stabilizer = new ChangeStabilizer(options.StabilityDelay, options.ForcedProcessInterval);
         var interval = TimeSpan.FromSeconds(1.0 / Math.Clamp(options.Fps, 0.5, 30.0));
         var wasMinimized = false;
 
@@ -229,10 +233,13 @@ public sealed class LiveTranslationSession(
             if (stabilizer.Update(frameChanged, clock.Elapsed))
             {
                 // Pełną kopię klatki robimy wyłącznie, gdy naprawdę idzie do OCR.
+                // Powiększanie z profilu służy MAŁYM regionom trybu ręcznego — skalowanie
+                // całej klatki 1080p do 4K kosztowałoby sekundę+ na każde przetworzenie.
+                var preferredUpscale = bitmap.Width >= 1000 || bitmap.Height >= 700 ? 0.0 : options.OcrUpscale;
                 var downscale = OcrScaling.ComputeDownscale(bitmap.Width, bitmap.Height, ocrProvider.MaxImageDimension);
                 var factor = downscale < 1.0
                     ? downscale
-                    : OcrScaling.ComputeUpscale(bitmap.Width, bitmap.Height, ocrProvider.MaxImageDimension, options.OcrUpscale);
+                    : OcrScaling.ComputeUpscale(bitmap.Width, bitmap.Height, ocrProvider.MaxImageDimension, preferredUpscale);
 
                 if (Math.Abs(factor - 1.0) > 0.001)
                 {

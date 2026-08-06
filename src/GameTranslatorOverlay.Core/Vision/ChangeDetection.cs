@@ -113,25 +113,39 @@ public static class FrameChangeDetector
 }
 
 /// <summary>
-/// Debouncing zmian obrazu: OCR uruchamiamy dopiero, gdy po serii zmian obraz
-/// ustoi się na <see cref="_stabilityDelay"/>. Chroni przed rozpoznawaniem
-/// półprzezroczystych animacji i migotaniem wyników.
+/// Debouncing zmian obrazu: OCR uruchamiamy, gdy po serii zmian obraz ustoi się na
+/// <see cref="_stabilityDelay"/>. Gry z animowanym tłem nigdy nie „stoją” — dlatego
+/// po <see cref="_maxDirtyDuration"/> ciągłych zmian przetwarzamy klatkę mimo wszystko,
+/// inaczej tłumaczenie czekałoby w nieskończoność na spokój, który nie nadejdzie.
 /// </summary>
-public sealed class ChangeStabilizer(TimeSpan stabilityDelay)
+public sealed class ChangeStabilizer(TimeSpan stabilityDelay, TimeSpan? maxDirtyDuration = null)
 {
     private readonly TimeSpan _stabilityDelay = stabilityDelay;
+    private readonly TimeSpan _maxDirtyDuration = maxDirtyDuration ?? TimeSpan.FromTicks(stabilityDelay.Ticks * 4);
     private bool _dirty;
     private TimeSpan _lastChangeAt;
+    private TimeSpan _dirtySince;
 
     public bool IsDirty => _dirty;
 
-    /// <summary>Zwraca true dokładnie raz — gdy obraz po zmianach właśnie się ustabilizował.</summary>
+    /// <summary>Zwraca true, gdy warto uruchomić OCR (stabilizacja albo wymuszenie po ciągłych zmianach).</summary>
     public bool Update(bool frameChanged, TimeSpan elapsed)
     {
         if (frameChanged)
         {
+            if (!_dirty)
+            {
+                _dirtySince = elapsed;
+            }
             _dirty = true;
             _lastChangeAt = elapsed;
+
+            // Animowane tło: obraz zmienia się bez przerwy — przetwarzaj cyklicznie.
+            if (elapsed - _dirtySince >= _maxDirtyDuration)
+            {
+                _dirtySince = elapsed;
+                return true;
+            }
             return false;
         }
 
@@ -148,6 +162,7 @@ public sealed class ChangeStabilizer(TimeSpan stabilityDelay)
     {
         _dirty = true;
         _lastChangeAt = elapsed;
+        _dirtySince = elapsed;
     }
 
     public void Reset() => _dirty = false;

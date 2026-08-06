@@ -86,27 +86,57 @@ public partial class OverlayWindow : Window
     private static bool IsCoverPlacement(AppSettings settings) =>
         settings.OverlayPlacement.Equals("cover", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsBackgroundless(AppSettings settings) =>
+        settings.OverlayBackgroundOpacity < 0.05;
+
+    private static TextBlock CreateBlockText(string text, AppSettings settings)
+    {
+        var textBlock = new TextBlock
+        {
+            Text = text,
+            Foreground = Brushes.White,
+            FontSize = Math.Max(9, settings.OverlayFontSize),
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        // Bez tła tekst dostaje czarną poświatę — inaczej ginąłby na jasnych scenach.
+        if (IsBackgroundless(settings))
+        {
+            textBlock.Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 5,
+                ShadowDepth = 0,
+                Opacity = 1.0,
+            };
+        }
+
+        return textBlock;
+    }
+
     private Border CreateBlockElement(string text, AppSettings settings)
     {
-        // W trybie zakrywania tło musi realnie schować oryginalny tekst pod spodem.
-        var opacity = IsCoverPlacement(settings)
-            ? Math.Max(settings.OverlayBackgroundOpacity, 0.95)
-            : settings.OverlayBackgroundOpacity;
-        var background = Color.FromArgb(
-            (byte)Math.Clamp(opacity * 255, 0, 255), 0x0B, 0x0E, 0x11);
+        Brush background;
+        if (IsBackgroundless(settings))
+        {
+            background = Brushes.Transparent;
+        }
+        else
+        {
+            // W trybie zakrywania tło musi realnie schować oryginalny tekst pod spodem.
+            var opacity = IsCoverPlacement(settings)
+                ? Math.Max(settings.OverlayBackgroundOpacity, 0.95)
+                : settings.OverlayBackgroundOpacity;
+            background = new SolidColorBrush(Color.FromArgb(
+                (byte)Math.Clamp(opacity * 255, 0, 255), 0x0B, 0x0E, 0x11));
+        }
 
         return new Border
         {
-            Background = new SolidColorBrush(background),
+            Background = background,
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(7, 4, 7, 4),
-            Child = new TextBlock
-            {
-                Text = text,
-                Foreground = Brushes.White,
-                FontSize = Math.Max(9, settings.OverlayFontSize),
-                TextWrapping = TextWrapping.Wrap,
-            },
+            Child = CreateBlockText(text, settings),
         };
     }
 
@@ -250,18 +280,17 @@ public partial class OverlayWindow : Window
 
         if (_subtitleElement is null)
         {
+            var subtitleContent = CreateBlockText(string.Empty, settings);
+            subtitleContent.TextAlignment = TextAlignment.Center;
             _subtitleElement = new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(
-                    (byte)Math.Clamp(settings.OverlayBackgroundOpacity * 255, 0, 255), 0x0B, 0x0E, 0x11)),
+                Background = IsBackgroundless(settings)
+                    ? Brushes.Transparent
+                    : new SolidColorBrush(Color.FromArgb(
+                        (byte)Math.Clamp(settings.OverlayBackgroundOpacity * 255, 0, 255), 0x0B, 0x0E, 0x11)),
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(14, 8, 14, 8),
-                Child = new TextBlock
-                {
-                    Foreground = Brushes.White,
-                    TextWrapping = TextWrapping.Wrap,
-                    TextAlignment = TextAlignment.Center,
-                },
+                Child = subtitleContent,
             };
             RootCanvas.Children.Add(_subtitleElement);
         }

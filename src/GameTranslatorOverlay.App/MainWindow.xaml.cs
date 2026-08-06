@@ -121,6 +121,14 @@ public partial class MainWindow : Window
         CmbPlacement.ItemsSource = new[] { "Pod oryginałem", "Na oryginale (zakrywa)" };
         CmbPlacement.SelectedIndex = _settings.OverlayPlacement == "cover" ? 1 : 0;
 
+        CmbBackground.ItemsSource = new[] { "Ciemne", "Delikatne", "Brak (sam tekst)" };
+        CmbBackground.SelectedIndex = _settings.OverlayBackgroundOpacity switch
+        {
+            < 0.05 => 2,
+            < 0.7 => 1,
+            _ => 0,
+        };
+
         TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         ChkCacheOnly.IsChecked = _settings.CacheOnlyMode;
         ChkPrivate.IsChecked = _settings.PrivateMode;
@@ -492,6 +500,12 @@ public partial class MainWindow : Window
         _settings.ResultDisplayMode = CmbDisplayMode.SelectedIndex == 1 ? "overlay" : "panel";
         _settings.LiveDisplayMode = CmbLiveStyle.SelectedIndex == 1 ? "subtitle" : "at-source";
         _settings.OverlayPlacement = CmbPlacement.SelectedIndex == 1 ? "cover" : "below";
+        _settings.OverlayBackgroundOpacity = CmbBackground.SelectedIndex switch
+        {
+            2 => 0.0,
+            1 => 0.40,
+            _ => 0.85,
+        };
         _settings.CacheOnlyMode = ChkCacheOnly.IsChecked == true;
         _settings.PrivateMode = ChkPrivate.IsChecked == true;
 
@@ -580,7 +594,7 @@ public partial class MainWindow : Window
         var profile = _orchestrator.ActiveProfile;
         var options = new LiveSessionOptions
         {
-            Fps = profile?.ChangeDetection?.Fps ?? 4,
+            Fps = profile?.ChangeDetection?.Fps ?? 6,
             ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.02,
             OcrUpscale = profile?.Ocr?.Upscale ?? _settings.OcrUpscale,
         };
