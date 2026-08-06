@@ -12,6 +12,7 @@ public sealed record LiveOverlayBlock(
     string NormalizedTranslation,
     int LineHeight,
     int ColorRgb,
+    int BackgroundRgb = -1,
     int Misses = 0);
 
 /// <summary>

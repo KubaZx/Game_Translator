@@ -8,7 +8,7 @@ public class LiveBlockSurvivalTests
     private static readonly RectPx DefaultBox = new(10, 10, 100, 20);
 
     private static LiveOverlayBlock Block(int misses = 0, RectPx? box = null) =>
-        new(box ?? DefaultBox, "Tłumaczenie", "tłumaczenie", 20, -1, misses);
+        new(box ?? DefaultBox, "Tłumaczenie", "tłumaczenie", 20, -1, Misses: misses);
 
     private static Dictionary<string, LiveOverlayBlock> Displayed(params (string Key, int Misses)[] blocks) =>
         blocks.ToDictionary(static b => b.Key, static b => Block(b.Misses), StringComparer.Ordinal);

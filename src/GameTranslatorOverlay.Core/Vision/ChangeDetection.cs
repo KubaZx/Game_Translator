@@ -209,6 +209,101 @@ public static class TextColorSampler
 }
 
 /// <summary>
+/// Próbkuje z prostokąta klatki DWA kolory bloku tekstu: kolor znaków i kolor tła.
+/// Piksele dzielone są na dwa klastry po jasności (2-średnie); tekst to klaster
+/// MNIEJSZOŚCIOWY — działa więc zarówno dla jasnego tekstu na ciemnym tle (RPG),
+/// jak i ciemnego tekstu na jasnym oknie (visual novele), gdzie sampler „tylko
+/// jasnych pikseli” brał tło za tekst.
+/// </summary>
+public static class BlockColorSampler
+{
+    /// <summary>Zwraca (kolorTekstu, kolorTła) jako 0xRRGGBB; -1 gdy nie da się ustalić.</summary>
+    public static (int TextRgb, int BackgroundRgb) SampleColors(
+        byte[] pixelsBgra32, int width, int height, int stride,
+        GameTranslatorOverlay.Core.Ocr.RectPx box)
+    {
+        var x0 = Math.Max(0, box.X);
+        var y0 = Math.Max(0, box.Y);
+        var x1 = Math.Min(width, box.Right);
+        var y1 = Math.Min(height, box.Bottom);
+        if (x1 <= x0 || y1 <= y0) return (-1, -1);
+
+        var lums = new List<float>();
+        var rs = new List<byte>();
+        var gs = new List<byte>();
+        var bs = new List<byte>();
+        for (var y = y0; y < y1; y += 2)
+        {
+            var rowOffset = y * stride;
+            for (var x = x0; x < x1; x += 2)
+            {
+                var offset = rowOffset + x * 4;
+                var b = pixelsBgra32[offset];
+                var g = pixelsBgra32[offset + 1];
+                var r = pixelsBgra32[offset + 2];
+                lums.Add(0.299f * r + 0.587f * g + 0.114f * b);
+                rs.Add(r);
+                gs.Add(g);
+                bs.Add(b);
+            }
+        }
+
+        if (lums.Count < 16) return (-1, -1);
+
+        var min = lums.Min();
+        var max = lums.Max();
+        if (max - min < 30f)
+        {
+            // Płaski wycinek bez kontrastu — tekstu nie da się odróżnić, tło = średnia.
+            return (-1, AverageRgb(rs, gs, bs, lums, threshold: float.MaxValue, takeBelow: true));
+        }
+
+        // 2-średnie po jasności: kilka iteracji w zupełności wystarcza.
+        var threshold = (min + max) / 2f;
+        for (var i = 0; i < 4; i++)
+        {
+            float sumLow = 0, sumHigh = 0;
+            int countLow = 0, countHigh = 0;
+            foreach (var lum in lums)
+            {
+                if (lum < threshold) { sumLow += lum; countLow++; }
+                else { sumHigh += lum; countHigh++; }
+            }
+            if (countLow == 0 || countHigh == 0) break;
+            threshold = (sumLow / countLow + sumHigh / countHigh) / 2f;
+        }
+
+        var below = lums.Count(l => l < threshold);
+        var above = lums.Count - below;
+        if (below == 0 || above == 0) return (-1, -1);
+
+        // Znaki zajmują mniejszość pola bloku; przy remisie jaśniejszy klaster to tekst.
+        var textIsDark = below < above;
+        var textRgb = AverageRgb(rs, gs, bs, lums, threshold, takeBelow: textIsDark);
+        var backgroundRgb = AverageRgb(rs, gs, bs, lums, threshold, takeBelow: !textIsDark);
+        return (textRgb, backgroundRgb);
+    }
+
+    private static int AverageRgb(
+        List<byte> rs, List<byte> gs, List<byte> bs, List<float> lums, float threshold, bool takeBelow)
+    {
+        long sumR = 0, sumG = 0, sumB = 0;
+        var count = 0;
+        for (var i = 0; i < lums.Count; i++)
+        {
+            var isBelow = lums[i] < threshold;
+            if (isBelow != takeBelow) continue;
+            sumR += rs[i];
+            sumG += gs[i];
+            sumB += bs[i];
+            count++;
+        }
+        if (count == 0) return -1;
+        return (int)(sumR / count) << 16 | (int)(sumG / count) << 8 | (int)(sumB / count);
+    }
+}
+
+/// <summary>
 /// Debouncing zmian obrazu: OCR uruchamiamy, gdy po serii zmian obraz ustoi się na
 /// <see cref="_stabilityDelay"/>. Gry z animowanym tłem nigdy nie „stoją” — dlatego
 /// po <see cref="_maxDirtyDuration"/> ciągłych zmian przetwarzamy klatkę mimo wszystko,

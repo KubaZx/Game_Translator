@@ -108,10 +108,28 @@ public partial class OverlayWindow : Window
         return 15;
     }
 
-    private static TextBlock CreateBlockText(string text, AppSettings settings, double fontSize, int colorRgb = -1)
+    private static double Luminance(int rgb) =>
+        0.299 * ((rgb >> 16) & 0xFF) + 0.587 * ((rgb >> 8) & 0xFF) + 0.114 * (rgb & 0xFF);
+
+    private static TextBlock CreateBlockText(
+        string text, AppSettings settings, double fontSize, int colorRgb = -1, int backgroundRgb = -1)
     {
         Brush foreground = Brushes.White;
-        if (colorRgb >= 0)
+        if (colorRgb >= 0 && backgroundRgb >= 0)
+        {
+            // Znamy tło łatki: kolor z próbkowania zostaje, o ile realnie kontrastuje —
+            // dzięki temu ciemny tekst na jasnym oknie (visual novele) też jest wierny.
+            if (Math.Abs(Luminance(colorRgb) - Luminance(backgroundRgb)) >= 60)
+            {
+                foreground = new SolidColorBrush(Color.FromRgb(
+                    (byte)(colorRgb >> 16), (byte)(colorRgb >> 8), (byte)colorRgb));
+            }
+            else
+            {
+                foreground = Luminance(backgroundRgb) >= 128 ? Brushes.Black : Brushes.White;
+            }
+        }
+        else if (colorRgb >= 0)
         {
             var r = (byte)(colorRgb >> 16);
             var g = (byte)(colorRgb >> 8);
@@ -151,25 +169,38 @@ public partial class OverlayWindow : Window
         return textBlock;
     }
 
-    private Border CreateBlockElement(string text, AppSettings settings, double scale, int lineHeightPx, int colorRgb = -1)
+    private Border CreateBlockElement(
+        string text, AppSettings settings, double scale, int lineHeightPx, int colorRgb = -1, int backgroundRgb = -1)
     {
+        var cover = IsCoverPlacement(settings);
+        var sampledCover = cover && !IsBackgroundless(settings) && backgroundRgb >= 0;
+
         Brush background;
         if (IsBackgroundless(settings))
         {
             background = Brushes.Transparent;
         }
+        else if (sampledCover)
+        {
+            // Wtapianie: łatka maluje się PRAWDZIWYM kolorem tła gry spod tekstu —
+            // na oknie dialogowym/tooltipie znika jak natywny napis, zamiast świecić
+            // obcym granatowym prostokątem.
+            background = new SolidColorBrush(Color.FromArgb(
+                (byte)Math.Clamp(Math.Max(settings.OverlayBackgroundOpacity, 0.97) * 255, 0, 255),
+                (byte)(backgroundRgb >> 16), (byte)(backgroundRgb >> 8), (byte)backgroundRgb));
+        }
         else
         {
             // W trybie zakrywania tło musi realnie schować oryginalny tekst pod spodem.
-            var opacity = IsCoverPlacement(settings)
+            var opacity = cover
                 ? Math.Max(settings.OverlayBackgroundOpacity, 0.95)
                 : settings.OverlayBackgroundOpacity;
             background = new SolidColorBrush(Color.FromArgb(
                 (byte)Math.Clamp(opacity * 255, 0, 255), 0x0B, 0x0E, 0x11));
         }
 
-        var textBlock = CreateBlockText(text, settings, ResolveFontSize(settings, lineHeightPx, scale), colorRgb);
-        if (IsCoverPlacement(settings))
+        var textBlock = CreateBlockText(text, settings, ResolveFontSize(settings, lineHeightPx, scale), colorRgb, sampledCover ? backgroundRgb : -1);
+        if (cover)
         {
             // W trybie zakrywania tekst centruje się w prostokącie oryginału.
             textBlock.VerticalAlignment = VerticalAlignment.Center;
@@ -178,9 +209,9 @@ public partial class OverlayWindow : Window
         var element = new Border
         {
             Background = background,
-            CornerRadius = new CornerRadius(4),
-            // Bez tła liczy się precyzyjne trafienie w pole oryginału — zero odstępu.
-            Padding = IsBackgroundless(settings) ? new Thickness(0) : new Thickness(7, 4, 7, 4),
+            // Wtopiona łatka ma udawać tekst gry: bez dymkowych rogów i grubego paddingu.
+            CornerRadius = new CornerRadius(sampledCover ? 1 : 4),
+            Padding = IsBackgroundless(settings) || sampledCover ? new Thickness(0) : new Thickness(7, 4, 7, 4),
             Child = textBlock,
         };
 
@@ -195,12 +226,17 @@ public partial class OverlayWindow : Window
         var cover = IsCoverPlacement(settings);
         var monitorHeightDip = monitor.Bounds.Height / scale;
 
+        // Zapas zakrycia: krawędzie antyaliasingu oryginalnych glifów wystają poza
+        // box OCR — bez niego spod łatki prześwituje obwódka starego tekstu.
+        const double coverInsetPx = 3.0;
+        var inset = cover ? coverInsetPx / scale : 0;
+
         if (cover)
         {
             // Dymek ma pokryć cały prostokąt oryginalnego tekstu; polski tekst bywa
             // dłuższy, więc blok może urosnąć w dół — nie ściskamy go na siłę.
-            element.MinWidth = Math.Max(0, box.Width / scale);
-            element.MinHeight = Math.Max(0, box.Height / scale);
+            element.MinWidth = Math.Max(0, box.Width / scale + 2 * inset);
+            element.MinHeight = Math.Max(0, box.Height / scale + 2 * inset);
         }
         else
         {
@@ -209,15 +245,31 @@ public partial class OverlayWindow : Window
         }
 
         element.MaxWidth = Math.Max(140, (monitor.Bounds.Right - box.X) / scale - 12);
+
+        // Wtapianie jednoliniowych napisów: polski bywa ~20% dłuższy — zmniejszamy
+        // czcionkę, aż tekst zmieści się w polu oryginału (z małym zapasem), zamiast
+        // rozpychać łatkę po sąsiednim UI gry albo łamać wiersz.
+        if (cover && element.Child is TextBlock coverText && element.Tag is int coverLineHeight
+            && coverLineHeight > 0 && coverLineHeight >= box.Height * 0.6)
+        {
+            coverText.FontSize = ResolveFontSize(settings, coverLineHeight, scale);
+            for (var i = 0; i < 8 && coverText.FontSize > 9; i++)
+            {
+                element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                if (element.DesiredSize.Width <= element.MinWidth * 1.08) break;
+                coverText.FontSize = Math.Max(9, coverText.FontSize * 0.93);
+            }
+        }
+
         element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
 
-        var left = (box.X - monitor.Bounds.X) / scale;
+        var left = (box.X - monitor.Bounds.X) / scale - inset;
         double top;
 
         if (cover)
         {
             // Dokładnie na oryginale; przy dolnej krawędzi dosuwamy w górę, żeby nie uciąć.
-            top = (box.Y - monitor.Bounds.Y) / scale;
+            top = (box.Y - monitor.Bounds.Y) / scale - inset;
             if (top + element.DesiredSize.Height > monitorHeightDip)
             {
                 top = Math.Max(0, monitorHeightDip - element.DesiredSize.Height);
@@ -313,7 +365,8 @@ public partial class OverlayWindow : Window
                 {
                     RootCanvas.Children.Remove(element);
                 }
-                element = CreateBlockElement(block.TranslatedText, settings, monitor.Scale, block.LineHeight, block.ColorRgb);
+                element = CreateBlockElement(
+                    block.TranslatedText, settings, monitor.Scale, block.LineHeight, block.ColorRgb, block.BackgroundRgb);
                 element.Tag = block.LineHeight;
                 _liveElements[block.Key] = element;
                 RootCanvas.Children.Add(element);
