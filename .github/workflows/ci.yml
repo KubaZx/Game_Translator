@@ -40,6 +40,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: build-test
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -71,3 +73,20 @@ jobs:
         with:
           name: GameTranslatorOverlay-win-x64
           path: publish/
+
+      # Tag v* = pełne wydanie: zip identyczny z tools/package.ps1 + GitHub Release.
+      - name: Pack release zip
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: Compress-Archive -Path publish/* -DestinationPath "GameTranslatorOverlay-$env:GITHUB_REF_NAME-win-x64.zip"
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: GameTranslatorOverlay ${{ github.ref_name }}
+          files: GameTranslatorOverlay-*.zip
+          body: |
+            Portable win-x64 (self-contained, bez instalacji). Rozpakuj zip i uruchom `GameTranslatorOverlay.exe`.
+
+            Pełna lista zmian: [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md)
