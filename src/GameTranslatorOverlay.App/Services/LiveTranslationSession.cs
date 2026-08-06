@@ -17,7 +17,8 @@ public sealed record LiveUpdate(
     string? SubtitleText = null,
     RectPx WindowBounds = default,
     bool ClearOverlay = false,
-    bool Stopped = false);
+    bool Stopped = false,
+    bool HideOverlay = false);
 
 public sealed class LiveSessionOptions
 {
@@ -27,6 +28,12 @@ public sealed class LiveSessionOptions
 
     /// <summary>Przy ciągłych zmianach (animowane tło) przetwarzaj mimo braku stabilizacji.</summary>
     public TimeSpan ForcedProcessInterval { get; init; } = TimeSpan.FromMilliseconds(1000);
+
+    /// <summary>
+    /// Powyżej tego ułamka zmienionych komórek scena jest „w ruchu” (gracz biegnie,
+    /// kamera płynie) — tłumaczenie czeka, aż obraz się uspokoi.
+    /// </summary>
+    public double MotionThreshold { get; init; } = 0.35;
 
     public double OcrUpscale { get; init; }
 }
@@ -59,6 +66,7 @@ public sealed class LiveTranslationSession(
     private RectPx _lastEmittedBounds;
     private bool _warnedAboutScreenFallback;
     private int _consecutiveFailures;
+    private int _motionFrames;
     private Task? _loop;
 
     public bool IsRunning => _loop is { IsCompleted: false };
@@ -238,6 +246,25 @@ public sealed class LiveTranslationSession(
             _previousGrid = grid;
 
             var frameChanged = changedFraction > options.ChangeThreshold;
+
+            // Scena w ruchu (bieg, przesuw kamery): każdy wynik OCR wylądowałby w miejscu,
+            // z którego tekst już odpłynął. Chowamy nakładkę, wstrzymujemy tłumaczenie
+            // i wracamy pełnym OCR-em ~ćwierć sekundy po ustaniu ruchu.
+            if (changedFraction >= options.MotionThreshold)
+            {
+                _motionFrames++;
+                _pendingDirtyRegion = frameRect;
+                stabilizer.ForceDirty(clock.Elapsed);
+                if (_motionFrames == 2)
+                {
+                    Emit(new LiveUpdate(
+                        "Live: ruch na ekranie — wstrzymuję tłumaczenie do ustania ruchu.",
+                        HideOverlay: true), cancellationToken);
+                }
+                return (changedFraction, _motionFrames >= 2);
+            }
+            _motionFrames = 0;
+
             if (frameChanged && analysis.ChangedRegion is { } changedNow)
             {
                 // Zmiany kumulują się między klatkami (animacja pojawiania tooltipa) —

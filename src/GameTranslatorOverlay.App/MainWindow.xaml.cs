@@ -639,6 +639,11 @@ public partial class MainWindow : Window
         {
             _overlay.ClearBlocks();
         }
+        if (update.HideOverlay)
+        {
+            // Ruch sceny: bloki są chwilowo nieaktualne — chowamy, wrócą po najbliższym OCR.
+            _overlay.Hide();
+        }
         if (update.Stopped)
         {
             StopLiveSession();
