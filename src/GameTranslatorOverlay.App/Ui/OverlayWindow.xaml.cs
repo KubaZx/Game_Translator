@@ -83,10 +83,17 @@ public partial class OverlayWindow : Window
         }
     }
 
+    private static bool IsCoverPlacement(AppSettings settings) =>
+        settings.OverlayPlacement.Equals("cover", StringComparison.OrdinalIgnoreCase);
+
     private Border CreateBlockElement(string text, AppSettings settings)
     {
+        // W trybie zakrywania tło musi realnie schować oryginalny tekst pod spodem.
+        var opacity = IsCoverPlacement(settings)
+            ? Math.Max(settings.OverlayBackgroundOpacity, 0.95)
+            : settings.OverlayBackgroundOpacity;
         var background = Color.FromArgb(
-            (byte)Math.Clamp(settings.OverlayBackgroundOpacity * 255, 0, 255), 0x0B, 0x0E, 0x11);
+            (byte)Math.Clamp(opacity * 255, 0, 255), 0x0B, 0x0E, 0x11);
 
         return new Border
         {
@@ -103,20 +110,48 @@ public partial class OverlayWindow : Window
         };
     }
 
-    private void PositionBlockElement(Border element, RectPx box, MonitorArea monitor)
+    private void PositionBlockElement(Border element, RectPx box, MonitorArea monitor, AppSettings settings)
     {
         var scale = monitor.Scale;
+        var cover = IsCoverPlacement(settings);
+        var monitorHeightDip = monitor.Bounds.Height / scale;
+
+        if (cover)
+        {
+            // Dymek ma pokryć cały prostokąt oryginalnego tekstu; polski tekst bywa
+            // dłuższy, więc blok może urosnąć w dół — nie ściskamy go na siłę.
+            element.MinWidth = Math.Max(0, box.Width / scale);
+            element.MinHeight = Math.Max(0, box.Height / scale);
+        }
+        else
+        {
+            element.MinWidth = 0;
+            element.MinHeight = 0;
+        }
+
         element.MaxWidth = Math.Max(140, (monitor.Bounds.Right - box.X) / scale - 12);
         element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
 
         var left = (box.X - monitor.Bounds.X) / scale;
-        var top = (box.Bottom - monitor.Bounds.Y) / scale + 4;
+        double top;
 
-        // Tłumaczenie pojawia się pod oryginałem; przy dolnej krawędzi — nad nim.
-        var monitorHeightDip = monitor.Bounds.Height / scale;
-        if (top + element.DesiredSize.Height > monitorHeightDip)
+        if (cover)
         {
-            top = Math.Max(0, (box.Y - monitor.Bounds.Y) / scale - element.DesiredSize.Height - 4);
+            // Dokładnie na oryginale; przy dolnej krawędzi dosuwamy w górę, żeby nie uciąć.
+            top = (box.Y - monitor.Bounds.Y) / scale;
+            if (top + element.DesiredSize.Height > monitorHeightDip)
+            {
+                top = Math.Max(0, monitorHeightDip - element.DesiredSize.Height);
+            }
+        }
+        else
+        {
+            // Tłumaczenie pojawia się pod oryginałem; przy dolnej krawędzi — nad nim.
+            top = (box.Bottom - monitor.Bounds.Y) / scale + 4;
+            if (top + element.DesiredSize.Height > monitorHeightDip)
+            {
+                top = Math.Max(0, (box.Y - monitor.Bounds.Y) / scale - element.DesiredSize.Height - 4);
+            }
         }
 
         Canvas.SetLeft(element, Math.Max(0, left));
@@ -138,7 +173,7 @@ public partial class OverlayWindow : Window
         foreach (var (box, text) in blocks)
         {
             var element = CreateBlockElement(text, settings);
-            PositionBlockElement(element, box, monitor);
+            PositionBlockElement(element, box, monitor, settings);
             _manualElements.Add(element);
             RootCanvas.Children.Add(element);
         }
@@ -196,7 +231,7 @@ public partial class OverlayWindow : Window
                 RootCanvas.Children.Add(element);
             }
 
-            PositionBlockElement(element, block.ScreenBox, monitor);
+            PositionBlockElement(element, block.ScreenBox, monitor, settings);
         }
 
         CoverMonitor(monitor);

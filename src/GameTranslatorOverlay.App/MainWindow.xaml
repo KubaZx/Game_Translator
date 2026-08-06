@@ -73,6 +73,7 @@
               <RowDefinition Height="Auto" />
               <RowDefinition Height="Auto" />
               <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Język źródłowy:" VerticalAlignment="Center" Margin="0,3" />
@@ -89,6 +90,9 @@
             <ComboBox Grid.Row="2" Grid.Column="1" x:Name="CmbDisplayMode" Margin="0,3" SelectionChanged="OnSettingChanged" />
             <TextBlock Grid.Row="2" Grid.Column="3" Text="Czcionka nakładki:" VerticalAlignment="Center" Margin="0,3" />
             <TextBox Grid.Row="2" Grid.Column="4" x:Name="TxtFontSize" Margin="0,3" LostFocus="OnSettingChanged" />
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Położenie dymków:" VerticalAlignment="Center" Margin="0,3" />
+            <ComboBox Grid.Row="3" Grid.Column="1" x:Name="CmbPlacement" Margin="0,3" SelectionChanged="OnSettingChanged" />
           </Grid>
 
           <GroupBox Header="Klucz API (DeepL)" Foreground="White" Margin="0,10,0,0" Padding="8">

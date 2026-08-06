@@ -24,6 +24,9 @@ public sealed class AppSettings
     /// <summary>at-source (przy oryginale) | subtitle (napisy na dole).</summary>
     public string LiveDisplayMode { get; set; } = "at-source";
     public int SubtitleSeconds { get; set; } = 8;
+
+    /// <summary>below (dymek pod oryginałem) | cover (dymek zakrywa oryginalny tekst).</summary>
+    public string OverlayPlacement { get; set; } = "below";
     public string? ActiveProfileId { get; set; }
 
     /// <summary>0 = automatyczny dobór powiększenia obrazu przed OCR.</summary>

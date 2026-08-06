@@ -118,6 +118,9 @@ public partial class MainWindow : Window
         CmbLiveStyle.ItemsSource = new[] { "Przy oryginale", "Napisy na dole" };
         CmbLiveStyle.SelectedIndex = _settings.LiveDisplayMode == "subtitle" ? 1 : 0;
 
+        CmbPlacement.ItemsSource = new[] { "Pod oryginałem", "Na oryginale (zakrywa)" };
+        CmbPlacement.SelectedIndex = _settings.OverlayPlacement == "cover" ? 1 : 0;
+
         TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         ChkCacheOnly.IsChecked = _settings.CacheOnlyMode;
         ChkPrivate.IsChecked = _settings.PrivateMode;
@@ -480,6 +483,7 @@ public partial class MainWindow : Window
         _settings.Provider = CmbProvider.SelectedItem as string ?? "DeepL";
         _settings.ResultDisplayMode = CmbDisplayMode.SelectedIndex == 1 ? "overlay" : "panel";
         _settings.LiveDisplayMode = CmbLiveStyle.SelectedIndex == 1 ? "subtitle" : "at-source";
+        _settings.OverlayPlacement = CmbPlacement.SelectedIndex == 1 ? "cover" : "below";
         _settings.CacheOnlyMode = ChkCacheOnly.IsChecked == true;
         _settings.PrivateMode = ChkPrivate.IsChecked == true;
 
