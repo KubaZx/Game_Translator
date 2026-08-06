@@ -40,7 +40,9 @@ public sealed class InMemoryTranslationCache : ITranslationCache
         if (best is null) return Task.FromResult<CachedTranslation?>(null);
 
         var updated = best.Translation with { LastUsedAt = DateTimeOffset.UtcNow, UseCount = best.Translation.UseCount + 1 };
-        _entries[Key(hash, sourceLanguage, targetLanguage, updated.GameProfile)] = best with { Translation = updated };
+        // Statystyki użycia aktualizujemy CAS-em (best-effort): przegrany wyścig z równoległą
+        // korektą/czyszczeniem nie może wskrzesić starego wpisu ani nadpisać ręcznej poprawki.
+        _entries.TryUpdate(Key(hash, sourceLanguage, targetLanguage, updated.GameProfile), best with { Translation = updated }, best);
         return Task.FromResult<CachedTranslation?>(updated);
     }
 
@@ -133,6 +135,15 @@ public sealed class InMemoryTranslationCache : ITranslationCache
         var imported = 0;
         foreach (var entry in entries)
         {
+            // Importowana ręczna korekta ma nadpisać istniejący wpis automatyczny —
+            // zwykłe wpisy nie nadpisują niczego.
+            if (entry.IsManual)
+            {
+                await SaveManualCorrectionAsync(entry.ToNewCacheEntry(), cancellationToken).ConfigureAwait(false);
+                imported++;
+                continue;
+            }
+
             var hash = TextHasher.Sha256Hex(entry.NormalizedText);
             var key = Key(hash, entry.SourceLanguage, entry.TargetLanguage, entry.GameProfile);
             if (_entries.ContainsKey(key)) continue;

@@ -20,6 +20,7 @@ internal static class NativeMethods
     public const uint MOD_CONTROL = 0x2;
     public const uint MOD_SHIFT = 0x4;
     public const uint MOD_WIN = 0x8;
+    public const uint MOD_NOREPEAT = 0x4000;
     public const int WM_HOTKEY = 0x0312;
 
     public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;

@@ -38,7 +38,7 @@ public sealed class HotkeyManager : IDisposable
         }
 
         var id = _nextId++;
-        if (!NativeMethods.RegisterHotKey(_source.Handle, id, modifiers, key))
+        if (!NativeMethods.RegisterHotKey(_source.Handle, id, modifiers | NativeMethods.MOD_NOREPEAT, key))
         {
             error = $"Skrót {gesture} jest już zajęty przez inny program. Wybierz inny w ustawieniach.";
             return false;
@@ -71,6 +71,9 @@ public sealed class HotkeyManager : IDisposable
         var keyToken = tokens[^1].ToUpperInvariant();
         if (keyToken.Length == 1 && (char.IsAsciiLetter(keyToken[0]) || char.IsAsciiDigit(keyToken[0])))
         {
+            // Goła litera/cyfra jako GLOBALNY skrót połykałaby klawisz w całym systemie,
+            // także w grze (ruch, czat) — wymagamy modyfikatora. Klawisze F1–F24 mogą być solo.
+            if (modifiers == 0) return false;
             key = keyToken[0];
             return true;
         }

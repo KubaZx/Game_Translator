@@ -80,6 +80,17 @@ public sealed class TranslationPipeline(
                 continue;
             }
 
+            var cached = await cache.LookupAsync(normalized, sourceLanguage, targetLanguage, options.GameProfile, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Ręczna korekta użytkownika ma absolutne pierwszeństwo — także przed słownikiem.
+            if (cached is { IsManual: true })
+            {
+                usage.RecordCacheHit();
+                outcomes[normalized] = new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache);
+                continue;
+            }
+
             if (glossary.TryTranslateExact(normalized, out var glossaryTranslation))
             {
                 usage.RecordGlossaryHit();
@@ -87,8 +98,6 @@ public sealed class TranslationPipeline(
                 continue;
             }
 
-            var cached = await cache.LookupAsync(normalized, sourceLanguage, targetLanguage, options.GameProfile, cancellationToken)
-                .ConfigureAwait(false);
             if (cached is not null)
             {
                 usage.RecordCacheHit();
@@ -240,8 +249,11 @@ public sealed class TranslationPipeline(
 
             try
             {
+                // Automatyczne wyniki z API lądują w cache GLOBALNYM — ten sam tekst w innej grze
+                // (albo bez profilu) nie może być drugi raz bilingowany. Klucz profilu jest
+                // zarezerwowany dla ręcznych korekt i wpisów dostarczanych z profilem.
                 await cache.StoreAsync(
-                    new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage, translated, provider.Name, options.GameProfile),
+                    new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage, translated, provider.Name, GameProfile: string.Empty),
                     cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

@@ -32,26 +32,37 @@ public static class TextBlockGrouper
 
         foreach (var line in ordered)
         {
-            var assigned = -1;
+            var matching = new List<int>();
             for (var i = 0; i < clusters.Count; i++)
             {
                 if (Belongs(clusterBoxes[i], line.Box, maxVerticalGap, maxHorizontalGap))
                 {
-                    assigned = i;
-                    break;
+                    matching.Add(i);
                 }
             }
 
-            if (assigned < 0)
+            if (matching.Count == 0)
             {
                 clusters.Add([line]);
                 clusterBoxes.Add(line.Box);
+                continue;
             }
-            else
+
+            // Linia-mostek (np. szeroki nagłówek nad dwiema kolumnami) łączy wszystkie
+            // pasujące klastry w jeden — bez scalania blok byłby rozerwany, a kolejność
+            // czytania przeplatana między fragmentami.
+            var target = matching[0];
+            for (var j = matching.Count - 1; j >= 1; j--)
             {
-                clusters[assigned].Add(line);
-                clusterBoxes[assigned] = clusterBoxes[assigned].Union(line.Box);
+                var index = matching[j];
+                clusters[target].AddRange(clusters[index]);
+                clusterBoxes[target] = clusterBoxes[target].Union(clusterBoxes[index]);
+                clusters.RemoveAt(index);
+                clusterBoxes.RemoveAt(index);
             }
+
+            clusters[target].Add(line);
+            clusterBoxes[target] = clusterBoxes[target].Union(line.Box);
         }
 
         return clusters

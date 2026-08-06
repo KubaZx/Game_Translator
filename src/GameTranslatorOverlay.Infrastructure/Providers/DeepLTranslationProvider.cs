@@ -13,6 +13,13 @@ public sealed class DeepLOptions
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(15);
     public int MaxRetries { get; set; } = 2;
     public int MaxBatchSize { get; set; } = 50;
+
+    /// <summary>
+    /// Górny limit czekania między ponowieniami. Nagłówek Retry-After powyżej tej wartości
+    /// oznacza rezygnację z retry — użytkownik dostaje od razu czytelny błąd zamiast
+    /// zawieszonej na godziny aplikacji.
+    /// </summary>
+    public TimeSpan MaxRetryDelay { get; set; } = TimeSpan.FromSeconds(20);
 }
 
 /// <summary>
@@ -117,9 +124,19 @@ public sealed class DeepLTranslationProvider(
 
                 var status = (int)response.StatusCode;
                 var retryable = status == 429 || status >= 500;
+                var retryAfter = response.Headers.RetryAfter?.Delta;
+
+                // Serwer/pośrednik może przysłać absurdalny Retry-After (godziny) —
+                // wtedy nie ponawiamy, tylko od razu zwracamy czytelny błąd.
+                if (retryAfter > _options.MaxRetryDelay)
+                {
+                    retryable = false;
+                }
+
                 if (retryable && attempt < _options.MaxRetries)
                 {
-                    var delay = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(attempt + 1);
+                    var delay = retryAfter ?? TimeSpan.FromSeconds(attempt + 1);
+                    if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
                     _logger.LogInformation("DeepL zwrócił {Status} — ponawiam za {Delay} (próba {Attempt}/{Max})",
                         status, delay, attempt + 1, _options.MaxRetries);
                     await Task.Delay(delay, cancellationToken).ConfigureAwait(false);

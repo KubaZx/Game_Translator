@@ -59,6 +59,24 @@ public class InMemoryCacheTests
     }
 
     [Fact]
+    public async Task Import_recznej_korekty_nadpisuje_wpis_automatyczny()
+    {
+        var source = new InMemoryTranslationCache();
+        await source.SaveManualCorrectionAsync(new NewCacheEntry("Hello", "Hello", "en", "pl", "Poprawione", "manual"));
+        var json = await source.ExportJsonAsync();
+
+        var target = new InMemoryTranslationCache();
+        await target.StoreAsync(new NewCacheEntry("Hello", "Hello", "en", "pl", "Automatyczne", "Mock"));
+        var imported = await target.ImportJsonAsync(json);
+
+        Assert.Equal(1, imported);
+        var hit = await target.LookupAsync("Hello", "en", "pl", "");
+        Assert.NotNull(hit);
+        Assert.Equal("Poprawione", hit.TranslatedText);
+        Assert.True(hit.IsManual);
+    }
+
+    [Fact]
     public async Task Eksport_i_import_wykonuja_roundtrip()
     {
         var source = new InMemoryTranslationCache();

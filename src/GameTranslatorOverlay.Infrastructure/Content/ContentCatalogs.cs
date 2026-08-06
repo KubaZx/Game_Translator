@@ -107,14 +107,25 @@ public sealed class UserGlossaryStore(AppPaths paths)
     {
         lock (_gate)
         {
-            if (!File.Exists(paths.UserGlossaryPath))
+            var path = paths.GetUserGlossaryPath(sourceLanguage, targetLanguage);
+            if (!File.Exists(path))
             {
                 return CreateEmpty(sourceLanguage, targetLanguage);
             }
 
             try
             {
-                return GlossarySerializer.FromJson(File.ReadAllText(paths.UserGlossaryPath));
+                var document = GlossarySerializer.FromJson(File.ReadAllText(path));
+
+                // Terminy z innej pary językowej podmieniałyby tłumaczenia po cichu —
+                // niedopasowany dokument traktujemy jak brak słownika.
+                if (!document.SourceLanguage.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase)
+                    || !document.TargetLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase))
+                {
+                    return CreateEmpty(sourceLanguage, targetLanguage);
+                }
+
+                return document;
             }
             catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException or IOException)
             {
@@ -128,11 +139,13 @@ public sealed class UserGlossaryStore(AppPaths paths)
         lock (_gate)
         {
             var document = Load(sourceLanguage, targetLanguage);
+            document.SourceLanguage = sourceLanguage;
+            document.TargetLanguage = targetLanguage;
             document.Terms.RemoveAll(t =>
                 t.Source.Equals(term.Source, StringComparison.OrdinalIgnoreCase) && t.CaseSensitive == term.CaseSensitive);
             document.Terms.Add(term);
             paths.EnsureCreated();
-            File.WriteAllText(paths.UserGlossaryPath, GlossarySerializer.ToJson(document));
+            File.WriteAllText(paths.GetUserGlossaryPath(sourceLanguage, targetLanguage), GlossarySerializer.ToJson(document));
         }
     }
 

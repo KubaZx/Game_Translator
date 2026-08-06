@@ -50,11 +50,23 @@ public sealed class SqliteTranslationCache : ITranslationCache
     private SqliteConnection OpenConnection()
     {
         var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        using var pragma = connection.CreateCommand();
-        pragma.CommandText = "PRAGMA journal_mode=WAL;";
-        pragma.ExecuteNonQuery();
-        return connection;
+        try
+        {
+            connection.Open();
+            using var pragma = connection.CreateCommand();
+            // Przy uszkodzonym pliku dopiero ta instrukcja padnie (SQLite otwiera plik leniwie).
+            pragma.CommandText = "PRAGMA journal_mode=WAL;";
+            pragma.ExecuteNonQuery();
+            return connection;
+        }
+        catch
+        {
+            // Bez sprzątnięcia puli wyciekłe połączenie trzymałoby uchwyt pliku
+            // i uniemożliwiało użytkownikowi usunięcie uszkodzonej bazy.
+            SqliteConnection.ClearPool(connection);
+            connection.Dispose();
+            throw;
+        }
     }
 
     private static void Migrate(SqliteConnection connection)
@@ -172,10 +184,11 @@ public sealed class SqliteTranslationCache : ITranslationCache
         }, cancellationToken);
     }
 
-    private static void UpsertEntry(SqliteConnection connection, NewCacheEntry entry, bool manualOverwrite)
+    private static void UpsertEntry(SqliteConnection connection, NewCacheEntry entry, bool manualOverwrite, SqliteTransaction? transaction = null)
     {
         var now = FormatTimestamp(DateTimeOffset.UtcNow);
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = $"""
             INSERT INTO translations
                 (text_hash, source_text, normalized_text, source_lang, target_lang, translated_text,
@@ -289,6 +302,15 @@ public sealed class SqliteTranslationCache : ITranslationCache
             using var transaction = connection.BeginTransaction();
             foreach (var entry in entries)
             {
+                // Importowana ręczna korekta nadpisuje istniejący wpis (zachowanie priorytetu
+                // korekt); zwykłe wpisy nie nadpisują niczego.
+                if (entry.IsManual)
+                {
+                    UpsertEntry(connection, entry.ToNewCacheEntry(), manualOverwrite: true, transaction);
+                    imported++;
+                    continue;
+                }
+
                 var now = FormatTimestamp(DateTimeOffset.UtcNow);
                 using var command = connection.CreateCommand();
                 command.Transaction = transaction;

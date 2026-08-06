@@ -149,6 +149,28 @@ public class DeepLTranslationProviderTests
     }
 
     [Fact]
+    public async Task Ogromny_RetryAfter_nie_wiesza_aplikacji_tylko_od_razu_zwraca_blad()
+    {
+        var handler = new FakeHandler(static (_, _) =>
+        {
+            var retry = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            retry.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromHours(1));
+            return Task.FromResult(retry);
+        });
+        var provider = CreateProvider(handler);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var ex = await Assert.ThrowsAsync<TranslationException>(
+            () => provider.TranslateBatchAsync(["Hello"], "en", "pl"));
+        stopwatch.Stop();
+
+        Assert.Equal(TranslationFailureKind.RateLimited, ex.Kind);
+        Assert.Equal(1, handler.Calls);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5),
+            $"Żądanie powinno paść natychmiast, a trwało {stopwatch.Elapsed}.");
+    }
+
+    [Fact]
     public async Task Timeout_mapuje_sie_na_zrozumialy_blad()
     {
         var handler = new FakeHandler(static async (request, _) =>

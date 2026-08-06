@@ -12,6 +12,8 @@ namespace GameTranslatorOverlay.App.Ui;
 /// </summary>
 public partial class RegionSelectWindow : Window
 {
+    private static RegionSelectWindow? _active;
+
     private readonly MonitorArea _monitor;
     private readonly TaskCompletionSource<RectPx?> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private NativeMethods.POINT _dragStart;
@@ -20,23 +22,46 @@ public partial class RegionSelectWindow : Window
     public static Task<RectPx?> SelectAsync()
     {
         var window = new RegionSelectWindow();
+        _active = window;
         window.Show();
         window.Activate();
         return window._completion.Task;
     }
+
+    /// <summary>Zamyka otwarte okno zaznaczania — np. gdy aplikacja kończy pracę.</summary>
+    public static void CloseActive() => _active?.Close();
 
     private RegionSelectWindow()
     {
         InitializeComponent();
         _monitor = Displays.FromCursor();
         Loaded += OnLoadedHandler;
-        Closed += (_, _) => _completion.TrySetResult(null);
+        Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_active, this)) _active = null;
+            _completion.TrySetResult(null);
+        };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        CoverMonitor();
+    }
+
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        // Okno powstaje na monitorze głównym; po przeniesieniu na monitor o innym DPI
+        // WPF sam zmniejsza/powiększa rozmiar wg WM_DPICHANGED — wymuszamy z powrotem
+        // pełne pokrycie docelowego monitora (fizyczne piksele).
+        Dispatcher.BeginInvoke(CoverMonitor);
+    }
+
+    private void CoverMonitor()
+    {
         var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
         NativeMethods.SetWindowPos(
             hwnd, NativeMethods.HWND_TOPMOST,
             _monitor.Bounds.X, _monitor.Bounds.Y, _monitor.Bounds.Width, _monitor.Bounds.Height,

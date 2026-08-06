@@ -105,6 +105,10 @@ public partial class ResultPanelWindow : Window
         WarningText.Visibility = string.IsNullOrEmpty(result.Warning) ? Visibility.Collapsed : Visibility.Visible;
         TimingText.Text = result.Timings.ToString();
 
+        // Porzucona edycja z poprzedniego wyniku nie może zostawić panelu w trybie
+        // „kradnę fokus grze".
+        SetNoActivate(true);
+
         Show();
         Dispatcher.BeginInvoke(() => PositionNear(result.Region), DispatcherPriority.Loaded);
         RestartAutoHide();
@@ -140,6 +144,7 @@ public partial class ResultPanelWindow : Window
     private void RestartAutoHide()
     {
         _autoHideTimer.Stop();
+        if (_items.Any(static item => item.IsEditing)) return;
         if (_autoHideSeconds > 0 && PinToggle.IsChecked != true)
         {
             _autoHideTimer.Interval = TimeSpan.FromSeconds(_autoHideSeconds);
@@ -200,16 +205,14 @@ public partial class ResultPanelWindow : Window
             item.TranslatedText = corrected;
             item.OriginLabel = "Ręczna korekta ✔";
             item.IsEditing = false;
+            SetNoActivate(true);
+            RestartAutoHide();
         }
         catch (Exception ex)
         {
+            // Edycja zostaje otwarta (tekst użytkownika nie może przepaść przez auto-ukrycie).
             WarningText.Text = "Nie udało się zapisać poprawki: " + ex.Message;
             WarningText.Visibility = Visibility.Visible;
-        }
-        finally
-        {
-            SetNoActivate(true);
-            RestartAutoHide();
         }
     }
 
@@ -232,7 +235,15 @@ public partial class ResultPanelWindow : Window
 
     private void OnPinChanged(object sender, RoutedEventArgs e) => RestartAutoHide();
 
-    private void OnCloseClick(object sender, RoutedEventArgs e) => Hide();
+    private void OnCloseClick(object sender, RoutedEventArgs e)
+    {
+        foreach (var item in _items)
+        {
+            item.IsEditing = false;
+        }
+        SetNoActivate(true);
+        Hide();
+    }
 
     public void ForceClose()
     {

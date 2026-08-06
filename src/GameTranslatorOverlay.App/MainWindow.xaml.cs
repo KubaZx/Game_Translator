@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
     private System.Drawing.Bitmap? _previewBitmap;
+    private bool _previewBusy;
     private bool _loadingUi;
     private bool _selectingRegion;
     private int _statusTicks;
@@ -129,14 +130,23 @@ public partial class MainWindow : Window
 
     private void OnRefreshClick(object sender, RoutedEventArgs e) => _ = RefreshWindowsAsync();
 
+    private void SetPreviewBusy(bool busy)
+    {
+        _previewBusy = busy;
+        BtnCapture.IsEnabled = !busy;
+        BtnOcrTest.IsEnabled = !busy;
+    }
+
     private async void OnCaptureClick(object sender, RoutedEventArgs e)
     {
+        if (_previewBusy) return;
         if (WindowsList.SelectedItem is not TargetWindow window)
         {
             SetStatus("Najpierw wybierz okno z listy po lewej.");
             return;
         }
 
+        SetPreviewBusy(true);
         try
         {
             var bitmap = await Task.Run(() => ScreenCapture.CaptureWindow(window.Handle));
@@ -156,30 +166,40 @@ public partial class MainWindow : Window
             _logger.LogError(ex, "Błąd przechwytywania okna");
             SetStatus("Błąd przechwytywania okna — szczegóły w logu diagnostycznym.");
         }
+        finally
+        {
+            SetPreviewBusy(false);
+        }
     }
 
     private async void OnOcrTestClick(object sender, RoutedEventArgs e)
     {
-        if (_previewBitmap is null)
+        if (_previewBusy) return;
+
+        // Lokalna migawka referencji — pole może zostać podmienione/zwolnione przez UI,
+        // a bitmapa GDI+ nie jest bezpieczna wątkowo.
+        var bitmap = _previewBitmap;
+        if (bitmap is null)
         {
             SetStatus("Najpierw przechwyć podgląd okna (📷).");
             return;
         }
 
+        SetPreviewBusy(true);
         try
         {
             var sourceLanguage = _settings.SourceLanguage;
             var result = await Task.Run(async () =>
             {
-                var downscale = OcrScaling.ComputeDownscale(_previewBitmap.Width, _previewBitmap.Height, _ocr.MaxImageDimension);
-                var working = downscale < 1.0 ? ScreenCapture.Rescale(_previewBitmap, downscale) : _previewBitmap;
+                var downscale = OcrScaling.ComputeDownscale(bitmap.Width, bitmap.Height, _ocr.MaxImageDimension);
+                var working = downscale < 1.0 ? ScreenCapture.Rescale(bitmap, downscale) : bitmap;
                 try
                 {
                     return await _ocr.RecognizeAsync(ScreenCapture.ToOcrBitmap(working), sourceLanguage);
                 }
                 finally
                 {
-                    if (!ReferenceEquals(working, _previewBitmap)) working.Dispose();
+                    if (!ReferenceEquals(working, bitmap)) working.Dispose();
                 }
             });
 
@@ -197,13 +217,23 @@ public partial class MainWindow : Window
             _logger.LogError(ex, "Błąd testu OCR");
             SetStatus("Błąd OCR — szczegóły w logu diagnostycznym.");
         }
+        finally
+        {
+            SetPreviewBusy(false);
+        }
     }
 
     private void OnTranslateRegionClick(object sender, RoutedEventArgs e) => _ = TranslateRegionInteractiveAsync();
 
     private async Task TranslateRegionInteractiveAsync()
     {
-        if (_selectingRegion) return;
+        if (_selectingRegion)
+        {
+            // Ponowny skrót w trakcie wiszącego tłumaczenia = prawdziwe latest-wins:
+            // anulujemy starą operację zamiast po cichu ignorować użytkownika.
+            _orchestrator.CancelActiveOperation();
+            return;
+        }
         _selectingRegion = true;
         try
         {
@@ -392,21 +422,32 @@ public partial class MainWindow : Window
         {
             TxtCacheStatus.Text = ex.Message;
         }
+        catch (Exception ex)
+        {
+            // Zablokowany/usunięty plik bazy nie może zasypać użytkownika modalnymi błędami
+            // z timera — pokazujemy status i logujemy techniczny szczegół.
+            _logger.LogWarning(ex, "Nie udało się odczytać statystyk cache");
+            TxtCacheStatus.Text = "Cache SQLite: statystyki chwilowo niedostępne (szczegóły w logu).";
+        }
     }
 
     private void SetStatus(string message)
     {
+        // Wyłącznie pasek statusu w UI. Statusy zawierają treści z ekranu użytkownika
+        // (tytuły okien, komunikaty o tłumaczeniach) — NIE wolno ich logować na dysk.
         TxtStatus.Text = message;
-        _logger.LogInformation("{Status}", message);
     }
 
     private void OnClosedHandler(object? sender, EventArgs e)
     {
         _statusTimer.Stop();
+        _orchestrator.CancelActiveOperation();
         _hotkeys.Dispose();
+        RegionSelectWindow.CloseActive();
         _overlay.Close();
         _panel.ForceClose();
-        _previewBitmap?.Dispose();
         _settingsStore.Save(_settings);
+        // _previewBitmap celowo bez Dispose: operacja OCR w tle mogłaby jeszcze z niej
+        // korzystać (use-after-dispose = twardy crash GDI+), a proces i tak się kończy.
     }
 }

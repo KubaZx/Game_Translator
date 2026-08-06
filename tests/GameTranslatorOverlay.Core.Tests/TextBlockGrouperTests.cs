@@ -74,4 +74,20 @@ public class TextBlockGrouperTests
     {
         Assert.Empty(TextBlockGrouper.Group([]));
     }
+
+    [Fact]
+    public void Group_scala_klastry_polaczone_linia_mostkiem()
+    {
+        var lines = new[]
+        {
+            Line("Lewa kolumna", 0, 100, width: 80),
+            Line("Prawa kolumna", 500, 100, width: 100),
+            Line("Szeroki nagłówek pod spodem", 0, 130, width: 600),
+        };
+
+        var blocks = TextBlockGrouper.Group(lines);
+
+        var block = Assert.Single(blocks);
+        Assert.Equal(3, block.Lines.Count);
+    }
 }

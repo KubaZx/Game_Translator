@@ -138,6 +138,24 @@ public sealed class SqliteTranslationCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task Import_recznej_korekty_nadpisuje_wpis_automatyczny()
+    {
+        await _cache.StoreAsync(Entry("Hello", "Automatyczne"));
+
+        var backup = new GameTranslatorOverlay.Core.Caching.InMemoryTranslationCache();
+        await backup.SaveManualCorrectionAsync(Entry("Hello", "Poprawione"));
+        var json = await backup.ExportJsonAsync();
+
+        var imported = await _cache.ImportJsonAsync(json);
+
+        Assert.Equal(1, imported);
+        var hit = await _cache.LookupAsync("Hello", "en", "pl", "");
+        Assert.NotNull(hit);
+        Assert.Equal("Poprawione", hit.TranslatedText);
+        Assert.True(hit.IsManual);
+    }
+
+    [Fact]
     public async Task Eksport_i_import_wykonuja_roundtrip_bez_duplikatow()
     {
         await _cache.StoreAsync(Entry("Hello", "Cześć"));

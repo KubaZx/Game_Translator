@@ -185,6 +185,40 @@ public class TranslationPipelineTests
     }
 
     [Fact]
+    public async Task Reczna_korekta_wygrywa_ze_slownikiem()
+    {
+        var (pipeline, provider, cache, _, glossary) = CreatePipeline();
+        glossary.AddTerm(new GlossaryTerm("Energy Shield", "Tarcza energetyczna"));
+        await cache.SaveManualCorrectionAsync(new NewCacheEntry("Energy Shield", "Energy Shield", "en", "pl", "Bariera energii", "manual"));
+
+        var outcomes = await pipeline.TranslateAsync(["Energy Shield"], "en", "pl");
+
+        var outcome = Assert.Single(outcomes);
+        Assert.Equal(TranslationOrigin.Cache, outcome.Origin);
+        Assert.Equal("Bariera energii", outcome.TranslatedText);
+        Assert.Equal(0, provider.CallCount);
+    }
+
+    [Fact]
+    public async Task Wyniki_API_trafiaja_do_cache_globalnego_takze_przy_aktywnym_profilu()
+    {
+        var glossary = new GlossaryService();
+        var cache = new InMemoryTranslationCache();
+        var provider = new FakeProvider();
+        var usage = new UsageTracker();
+        var withProfile = new TranslationPipeline(glossary, cache, provider, usage,
+            new TranslationPipelineOptions { GameProfile = "poe2" });
+        var withoutProfile = new TranslationPipeline(glossary, cache, provider, usage,
+            new TranslationPipelineOptions());
+
+        await withProfile.TranslateAsync(["Hello"], "en", "pl");
+        var second = await withoutProfile.TranslateAsync(["Hello"], "en", "pl");
+
+        Assert.Equal(TranslationOrigin.Cache, second[0].Origin);
+        Assert.Equal(1, provider.CallCount);
+    }
+
+    [Fact]
     public async Task Mock_provider_dziala_deterministycznie()
     {
         var mock = new MockTranslationProvider();

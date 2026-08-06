@@ -161,6 +161,19 @@ public sealed class ContentCatalogTests : IDisposable
     }
 
     [Fact]
+    public void UserGlossaryStore_izoluje_pary_jezykowe()
+    {
+        var store = new UserGlossaryStore(new AppPaths(_temp.Path));
+        store.AddTerm(new GlossaryTerm("Attack", "Atak"), "en", "pl");
+
+        var germanPair = store.Load("en", "de");
+        var polishPair = store.Load("en", "pl");
+
+        Assert.Empty(germanPair.Terms);
+        Assert.Single(polishPair.Terms);
+    }
+
+    [Fact]
     public void UserGlossaryStore_dodaje_i_nadpisuje_terminy()
     {
         var paths = new AppPaths(_temp.Path);

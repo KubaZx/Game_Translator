@@ -81,6 +81,10 @@ public sealed class TranslationOrchestrator(
     /// <summary>Przebudowuje pipeline po każdej zmianie ustawień (dostawca, profil, tryby, limity).</summary>
     public void RebuildPipeline()
     {
+        // Operacja w locie działa na starych regułach (stary cache, stary dostawca) —
+        // po zmianie np. trybu prywatnego nie może dokończyć zapisu na dysk.
+        CancelActiveOperation();
+
         ActiveProfile = Profiles.FirstOrDefault(p => p.Id.Equals(settings.ActiveProfileId, StringComparison.OrdinalIgnoreCase));
 
         var warnings = new List<string>();
@@ -252,6 +256,11 @@ public sealed class TranslationOrchestrator(
             Priority: 100);
 
         glossaryService.AddTerm(term);
+
+        // Tryb prywatny obiecuje brak zapisu treści z ekranu na dysk — termin działa
+        // tylko w pamięci do końca sesji.
+        if (settings.PrivateMode) return Task.CompletedTask;
+
         return Task.Run(() => userGlossaryStore.AddTerm(term, settings.SourceLanguage, settings.TargetLanguage));
     }
 

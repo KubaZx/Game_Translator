@@ -36,6 +36,25 @@ public partial class OverlayWindow : Window
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE, new IntPtr(exStyle));
     }
 
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        // Przy przejściu na monitor o innym DPI WPF sam skaluje rozmiar okna wg
+        // WM_DPICHANGED — wymuszamy ponownie pełne pokrycie monitora w fizycznych px.
+        if (_monitor is { } monitor)
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                if (hwnd == IntPtr.Zero) return;
+                NativeMethods.SetWindowPos(
+                    hwnd, NativeMethods.HWND_TOPMOST,
+                    monitor.Bounds.X, monitor.Bounds.Y, monitor.Bounds.Width, monitor.Bounds.Height,
+                    NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOACTIVATE);
+            });
+        }
+    }
+
     public void ShowBlocks(IReadOnlyList<(RectPx Box, string Text)> blocks, AppSettings settings)
     {
         if (blocks.Count == 0) return;
