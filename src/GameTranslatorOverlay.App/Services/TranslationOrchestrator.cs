@@ -53,6 +53,8 @@ public sealed class TranslationOrchestrator(
     private TranslationPipeline? _pipeline;
     private InMemoryTranslationCache? _privateCache;
     private CancellationTokenSource? _activeCts;
+    private CancellationTokenSource _pipelineEpoch = new();
+    private readonly List<GlossaryTerm> _privateSessionTerms = [];
 
     public IReadOnlyList<GameProfile> Profiles { get; private set; } = [];
     public IReadOnlyList<CatalogIssue> ProfileIssues { get; private set; } = [];
@@ -83,7 +85,10 @@ public sealed class TranslationOrchestrator(
     {
         // Operacja w locie działa na starych regułach (stary cache, stary dostawca) —
         // po zmianie np. trybu prywatnego nie może dokończyć zapisu na dysk.
+        // Epoka pipeline'u obejmuje też wywołania z trybu live (TranslateTextsAsync).
         CancelActiveOperation();
+        var previousEpoch = Interlocked.Exchange(ref _pipelineEpoch, new CancellationTokenSource());
+        previousEpoch.Cancel();
 
         ActiveProfile = Profiles.FirstOrDefault(p => p.Id.Equals(settings.ActiveProfileId, StringComparison.OrdinalIgnoreCase));
 
@@ -95,6 +100,13 @@ public sealed class TranslationOrchestrator(
             LoadGlossary(profileGlossary, warnings);
         }
         glossaryService.LoadDocument(userGlossaryStore.Load(settings.SourceLanguage, settings.TargetLanguage));
+
+        // Terminy dodane w trybie prywatnym żyją tylko w pamięci — muszą przetrwać
+        // każdą przebudowę pipeline'u do końca sesji aplikacji.
+        foreach (var term in _privateSessionTerms)
+        {
+            glossaryService.AddTerm(term);
+        }
 
         if (settings.PrivateMode)
         {
@@ -258,8 +270,12 @@ public sealed class TranslationOrchestrator(
         glossaryService.AddTerm(term);
 
         // Tryb prywatny obiecuje brak zapisu treści z ekranu na dysk — termin działa
-        // tylko w pamięci do końca sesji.
-        if (settings.PrivateMode) return Task.CompletedTask;
+        // tylko w pamięci, ale musi przetrwać przebudowy pipeline'u do końca sesji.
+        if (settings.PrivateMode)
+        {
+            _privateSessionTerms.Add(term);
+            return Task.CompletedTask;
+        }
 
         return Task.Run(() => userGlossaryStore.AddTerm(term, settings.SourceLanguage, settings.TargetLanguage));
     }
@@ -272,11 +288,17 @@ public sealed class TranslationOrchestrator(
     /// Używane przez tryb live — każdy cykl bierze świeży pipeline, więc zmiana
     /// ustawień (dostawca, tryb prywatny) obowiązuje od następnej klatki.
     /// </summary>
-    public Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
+    public async Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
         IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
     {
         var pipeline = _pipeline ?? throw new InvalidOperationException("Pipeline tłumaczenia nie został zbudowany.");
-        return pipeline.TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, cancellationToken);
+
+        // Token epoki: zmiana ustawień (np. włączenie trybu prywatnego/Cache-only)
+        // przerywa także tłumaczenia live będące w locie — stary pipeline nie może
+        // dokończyć zapisu na dysk ani wysyłki do API na starych regułach.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _pipelineEpoch.Token);
+        return await pipeline.TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, linked.Token)
+            .ConfigureAwait(false);
     }
 
     public string SourceLanguage => settings.SourceLanguage;

@@ -13,6 +13,8 @@ public sealed class GlossaryTermRow
     public string Source { get; set; } = string.Empty;
     public string Target { get; set; } = string.Empty;
     public int Priority { get; set; } = 100;
+    public bool CaseSensitive { get; set; }
+    public string? Note { get; set; }
 }
 
 /// <summary>
@@ -46,7 +48,14 @@ public partial class GlossaryEditorWindow : Window
 
         foreach (var term in _store.Load(sourceLanguage, targetLanguage).Terms)
         {
-            _rows.Add(new GlossaryTermRow { Source = term.Source, Target = term.Target, Priority = term.Priority });
+            _rows.Add(new GlossaryTermRow
+            {
+                Source = term.Source,
+                Target = term.Target,
+                Priority = term.Priority,
+                CaseSensitive = term.CaseSensitive,
+                Note = term.Note,
+            });
         }
 
         TermsGrid.ItemsSource = _rows;
@@ -61,8 +70,20 @@ public partial class GlossaryEditorWindow : Window
         TermsGrid.ScrollIntoView(row);
     }
 
+    private bool TryCommitPendingEdit()
+    {
+        if (!TermsGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, true))
+        {
+            TxtInfo.Text = "Popraw zaznaczoną komórkę (priorytet musi być liczbą całkowitą), zanim wykonasz tę operację.";
+            return false;
+        }
+        return true;
+    }
+
     private void OnDeleteRowClick(object sender, RoutedEventArgs e)
     {
+        if (!TryCommitPendingEdit()) return;
+
         foreach (var row in TermsGrid.SelectedItems.Cast<GlossaryTermRow>().ToList())
         {
             _rows.Remove(row);
@@ -72,6 +93,8 @@ public partial class GlossaryEditorWindow : Window
 
     private void OnImportClick(object sender, RoutedEventArgs e)
     {
+        if (!TryCommitPendingEdit()) return;
+
         var dialog = new OpenFileDialog { Filter = "Słownik JSON|*.json" };
         if (dialog.ShowDialog(this) != true) return;
 
@@ -85,25 +108,46 @@ public partial class GlossaryEditorWindow : Window
                 return;
             }
 
+            // Słownik innej pary językowej podmieniałby tłumaczenia po cichu.
+            if (!document.SourceLanguage.Equals(_sourceLanguage, StringComparison.OrdinalIgnoreCase)
+                || !document.TargetLanguage.Equals(_targetLanguage, StringComparison.OrdinalIgnoreCase))
+            {
+                TxtInfo.Text = $"Plik odrzucony: to słownik pary {document.SourceLanguage}→{document.TargetLanguage}, " +
+                               $"a edytujesz parę {_sourceLanguage}→{_targetLanguage}.";
+                return;
+            }
+
             var imported = 0;
+            var overwritten = 0;
             foreach (var term in document.Terms)
             {
                 var existing = _rows.FirstOrDefault(r =>
-                    r.Source.Equals(term.Source, StringComparison.OrdinalIgnoreCase));
+                    r.Source.Equals(term.Source, StringComparison.OrdinalIgnoreCase)
+                    && r.CaseSensitive == term.CaseSensitive);
                 if (existing is not null)
                 {
                     existing.Target = term.Target;
                     existing.Priority = term.Priority;
+                    existing.Note = term.Note;
+                    overwritten++;
                 }
                 else
                 {
-                    _rows.Add(new GlossaryTermRow { Source = term.Source, Target = term.Target, Priority = term.Priority });
+                    _rows.Add(new GlossaryTermRow
+                    {
+                        Source = term.Source,
+                        Target = term.Target,
+                        Priority = term.Priority,
+                        CaseSensitive = term.CaseSensitive,
+                        Note = term.Note,
+                    });
                 }
                 imported++;
             }
 
             TermsGrid.Items.Refresh();
-            TxtInfo.Text = $"Zaimportowano {imported} terminów z „{Path.GetFileName(dialog.FileName)}”.";
+            TxtInfo.Text = $"Zaimportowano {imported} terminów z „{Path.GetFileName(dialog.FileName)}”" +
+                           (overwritten > 0 ? $" (nadpisano {overwritten} istniejących)." : ".");
             UpdateConflictInfo(prefix: TxtInfo.Text + " ");
         }
         catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException or IOException)
@@ -134,7 +178,7 @@ public partial class GlossaryEditorWindow : Window
 
     private void OnSaveClick(object sender, RoutedEventArgs e)
     {
-        TermsGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, true);
+        if (!TryCommitPendingEdit()) return;
 
         _store.ReplaceAll(BuildDocument(), _sourceLanguage, _targetLanguage);
         _orchestrator.RebuildPipeline();
@@ -152,7 +196,12 @@ public partial class GlossaryEditorWindow : Window
         };
         document.Terms.AddRange(_rows
             .Where(static r => !string.IsNullOrWhiteSpace(r.Source) && !string.IsNullOrWhiteSpace(r.Target))
-            .Select(static r => new GlossaryTerm(r.Source.Trim(), r.Target.Trim(), Priority: r.Priority)));
+            .Select(static r => new GlossaryTerm(
+                r.Source.Trim(),
+                r.Target.Trim(),
+                r.CaseSensitive,
+                r.Priority,
+                string.IsNullOrWhiteSpace(r.Note) ? null : r.Note.Trim())));
         return document;
     }
 

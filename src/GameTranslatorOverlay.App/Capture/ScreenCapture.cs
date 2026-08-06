@@ -27,17 +27,25 @@ public static class ScreenCapture
         return bitmap;
     }
 
-    public static Bitmap? CaptureWindow(IntPtr hwnd)
+    public static Bitmap? CaptureWindow(IntPtr hwnd) => CaptureWindowEx(hwnd).Bitmap;
+
+    /// <summary>
+    /// Przechwytuje okno przez PrintWindow; gdy okno tego nie wspiera, spada do zrzutu
+    /// ekranu w prostokącie okna. <c>UsedScreenFallback=true</c> oznacza, że w kadrze
+    /// mogły znaleźć się inne okna nachodzące na grę — wołający powinien o tym
+    /// poinformować użytkownika (prywatność).
+    /// </summary>
+    public static (Bitmap? Bitmap, bool UsedScreenFallback) CaptureWindowEx(IntPtr hwnd)
     {
-        if (!NativeMethods.IsWindow(hwnd) || NativeMethods.IsIconic(hwnd)) return null;
+        if (!NativeMethods.IsWindow(hwnd) || NativeMethods.IsIconic(hwnd)) return (null, false);
 
         var bounds = GetWindowBounds(hwnd);
-        if (bounds.IsEmpty) return null;
+        if (bounds.IsEmpty) return (null, false);
 
-        if (!NativeMethods.GetWindowRect(hwnd, out var windowRect)) return null;
+        if (!NativeMethods.GetWindowRect(hwnd, out var windowRect)) return (null, false);
         var windowWidth = windowRect.Right - windowRect.Left;
         var windowHeight = windowRect.Bottom - windowRect.Top;
-        if (windowWidth <= 0 || windowHeight <= 0) return null;
+        if (windowWidth <= 0 || windowHeight <= 0) return (null, false);
 
         var printed = new Bitmap(windowWidth, windowHeight, PixelFormat.Format32bppArgb);
         bool success;
@@ -58,7 +66,7 @@ public static class ScreenCapture
         {
             // Niektóre gry (DirectX/Vulkan) nie wspierają PrintWindow — bierzemy obraz prosto z ekranu.
             printed.Dispose();
-            return CaptureScreenRegion(bounds);
+            return (CaptureScreenRegion(bounds), true);
         }
 
         // PrintWindow renderuje pełny prostokąt okna (z cieniem) — przycinamy do widocznej ramki.
@@ -70,12 +78,12 @@ public static class ScreenCapture
 
         if (crop.Width <= 0 || crop.Height <= 0 || (crop.X == 0 && crop.Y == 0 && crop.Width == windowWidth && crop.Height == windowHeight))
         {
-            return printed;
+            return (printed, false);
         }
 
         try
         {
-            return printed.Clone(crop, PixelFormat.Format32bppArgb);
+            return (printed.Clone(crop, PixelFormat.Format32bppArgb), false);
         }
         finally
         {

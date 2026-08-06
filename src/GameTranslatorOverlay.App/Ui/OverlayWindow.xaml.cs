@@ -11,23 +11,28 @@ using GameTranslatorOverlay.Infrastructure.Settings;
 namespace GameTranslatorOverlay.App.Ui;
 
 /// <summary>
-/// Przezroczysta nakładka click-through: wyświetla tłumaczenia przy oryginalnym tekście
-/// albo jako pasek napisów, nie przejmuje fokusu ani kliknięć. Jest wykluczona
-/// z przechwytywania ekranu (WDA_EXCLUDEFROMCAPTURE), więc OCR nigdy nie czyta
-/// własnych tłumaczeń.
+/// Przezroczysta nakładka click-through z trzema warstwami: bloki ręczne (auto-ukrywane),
+/// bloki live (zarządzane diffem po kluczach) i pasek napisów. Nie przejmuje fokusu
+/// ani kliknięć; jest wykluczana z przechwytywania ekranu (WDA_EXCLUDEFROMCAPTURE),
+/// a gdy wykluczenie zawiedzie, pętla live ma dodatkowy filtr anty-sprzężeniowy.
 /// </summary>
 public partial class OverlayWindow : Window
 {
-    private readonly DispatcherTimer _clearTimer = new();
+    private readonly DispatcherTimer _manualClearTimer = new();
     private readonly DispatcherTimer _subtitleTimer = new();
     private readonly Dictionary<string, Border> _liveElements = [];
+    private readonly List<Border> _manualElements = [];
     private Border? _subtitleElement;
     private MonitorArea? _monitor;
+    private bool _hiddenByUser;
+
+    /// <summary>Czy okno jest realnie wykluczone z przechwytywania ekranu.</summary>
+    public bool IsCaptureExclusionActive { get; private set; }
 
     public OverlayWindow()
     {
         InitializeComponent();
-        _clearTimer.Tick += (_, _) => ClearBlocks();
+        _manualClearTimer.Tick += (_, _) => ClearManualBlocks();
         _subtitleTimer.Tick += (_, _) => ClearSubtitle();
     }
 
@@ -44,8 +49,11 @@ public partial class OverlayWindow : Window
 
         // Nakładka nie może trafiać do przechwytywanego obrazu — inaczej OCR
         // czytałby własne tłumaczenia (pętla sprzężenia zwrotnego).
-        NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
+        IsCaptureExclusionActive = NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
     }
+
+    /// <summary>Tworzy HWND bez pokazywania okna — pozwala wcześnie sprawdzić wykluczenie z capture.</summary>
+    public void EnsureHandleCreated() => new WindowInteropHelper(this).EnsureHandle();
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     {
@@ -65,6 +73,14 @@ public partial class OverlayWindow : Window
             hwnd, NativeMethods.HWND_TOPMOST,
             monitor.Bounds.X, monitor.Bounds.Y, monitor.Bounds.Width, monitor.Bounds.Height,
             NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOACTIVATE);
+    }
+
+    private void ShowIfAllowed()
+    {
+        if (!_hiddenByUser)
+        {
+            Show();
+        }
     }
 
     private Border CreateBlockElement(string text, AppSettings settings)
@@ -107,7 +123,7 @@ public partial class OverlayWindow : Window
         Canvas.SetTop(element, top);
     }
 
-    /// <summary>Jednorazowe wyświetlenie bloków (tryb ręczny). Czyści wynik poprzedni i elementy live.</summary>
+    /// <summary>Jednorazowe wyświetlenie bloków z tłumaczenia ręcznego (auto-ukrywane).</summary>
     public void ShowBlocks(IReadOnlyList<(RectPx Box, string Text)> blocks, AppSettings settings)
     {
         if (blocks.Count == 0) return;
@@ -116,25 +132,24 @@ public partial class OverlayWindow : Window
         _monitor = Displays.FromRect(overall);
         var monitor = _monitor;
 
-        RootCanvas.Children.Clear();
-        _liveElements.Clear();
-        _subtitleElement = null;
+        ClearManualBlocks();
+        _hiddenByUser = false;
 
         foreach (var (box, text) in blocks)
         {
             var element = CreateBlockElement(text, settings);
             PositionBlockElement(element, box, monitor);
+            _manualElements.Add(element);
             RootCanvas.Children.Add(element);
         }
 
         CoverMonitor(monitor);
         Show();
 
-        _clearTimer.Stop();
         if (settings.ResultAutoHideSeconds > 0)
         {
-            _clearTimer.Interval = TimeSpan.FromSeconds(settings.ResultAutoHideSeconds);
-            _clearTimer.Start();
+            _manualClearTimer.Interval = TimeSpan.FromSeconds(settings.ResultAutoHideSeconds);
+            _manualClearTimer.Start();
         }
     }
 
@@ -144,7 +159,9 @@ public partial class OverlayWindow : Window
     /// </summary>
     public void UpdateLiveBlocks(IReadOnlyList<LiveDisplayBlock> blocks, AppSettings settings)
     {
-        _clearTimer.Stop();
+        // Warstwy ręczna i napisów nie mogą zalegać pod aktualizacjami live.
+        ClearManualBlocks();
+        ClearSubtitle();
 
         if (blocks.Count == 0)
         {
@@ -183,15 +200,18 @@ public partial class OverlayWindow : Window
         }
 
         CoverMonitor(monitor);
-        Show();
+        ShowIfAllowed();
     }
 
     /// <summary>Pasek napisów na dole okna gry (tryb Subtitle) — pokazuje najnowszy tekst.</summary>
     public void ShowSubtitle(string text, RectPx gameWindowBounds, AppSettings settings)
     {
+        // Warstwy ręczna i bloków live nie mogą zalegać pod napisami.
+        ClearManualBlocks();
+        ClearLiveBlocks();
+
         _monitor = Displays.FromRect(gameWindowBounds);
         var monitor = _monitor;
-        var scale = monitor.Scale;
 
         if (_subtitleElement is null)
         {
@@ -214,16 +234,10 @@ public partial class OverlayWindow : Window
         var subtitleText = (TextBlock)_subtitleElement.Child;
         subtitleText.Text = text;
         subtitleText.FontSize = Math.Max(12, settings.OverlayFontSize + 2);
-        _subtitleElement.MaxWidth = Math.Max(320, gameWindowBounds.Width * 0.7 / scale);
-        _subtitleElement.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-
-        var centerX = (gameWindowBounds.X + gameWindowBounds.Width / 2.0 - monitor.Bounds.X) / scale;
-        var bottomY = (gameWindowBounds.Bottom - monitor.Bounds.Y) / scale;
-        Canvas.SetLeft(_subtitleElement, Math.Max(0, centerX - _subtitleElement.DesiredSize.Width / 2));
-        Canvas.SetTop(_subtitleElement, Math.Max(0, bottomY - _subtitleElement.DesiredSize.Height - 48));
+        PositionSubtitle(gameWindowBounds, monitor);
 
         CoverMonitor(monitor);
-        Show();
+        ShowIfAllowed();
 
         _subtitleTimer.Stop();
         if (settings.SubtitleSeconds > 0)
@@ -231,6 +245,47 @@ public partial class OverlayWindow : Window
             _subtitleTimer.Interval = TimeSpan.FromSeconds(settings.SubtitleSeconds);
             _subtitleTimer.Start();
         }
+    }
+
+    /// <summary>Przesuwa istniejący pasek napisów, gdy okno gry zmieniło pozycję (bez zmiany tekstu).</summary>
+    public void RepositionSubtitle(RectPx gameWindowBounds)
+    {
+        if (_subtitleElement is null) return;
+        _monitor = Displays.FromRect(gameWindowBounds);
+        PositionSubtitle(gameWindowBounds, _monitor);
+        CoverMonitor(_monitor);
+    }
+
+    private void PositionSubtitle(RectPx gameWindowBounds, MonitorArea monitor)
+    {
+        if (_subtitleElement is null) return;
+        var scale = monitor.Scale;
+        _subtitleElement.MaxWidth = Math.Max(320, gameWindowBounds.Width * 0.7 / scale);
+        _subtitleElement.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+
+        var centerX = (gameWindowBounds.X + gameWindowBounds.Width / 2.0 - monitor.Bounds.X) / scale;
+        var bottomY = (gameWindowBounds.Bottom - monitor.Bounds.Y) / scale;
+        Canvas.SetLeft(_subtitleElement, Math.Max(0, centerX - _subtitleElement.DesiredSize.Width / 2));
+        Canvas.SetTop(_subtitleElement, Math.Max(0, bottomY - _subtitleElement.DesiredSize.Height - 48));
+    }
+
+    private void HideIfEmpty()
+    {
+        if (RootCanvas.Children.Count == 0)
+        {
+            Hide();
+        }
+    }
+
+    private void ClearManualBlocks()
+    {
+        _manualClearTimer.Stop();
+        foreach (var element in _manualElements)
+        {
+            RootCanvas.Children.Remove(element);
+        }
+        _manualElements.Clear();
+        HideIfEmpty();
     }
 
     private void ClearSubtitle()
@@ -241,10 +296,7 @@ public partial class OverlayWindow : Window
             RootCanvas.Children.Remove(_subtitleElement);
             _subtitleElement = null;
         }
-        if (RootCanvas.Children.Count == 0)
-        {
-            Hide();
-        }
+        HideIfEmpty();
     }
 
     private void ClearLiveBlocks()
@@ -254,19 +306,18 @@ public partial class OverlayWindow : Window
             RootCanvas.Children.Remove(element);
         }
         _liveElements.Clear();
-        if (RootCanvas.Children.Count == 0)
-        {
-            Hide();
-        }
+        HideIfEmpty();
     }
 
     public void ClearBlocks()
     {
-        _clearTimer.Stop();
+        _manualClearTimer.Stop();
         _subtitleTimer.Stop();
         RootCanvas.Children.Clear();
         _liveElements.Clear();
+        _manualElements.Clear();
         _subtitleElement = null;
+        _hiddenByUser = false;
         Hide();
     }
 
@@ -274,11 +325,16 @@ public partial class OverlayWindow : Window
     {
         if (IsVisible)
         {
+            _hiddenByUser = true;
             Hide();
         }
-        else if (RootCanvas.Children.Count > 0)
+        else
         {
-            Show();
+            _hiddenByUser = false;
+            if (RootCanvas.Children.Count > 0)
+            {
+                Show();
+            }
         }
     }
 }

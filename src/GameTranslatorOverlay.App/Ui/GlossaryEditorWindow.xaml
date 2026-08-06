@@ -48,7 +48,10 @@
       <DataGrid.Columns>
         <DataGridTextColumn Header="Termin (język źródłowy)" Binding="{Binding Source}" Width="2*" />
         <DataGridTextColumn Header="Tłumaczenie" Binding="{Binding Target}" Width="2*" />
-        <DataGridTextColumn Header="Priorytet" Binding="{Binding Priority}" Width="90" />
+        <DataGridTextColumn Header="Priorytet" Binding="{Binding Priority}" Width="70" />
+        <DataGridCheckBoxColumn Header="Aa" Binding="{Binding CaseSensitive}" Width="40"
+                                ToolTipService.ToolTip="Rozróżniaj wielkość liter" />
+        <DataGridTextColumn Header="Notatka" Binding="{Binding Note}" Width="*" />
       </DataGrid.Columns>
     </DataGrid>
   </DockPanel>

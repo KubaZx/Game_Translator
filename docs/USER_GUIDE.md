@@ -86,6 +86,17 @@ Ctrl/Alt/Shift dla liter i cyfr).
 | Nakładka niewidoczna na nagraniu OBS | to celowe — nakładka jest wykluczona z przechwytywania ekranu |
 | Inny problem | zajrzyj do logów: folder danych → `logs\` (logi nie zawierają treści z ekranu) |
 
+## Uwaga o prywatności w trybie live
+
+Dla większości gier tryb live czyta obraz **wyłącznie z okna gry** (PrintWindow).
+Jeżeli gra tego nie wspiera (część tytułów DirectX/Vulkan), aplikacja przechodzi na
+zrzut ekranu w prostokącie okna gry i **wyraźnie o tym ostrzega** w statusie live —
+w takim wypadku fragmenty innych okien nachodzących na grę (np. powiadomienia)
+mogłyby zostać rozpoznane i przetłumaczone. Jeśli to dla Ciebie problem: zamknij
+poufne okna znad gry, korzystaj z trybu ręcznego (zaznaczasz dokładnie ten fragment,
+który chcesz) albo zatrzymaj tryb live. Okna samej aplikacji są zawsze wykluczone
+z przechwytywania.
+
 ## Uwaga o grach online
 
 Program niczego nie wstrzykuje do gry i nie automatyzuje rozgrywki — działa wyłącznie

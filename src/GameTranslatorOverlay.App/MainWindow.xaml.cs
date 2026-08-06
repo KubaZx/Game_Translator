@@ -81,6 +81,15 @@ public partial class MainWindow : Window
         _statusTimer.Tick += OnStatusTimerTick;
     }
 
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        // Główne okno pokazuje ostatnio rozpoznany tekst i tłumaczenia — nie może
+        // trafiać do przechwytywanego obrazu (fallback ekranowy czytałby własne wyniki).
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
+    }
+
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         _loadingUi = true;
@@ -345,7 +354,8 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            // Nowsze żądanie przejęło potok (latest-wins) — nic do pokazania.
+            // Nowsze żądanie albo zmiana ustawień przerwały potok (latest-wins).
+            SetStatus("Tłumaczenie przerwane (nowe żądanie albo zmiana ustawień) — spróbuj ponownie.");
         }
         catch (OcrLanguageNotAvailableException ex)
         {
@@ -563,11 +573,26 @@ public partial class MainWindow : Window
             OcrUpscale = profile?.Ocr?.Upscale ?? _settings.OcrUpscale,
         };
 
-        _liveSession = new LiveTranslationSession(
+        // Wczesne utworzenie HWND nakładki, żeby wiedzieć, czy wykluczenie z capture działa.
+        _overlay.EnsureHandleCreated();
+        if (!_overlay.IsCaptureExclusionActive)
+        {
+            _logger.LogWarning("Wykluczenie nakładki z przechwytywania nie działa na tym systemie — aktywny filtr anty-sprzężeniowy");
+        }
+
+        LiveTranslationSession? session = null;
+        session = new LiveTranslationSession(
             _orchestrator, _ocr, window.Handle, options,
-            update => Dispatcher.BeginInvoke(() => HandleLiveUpdate(update)),
+            update => Dispatcher.BeginInvoke(() =>
+            {
+                // Aktualizacje nieaktywnej (zatrzymanej/wymienionej) sesji nie mogą
+                // malować po nakładce ani ubijać nowej sesji.
+                if (!ReferenceEquals(session, _liveSession)) return;
+                HandleLiveUpdate(update);
+            }),
             _logger);
-        _liveSession.Start();
+        _liveSession = session;
+        session.Start();
 
         BtnStartLive.IsEnabled = false;
         BtnStopLive.IsEnabled = true;
@@ -595,6 +620,11 @@ public partial class MainWindow : Window
                 if (update.SubtitleText is { Length: > 0 } subtitle)
                 {
                     _overlay.ShowSubtitle(subtitle, update.WindowBounds, _settings);
+                }
+                else
+                {
+                    // Okno gry przesunęło się bez nowego tekstu — dosuwamy pasek napisów.
+                    _overlay.RepositionSubtitle(update.WindowBounds);
                 }
             }
             else
