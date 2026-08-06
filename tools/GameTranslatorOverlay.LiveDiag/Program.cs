@@ -92,9 +92,13 @@ internal static class Program
             new WindowsOcrProvider(), new UsageTracker(), loggerFactory);
         orchestrator.Initialize();
 
+        var frameDumpDir = Path.Combine(Path.GetTempPath(), "gto-livediag-frames");
+        Console.WriteLine($"== zrzuty klatek przy whiffach OCR: {frameDumpDir} ==");
+
         var started = DateTime.UtcNow;
         using var session = new LiveTranslationSession(
-            orchestrator, new WindowsOcrProvider(), hwnd, new LiveSessionOptions(),
+            orchestrator, new WindowsOcrProvider(), hwnd,
+            new LiveSessionOptions { DebugFrameDumpDir = frameDumpDir },
             update =>
             {
                 var t = (DateTime.UtcNow - started).TotalSeconds;

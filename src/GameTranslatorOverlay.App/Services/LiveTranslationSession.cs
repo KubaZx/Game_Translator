@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using GameTranslatorOverlay.App.Capture;
 using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.Core.Ocr;
@@ -26,20 +27,46 @@ public sealed class LiveSessionOptions
     public double ChangeThreshold { get; init; } = 0.02;
     public TimeSpan StabilityDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>Przy ciągłych zmianach (animowane tło) przetwarzaj mimo braku stabilizacji.</summary>
-    public TimeSpan ForcedProcessInterval { get; init; } = TimeSpan.FromMilliseconds(1000);
+    /// <summary>
+    /// Przy ciągłych zmianach (animowane tło) przetwarzaj mimo braku stabilizacji.
+    /// W żywej grze 3D szum sceny stale przekracza <see cref="ChangeThreshold"/>,
+    /// więc to ten interwał wyznacza faktyczne tempo tłumaczenia (zmierzono na PoE2).
+    /// </summary>
+    public TimeSpan ForcedProcessInterval { get; init; } = TimeSpan.FromMilliseconds(600);
 
     /// <summary>
     /// Powyżej tego ułamka MOCNO zmienionych komórek scena jest „w ruchu” (gracz
     /// biegnie, kamera płynie) — tłumaczenie czeka, aż obraz się uspokoi.
+    /// Pomiar na żywym PoE2: normalna gra (łącznie z biegiem po izometrycznej mapie)
+    /// nie przekracza ~9% — próg łapie tylko prawdziwe cięcia i przejścia scen.
     /// </summary>
-    public double MotionThreshold { get; init; } = 0.35;
+    public double MotionThreshold { get; init; } = 0.12;
 
     /// <summary>
     /// Bezpiecznik: nawet przy nieprzerwanym „ruchu” (np. powolna panorama z napisami)
     /// po tym czasie klatka i tak zostaje przetworzona.
     /// </summary>
     public TimeSpan MaxMotionPause { get; init; } = TimeSpan.FromMilliseconds(2500);
+
+    /// <summary>
+    /// Ile kolejnych przebiegów OCR może nie widzieć bloku, zanim blok zniknie
+    /// z nakładki. Chroni przed czknięciami Windows OCR (pusty wynik na
+    /// niezmienionej scenie), które bez łaski migają całą nakładką.
+    /// </summary>
+    public int BlockMissGrace { get; init; } = 2;
+
+    /// <summary>
+    /// Ułamek zmienionych komórek, od którego klatkę traktujemy jak cięcie sceny —
+    /// wtedy okres łaski nie obowiązuje i nieobecne bloki znikają od razu.
+    /// </summary>
+    public double SceneCutThreshold { get; init; } = 0.55;
+
+    /// <summary>
+    /// Diagnostyka (tylko narzędzia dev): katalog, do którego trafia PNG klatki,
+    /// gdy pełny przebieg OCR zwróci zero bloków mimo wyświetlanej nakładki.
+    /// W aplikacji zawsze null — nic nie ląduje na dysku.
+    /// </summary>
+    public string? DebugFrameDumpDir { get; init; }
 
     public double OcrUpscale { get; init; }
 }
@@ -61,11 +88,8 @@ public sealed class LiveTranslationSession(
 {
     private const int MaxConsecutiveFailures = 5;
 
-    private sealed record DisplayedBlock(
-        RectPx WindowRelativeBox, string TranslatedText, string NormalizedTranslation, int LineHeight, int ColorRgb);
-
     private readonly CancellationTokenSource _cts = new();
-    private readonly Dictionary<string, DisplayedBlock> _displayed = [];
+    private readonly Dictionary<string, LiveOverlayBlock> _displayed = [];
     private byte[]? _gridBuffer;
     private LuminanceGrid? _previousGrid;
     private RectPx? _pendingDirtyRegion;
@@ -160,14 +184,14 @@ public sealed class LiveTranslationSession(
 
                 try
                 {
-                    var (changedFraction, processed) = await RunCycleAsync(
+                    var (changedFraction, strongFraction, processed) = await RunCycleAsync(
                         stabilizer, clock, cancellationToken).ConfigureAwait(false);
 
                     _consecutiveFailures = 0;
                     if (!processed)
                     {
                         Emit(new LiveUpdate(
-                            $"Live: obserwuję (zmiana {changedFraction:P0}, bloki {_displayed.Count})."),
+                            $"Live: obserwuję (zmiana {changedFraction:P0}, mocne {strongFraction:P0}, bloki {_displayed.Count})."),
                             cancellationToken);
                     }
                 }
@@ -211,7 +235,7 @@ public sealed class LiveTranslationSession(
     }
 
     /// <summary>Jeden cykl: capture → detekcja zmian → (opcjonalnie) OCR + tłumaczenie.</summary>
-    private async Task<(double ChangedFraction, bool Processed)> RunCycleAsync(
+    private async Task<(double ChangedFraction, double StrongFraction, bool Processed)> RunCycleAsync(
         ChangeStabilizer stabilizer,
         Stopwatch clock,
         CancellationToken cancellationToken)
@@ -222,6 +246,7 @@ public sealed class LiveTranslationSession(
         var ocrRegion = default(RectPx);
         var partialOcr = false;
         double changedFraction;
+        double strongFraction;
         long captureMs;
 
         var captureWatch = Stopwatch.StartNew();
@@ -231,7 +256,7 @@ public sealed class LiveTranslationSession(
             captureMs = captureWatch.ElapsedMilliseconds;
             if (bitmap is null)
             {
-                return (0, false);
+                return (0, 0, false);
             }
 
             if (usedScreenFallback && !_warnedAboutScreenFallback)
@@ -250,6 +275,7 @@ public sealed class LiveTranslationSession(
                 ? new ChangeAnalysis(1.0, frameRect)
                 : FrameChangeDetector.Analyze(_previousGrid, grid, bitmap.Width, bitmap.Height);
             changedFraction = analysis.ChangedFraction;
+            strongFraction = analysis.StrongChangedFraction;
             _previousGrid = grid;
 
             var frameChanged = changedFraction > options.ChangeThreshold;
@@ -275,10 +301,10 @@ public sealed class LiveTranslationSession(
                         // Scena odpłynęła — stare bloki są nieaktualne, po ruchu budujemy od zera.
                         _displayed.Clear();
                         Emit(new LiveUpdate(
-                            "Live: ruch na ekranie — wstrzymuję tłumaczenie do ustania ruchu.",
+                            $"Live: ruch na ekranie (mocne {strongFraction:P0}) — wstrzymuję tłumaczenie do ustania ruchu.",
                             HideOverlay: true), cancellationToken);
                     }
-                    return (changedFraction, _motionFrames >= 2);
+                    return (changedFraction, strongFraction, _motionFrames >= 2);
                 }
 
                 // Bezpiecznik: „ruch” trwa podejrzanie długo (panorama z napisami,
@@ -365,9 +391,9 @@ public sealed class LiveTranslationSession(
 
         if (frameForOcr is not null)
         {
-            await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, captureMs, cancellationToken)
+            await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, captureMs, changedFraction, cancellationToken)
                 .ConfigureAwait(false);
-            return (changedFraction, true);
+            return (changedFraction, strongFraction, true);
         }
 
         // Okno przesunęło się bez zmiany treści — przeliczamy pozycje bloków bez OCR.
@@ -379,20 +405,21 @@ public sealed class LiveTranslationSession(
                 BuildDisplayList(bounds),
                 SubtitleText: null,
                 WindowBounds: bounds), cancellationToken);
-            return (changedFraction, true);
+            return (changedFraction, strongFraction, true);
         }
 
-        return (changedFraction, false);
+        return (changedFraction, strongFraction, false);
     }
 
     private async Task ProcessFrameAsync(
         OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr,
-        long captureMs, CancellationToken cancellationToken)
+        long captureMs, double changedFraction, CancellationToken cancellationToken)
     {
         var ocrWatch = Stopwatch.StartNew();
         var ocrResult = await ocrProvider.RecognizeAsync(frame, orchestrator.SourceLanguage, cancellationToken)
             .ConfigureAwait(false);
         var ocrMs = ocrWatch.ElapsedMilliseconds;
+        var rawLineCount = ocrResult.Lines.Count;
 
         var lines = ocrResult.Lines;
         if (Math.Abs(scaleBack - 1.0) > 0.001)
@@ -421,6 +448,27 @@ public sealed class LiveTranslationSession(
             .ToList();
         var keyed = LiveBlockKeyer.AssignKeys(blocks);
 
+        // Diagnostyka whiffów OCR (tylko narzędzia dev): pełny przebieg nie widzi NIC,
+        // choć nakładka ma bloki — zapisujemy klatkę, żeby odróżnić zepsuty capture
+        // od czknięcia silnika OCR.
+        if (options.DebugFrameDumpDir is { Length: > 0 } dumpDir
+            && !partialOcr && keyed.Count == 0 && _displayed.Count >= 3)
+        {
+            try
+            {
+                Directory.CreateDirectory(dumpDir);
+                var dumpPath = Path.Combine(dumpDir, $"whiff-{DateTime.Now:HHmmss-fff}.png");
+                ScreenCapture.SavePng(frame, dumpPath);
+                Emit(new LiveUpdate(
+                    $"Live: diagnostyka — pusty wynik OCR ({rawLineCount} linii surowych), zrzut: {dumpPath}"),
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(ex, "Nie udało się zapisać diagnostycznego zrzutu klatki");
+            }
+        }
+
         // Ochrona przed pętlą sprzężenia (gdy wykluczenie nakładki z przechwytywania
         // zawiedzie): blok, którego tekst jest naszym własnym wyświetlanym tłumaczeniem,
         // nie wraca do tłumaczenia.
@@ -439,7 +487,8 @@ public sealed class LiveTranslationSession(
         if (cancellationToken.IsCancellationRequested) return;
 
         var freshKeys = new List<string>();
-        var next = new Dictionary<string, DisplayedBlock>();
+        var claimedBoxes = new List<RectPx>();
+        var next = new Dictionary<string, LiveOverlayBlock>();
 
         // Przy częściowym OCR bloki spoza przetworzonego regionu zostają bez zmian.
         if (partialOcr)
@@ -497,16 +546,32 @@ public sealed class LiveTranslationSession(
                 }
             }
 
-            next[key] = new DisplayedBlock(
+            next[key] = new LiveOverlayBlock(
                 box,
                 translated,
                 TextNormalizer.Normalize(translated),
                 lineHeight,
                 colorRgb);
+            claimedBoxes.Add(box);
             if (!_displayed.ContainsKey(key))
             {
                 freshKeys.Add(key);
             }
+        }
+
+        // Okres łaski: bloki, których ten przebieg nie widział, nie znikają od razu —
+        // Windows OCR miewa puste przebiegi na niezmienionej scenie, a bez łaski każde
+        // takie czknięcie zdejmowało i przywracało całą nakładkę (miganie).
+        var sceneCut = changedFraction >= options.SceneCutThreshold;
+        var survivors = LiveBlockSurvival.Survivors(
+            _displayed,
+            next.Keys.ToHashSet(StringComparer.Ordinal),
+            claimedBoxes,
+            sceneCut,
+            options.BlockMissGrace);
+        foreach (var (key, block) in survivors)
+        {
+            next[key] = block;
         }
 
         var subtitle = freshKeys.Count > 0
@@ -530,8 +595,9 @@ public sealed class LiveTranslationSession(
 
         var firstError = outcomes.FirstOrDefault(static o => o.ErrorMessage is not null)?.ErrorMessage;
         var scope = partialOcr ? " • wycinek" : string.Empty;
+        var retained = survivors.Count > 0 ? $" • podtrzymane {survivors.Count}" : string.Empty;
         var status = firstError
-            ?? $"Live: {next.Count} bloków ({freshKeys.Count} nowych) • klatka {captureMs} ms • OCR {ocrMs} ms • tłum. {translateMs} ms{scope}";
+            ?? $"Live: {next.Count} bloków ({freshKeys.Count} nowych{retained}) • klatka {captureMs} ms • OCR {ocrMs} ms/{rawLineCount} linii • tłum. {translateMs} ms{scope}";
 
         Emit(new LiveUpdate(status, BuildDisplayList(bounds), subtitle, bounds), cancellationToken);
     }

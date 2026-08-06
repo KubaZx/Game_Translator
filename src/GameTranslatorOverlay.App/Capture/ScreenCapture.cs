@@ -130,6 +130,27 @@ public static class ScreenCapture
         }
     }
 
+    /// <summary>Zapis klatki OCR do PNG — wyłącznie diagnostyka narzędzi dev (LiveDiag).</summary>
+    public static void SavePng(OcrBitmap frame, string path)
+    {
+        using var bitmap = new Bitmap(frame.Width, frame.Height, PixelFormat.Format32bppArgb);
+        var rect = new Rectangle(0, 0, frame.Width, frame.Height);
+        var data = bitmap.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            for (var row = 0; row < frame.Height; row++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(
+                    frame.PixelsBgra32, row * frame.Stride, data.Scan0 + row * data.Stride, frame.Width * 4);
+            }
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+        bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+    }
+
     public static Bitmap Rescale(Bitmap source, double factor)
     {
         var width = Math.Max(1, (int)Math.Round(source.Width * factor));
