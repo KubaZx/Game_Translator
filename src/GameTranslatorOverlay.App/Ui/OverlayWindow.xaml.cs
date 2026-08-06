@@ -288,7 +288,11 @@ public partial class OverlayWindow : Window
 
         foreach (var block in blocks)
         {
-            if (_liveElements.TryGetValue(block.Key, out var element))
+            // Element odtwarzamy tylko przy realnej zmianie rozmiaru oryginału —
+            // drobne wahania OCR wygładza histereza po stronie sesji.
+            if (_liveElements.TryGetValue(block.Key, out var element)
+                && element.Tag is int previousLineHeight
+                && previousLineHeight == block.LineHeight)
             {
                 if (element.Child is TextBlock textBlock && textBlock.Text != block.TranslatedText)
                 {
@@ -297,7 +301,12 @@ public partial class OverlayWindow : Window
             }
             else
             {
+                if (element is not null)
+                {
+                    RootCanvas.Children.Remove(element);
+                }
                 element = CreateBlockElement(block.TranslatedText, settings, monitor.Scale, block.LineHeight, block.ColorRgb);
+                element.Tag = block.LineHeight;
                 _liveElements[block.Key] = element;
                 RootCanvas.Children.Add(element);
             }

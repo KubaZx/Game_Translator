@@ -257,6 +257,8 @@ public sealed class LiveTranslationSession(
                 stabilizer.ForceDirty(clock.Elapsed);
                 if (_motionFrames == 2)
                 {
+                    // Scena odpłynęła — stare bloki są nieaktualne, po ruchu budujemy od zera.
+                    _displayed.Clear();
                     Emit(new LiveUpdate(
                         "Live: ruch na ekranie — wstrzymuję tłumaczenie do ustania ruchu.",
                         HideOverlay: true), cancellationToken);
@@ -443,11 +445,34 @@ public sealed class LiveTranslationSession(
                 key += "'";
             }
 
+            var lineHeight = TextBlockMetrics.MedianLineHeight(keyed[i].Block);
+            if (_displayed.TryGetValue(key, out var previous))
+            {
+                // Histereza stylu: kolejne przebiegi OCR pływają o piksele (wycinek ×2
+                // vs pełna klatka, animacje pod tekstem) — nie przebudowujemy wyglądu
+                // bloku, dopóki zmiana nie jest znacząca. Koniec z „oddychającą” czcionką.
+                if (Math.Abs(previous.LineHeight - lineHeight) <= Math.Max(2, previous.LineHeight / 5))
+                {
+                    lineHeight = previous.LineHeight;
+                }
+                if (Math.Abs(previous.WindowRelativeBox.X - box.X) <= 6
+                    && Math.Abs(previous.WindowRelativeBox.Y - box.Y) <= 6
+                    && Math.Abs(previous.WindowRelativeBox.Width - box.Width) <= 12
+                    && Math.Abs(previous.WindowRelativeBox.Height - box.Height) <= 12)
+                {
+                    box = previous.WindowRelativeBox;
+                }
+                if (previous.ColorRgb >= 0)
+                {
+                    colorRgb = previous.ColorRgb;
+                }
+            }
+
             next[key] = new DisplayedBlock(
                 box,
                 translated,
                 TextNormalizer.Normalize(translated),
-                TextBlockMetrics.MedianLineHeight(keyed[i].Block),
+                lineHeight,
                 colorRgb);
             if (!_displayed.ContainsKey(key))
             {
