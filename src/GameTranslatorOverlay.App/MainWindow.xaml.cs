@@ -625,7 +625,9 @@ public partial class MainWindow : Window
         var options = new LiveSessionOptions
         {
             Fps = profile?.ChangeDetection?.Fps ?? 6,
-            ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.02,
+            // Domyślnie 0: każda mocna zmiana komórki budzi przetwarzanie — krótkie
+            // linijki dialogów w grach ze statycznym obrazem zmieniają ledwie kilka komórek.
+            ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.0,
             OcrUpscale = profile?.Ocr?.Upscale ?? _settings.OcrUpscale,
         };
 

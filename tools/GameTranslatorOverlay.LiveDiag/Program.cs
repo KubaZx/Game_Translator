@@ -153,6 +153,17 @@ internal static class Program
         Canvas.SetLeft(body, 60);
         Canvas.SetTop(body, 170);
 
+        // Malutkie pole tekstu (kilka komórek siatki) — test czułości na statycznej
+        // scenie: krótka zmiana, której dawny próg 2% siatki w ogóle nie zauważał.
+        var tiny = new TextBlock
+        {
+            Text = "Gold 15",
+            FontSize = 18,
+            Foreground = Brushes.LightGreen,
+        };
+        Canvas.SetLeft(tiny, 700);
+        Canvas.SetTop(tiny, 80);
+
         // Jednolita plama nie ruszała detektora (wnętrze ma identyczną jasność klatka
         // w klatkę — zmieniały się tylko krawędzie, ~2,5% komórek). Gradient sprawia,
         // że przesuw zmienia jasność KAŻDEJ komórki pod prostokątem, jak prawdziwy
@@ -180,6 +191,7 @@ internal static class Program
         canvas.Children.Add(ambient);
         canvas.Children.Add(headline);
         canvas.Children.Add(body);
+        canvas.Children.Add(tiny);
         canvas.Children.Add(mover);
 
         var window = new Window
@@ -216,6 +228,11 @@ internal static class Program
                 phraseIndex = (phraseIndex + 1) % phrases.Length;
                 headline.Text = phrases[phraseIndex];
             }
+
+            // Zmiany malutkiego pola w momentach BEZ zmiany nagłówka — samotna,
+            // kilkukomórkowa zmiana musi obudzić przetwarzanie sama z siebie.
+            if (t is > 11 and < 12) tiny.Text = "Gold 350";
+            else if (t is > 20 and < 21) tiny.Text = "Gold 1200";
 
             if (t is > 24 and < 30)
             {

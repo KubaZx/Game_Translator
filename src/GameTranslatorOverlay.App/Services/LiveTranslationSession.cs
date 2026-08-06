@@ -24,7 +24,16 @@ public sealed record LiveUpdate(
 public sealed class LiveSessionOptions
 {
     public double Fps { get; init; } = 6;
-    public double ChangeThreshold { get; init; } = 0.02;
+
+    /// <summary>
+    /// Ułamek zmienionych komórek, od którego klatka liczy się jako „zmieniona”.
+    /// Domyślnie 0 — KAŻDA komórka ze zmianą ponad próg jasności budzi przetwarzanie:
+    /// w grze ze statycznym obrazem krótka linijka dialogu zmienia ledwie 2–5 komórek
+    /// i przy dawnym progu 0.02 (26 komórek) w ogóle nie była zauważana.
+    /// Filtrem szumu jest próg jasności per komórka (cellDelta), nie ułamek komórek.
+    /// </summary>
+    public double ChangeThreshold { get; init; }
+
     public TimeSpan StabilityDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
@@ -62,6 +71,20 @@ public sealed class LiveSessionOptions
     public double SceneCutThreshold { get; init; } = 0.55;
 
     /// <summary>
+    /// Górna granica ponownych przebiegów po podejrzeniu czknięcia OCR (pusty/uszczuplony
+    /// wynik na scenie, która wg detektora się nie zmieniła). W grze ze statycznym obrazem
+    /// nic innego nie obudziłoby pętli — bez powtórki przegapiona kwestia przepada na zawsze.
+    /// </summary>
+    public int MaxWhiffRetries { get; init; } = 2;
+
+    /// <summary>
+    /// Bezpiecznik ostateczny dla scen bez ruchu: pełny przebieg OCR co ten interwał,
+    /// nawet gdy detektor zmian milczy (łapie zmiany zbyt subtelne dla siatki jasności
+    /// oraz czknięcia OCR, które przetrwały powtórki). Zero = wyłączony.
+    /// </summary>
+    public TimeSpan StaticRescanInterval { get; init; } = TimeSpan.FromSeconds(4);
+
+    /// <summary>
     /// Diagnostyka (tylko narzędzia dev): katalog, do którego trafia PNG klatki,
     /// gdy pełny przebieg OCR zwróci zero bloków mimo wyświetlanej nakładki.
     /// W aplikacji zawsze null — nic nie ląduje na dysku.
@@ -94,6 +117,9 @@ public sealed class LiveTranslationSession(
     private LuminanceGrid? _previousGrid;
     private RectPx? _pendingDirtyRegion;
     private double _peakChangedFraction;
+    private TimeSpan _lastProcessedAt;
+    private int _whiffRetries;
+    private bool _whiffRetryRequested;
     private RectPx _lastEmittedBounds;
     private bool _warnedAboutScreenFallback;
     private int _consecutiveFailures;
@@ -340,7 +366,13 @@ public sealed class LiveTranslationSession(
                 _pendingDirtyRegion = _pendingDirtyRegion?.Union(changedNow) ?? changedNow;
             }
 
-            var shouldProcess = stabilizer.Update(frameChanged, clock.Elapsed) || forceProcess;
+            // Bezpiecznik scen statycznych: bez niego zmiana zbyt subtelna dla siatki
+            // (albo czknięcie OCR bez kolejnych zmian obrazu) nigdy nie doczekałaby się
+            // ponownego przebiegu — w grze bez szumu tła pętla potrafi milczeć minutami.
+            var heartbeatDue = options.StaticRescanInterval > TimeSpan.Zero
+                && clock.Elapsed - _lastProcessedAt >= options.StaticRescanInterval;
+
+            var shouldProcess = stabilizer.Update(frameChanged, clock.Elapsed) || forceProcess || heartbeatDue;
             if (forceProcess)
             {
                 stabilizer.Reset();
@@ -418,8 +450,18 @@ public sealed class LiveTranslationSession(
         {
             var peakChanged = _peakChangedFraction;
             _peakChangedFraction = 0;
+            _lastProcessedAt = clock.Elapsed;
             await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, captureMs, peakChanged, cancellationToken)
                 .ConfigureAwait(false);
+
+            // Podejrzenie czknięcia OCR: na statycznej scenie tylko wymuszona powtórka
+            // może odzyskać przegapiony tekst (ograniczona licznikiem, żeby pusty ekran
+            // nie kręcił OCR w kółko).
+            if (_whiffRetryRequested)
+            {
+                _whiffRetryRequested = false;
+                stabilizer.ForceDirty(clock.Elapsed);
+            }
             return (changedFraction, strongFraction, true);
         }
 
@@ -602,6 +644,21 @@ public sealed class LiveTranslationSession(
         foreach (var (key, block) in survivors)
         {
             next[key] = block;
+        }
+
+        // Podejrzenie czknięcia OCR: pełny przebieg nic nie widzi mimo bloków na ekranie
+        // albo łaska musiała podtrzymywać zgubione bloki. Na scenie statycznej żadna
+        // kolejna zmiana obrazu nie nadejdzie — pętla sama prosi o powtórkę.
+        var whiffSuspected = survivors.Count > 0
+            || (!partialOcr && keyed.Count == 0 && rawLineCount == 0 && !sceneCut);
+        if (whiffSuspected && _whiffRetries < options.MaxWhiffRetries)
+        {
+            _whiffRetries++;
+            _whiffRetryRequested = true;
+        }
+        else if (!whiffSuspected)
+        {
+            _whiffRetries = 0;
         }
 
         var subtitle = freshKeys.Count > 0

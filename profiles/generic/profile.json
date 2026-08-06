@@ -9,6 +9,6 @@
   "sourceLanguage": "en",
   "recommendedMode": "manual-region",
   "ocr": { "upscale": 2.0, "minTextHeight": 10 },
-  "changeDetection": { "threshold": 0.02, "fps": 4 },
+  "changeDetection": { "threshold": 0.0, "fps": 6 },
   "minAppVersion": "0.1.0"
 }
