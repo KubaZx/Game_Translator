@@ -31,10 +31,24 @@ public partial class App : Application
 {
     private IHost? _host;
     private AppPaths? _paths;
+    private Mutex? _singleInstanceMutex;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Druga kopia aplikacji dublowałaby skróty globalne, nakładkę i dostęp do bazy —
+        // pilnujemy pojedynczej instancji.
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, @"Local\GameTranslatorOverlay.SingleInstance", out var isFirstInstance);
+        if (!isFirstInstance)
+        {
+            MessageBox.Show(
+                "GameTranslatorOverlay już działa.\n\nSprawdź ikonę „GT” w zasobniku systemowym (przy zegarze) — " +
+                "kliknij ją, aby przywrócić okno.",
+                "GameTranslatorOverlay", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown(0);
+            return;
+        }
 
         _paths = new AppPaths();
         _paths.EnsureCreated();
@@ -135,6 +149,7 @@ public partial class App : Application
         finally
         {
             Log.CloseAndFlush();
+            _singleInstanceMutex?.Dispose();
         }
         base.OnExit(e);
     }
