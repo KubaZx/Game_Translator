@@ -2,6 +2,42 @@
 
 Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
+## [0.2.2] — 2026-09-04
+
+Runda jakości trybu live strojona na żywych grach (Path of Exile 2, Escape Academy).
+
+### Działa lepiej
+
+- Jeden silnik OCR na język (zamiast tworzenia go co przebieg) i **detektor zmian odporny
+  na szum tła**: migotanie mgły/pogody nie liczy się jako zmiana — region OCR obejmuje tylko
+  nowy tekst, reakcja na nowy napis ~0,1–0,4 s, na spokojnej scenie zero pracy.
+- **Kontekst DeepL**: teksty z tej samej klatki jako kontekst (nietłumaczone, niebilingowane) —
+  krótkie kwestie tłumaczone z sensem sąsiednich bloków.
+- **Stabilizacja odczytów** nad ruchomą/zajętą grafiką: podobny lub brudniejszy odczyt przejmuje
+  tłumaczenie istniejącego bloku zamiast tworzyć nowy; ocena jakości odczytu (symbole,
+  wielkie litery w środku słowa, cyfry w słowach) — śmieć nie wypiera poprawnego tekstu.
+- Pamięć zgubionych bloków (10 s), fragmenty jednego wiersza łączone spacją, linie o różnej
+  wysokości nie sklejają się (podpowiedź „Tab" vs data), filtr artefaktów z ikon (`sc.@ß`).
+- Najechany element menu (rośnie w grze) skaluje dymek w miejscu — bez odtwarzania i skoków;
+  zmiana tła pod napisem (hover) przelicza kolory dopiero po dwóch zgodnych przebiegach.
+- Deterministyczne dopasowanie rozmiaru czcionki (koniec naprzemiennego duży/mały).
+
+### Wygląda lepiej
+
+- Łatka w trybie zakrywania to **rozmyta kopia tła** spod napisu, wyłącznie pod boxem oryginału,
+  z miękkimi krawędziami; dłuższe tłumaczenie wystaje poza nią czytelne dzięki konturowi.
+- **Kontur czcionki w kolorze z gry** (próbkowanie trzech tonów: tło / tekst / obwódka).
+- Bloki wieloliniowe: wiersze tłumaczenia na wysokości wierszy oryginału.
+- Zakrywanie zawsze w rozmiarze oryginału (ręczny rozmiar dotyczy panelu/napisów), czcionka
+  kurczy się najwyżej do 85% oryginału.
+- Odświeżone okno aplikacji: spójny ciemny motyw, wskaźnik stanu live.
+
+### Narzędzia dev
+
+- `OcrLab` (zrzut klatki + warianty preprocessingu OCR), manifest PerMonitorV2 dla narzędzi
+  (bez niego kadr z okna 4K@150% był ucięty), tryb diagnostyczny aplikacji
+  (`GTO_AUTOLIVE`, `GTO_DIAG_CAPTURABLE`).
+
 ## [0.2.1] — 2026-08-06
 
 ### Gry ze statycznym obrazem (dialogi „co 2 kwestie")
