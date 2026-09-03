@@ -11,7 +11,8 @@ using Microsoft.Extensions.Logging;
 namespace GameTranslatorOverlay.App.Services;
 
 public sealed record LiveDisplayBlock(
-    string Key, RectPx ScreenBox, string TranslatedText, int LineHeight = 0, int ColorRgb = -1, int BackgroundRgb = -1, int OutlineRgb = -1);
+    string Key, RectPx ScreenBox, string TranslatedText, int LineHeight = 0, int ColorRgb = -1,
+    int BackgroundRgb = -1, int OutlineRgb = -1, BackgroundTexture? Texture = null);
 
 public sealed record LiveUpdate(
     string StatusLine,
@@ -161,7 +162,8 @@ public sealed class LiveTranslationSession(
                 kv.Value.LineHeight,
                 kv.Value.ColorRgb,
                 kv.Value.BackgroundRgb,
-                kv.Value.OutlineRgb))
+                kv.Value.OutlineRgb,
+                kv.Value.Texture))
             .ToList();
 
     private async Task LoopAsync(CancellationToken cancellationToken)
@@ -595,8 +597,10 @@ public sealed class LiveTranslationSession(
                 (int)((box.Y - ocrRegion.Y) / scaleBack),
                 Math.Max(1, (int)(box.Width / scaleBack)),
                 Math.Max(1, (int)(box.Height / scaleBack)));
-            var (colorRgb, backgroundRgb, outlineRgb) = BlockColorSampler.SampleColors(
+            var sampled = BlockColorSampler.SampleColors(
                 frame.PixelsBgra32, frame.Width, frame.Height, frame.Stride, sampleBox);
+            var (colorRgb, backgroundRgb, outlineRgb) = sampled;
+            var texture = sampled.Texture;
 
             var key = keyed[i].Key;
             while (next.ContainsKey(key))
@@ -633,6 +637,10 @@ public sealed class LiveTranslationSession(
                 {
                     outlineRgb = previous.OutlineRgb;
                 }
+                if (previous.Texture is not null)
+                {
+                    texture = previous.Texture;
+                }
             }
 
             next[key] = new LiveOverlayBlock(
@@ -642,7 +650,8 @@ public sealed class LiveTranslationSession(
                 lineHeight,
                 colorRgb,
                 backgroundRgb,
-                outlineRgb);
+                outlineRgb,
+                Texture: texture);
             claimedBoxes.Add(box);
             if (!_displayed.ContainsKey(key))
             {

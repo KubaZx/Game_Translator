@@ -2,10 +2,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Vision;
 using GameTranslatorOverlay.Infrastructure.Settings;
 
 namespace GameTranslatorOverlay.App.Ui;
@@ -103,9 +105,30 @@ public partial class OverlayWindow : Window
     /// </summary>
     private static double ResolveFontSize(AppSettings settings, int lineHeightPx, double scale)
     {
-        if (settings.OverlayFontSize >= 9) return settings.OverlayFontSize;
-        if (lineHeightPx > 0) return Math.Clamp(lineHeightPx / scale * 0.75, 9, 48);
+        // Zakrywanie ZASTĘPUJE napis gry — rozmiar musi wynikać z oryginału, inaczej
+        // ręczne „15” zmienia 60-pikselowy tytuł w drobny druk w rogu wielkiej łatki.
+        // Ręczny rozmiar obowiązuje w panelu, pod oryginałem i w napisach.
+        if (settings.OverlayFontSize >= 9 && !(IsCoverPlacement(settings) && lineHeightPx > 0))
+        {
+            return settings.OverlayFontSize;
+        }
+        if (lineHeightPx > 0) return Math.Clamp(lineHeightPx / scale * 0.75, 9, 72);
         return 15;
+    }
+
+    /// <summary>Łatka jako rozmyta kopia tła spod tekstu (mini-siatka rozciągnięta z interpolacją).</summary>
+    private static Brush CreateTextureBrush(BackgroundTexture texture, double opacity)
+    {
+        var bitmap = BitmapSource.Create(
+            texture.Columns, texture.Rows, 96, 96, PixelFormats.Rgb24, null, texture.Rgb, texture.Columns * 3);
+        bitmap.Freeze();
+        var brush = new ImageBrush(bitmap)
+        {
+            Stretch = Stretch.Fill,
+            Opacity = opacity,
+        };
+        brush.Freeze();
+        return brush;
     }
 
     private static double Luminance(int rgb) =>
@@ -216,21 +239,25 @@ public partial class OverlayWindow : Window
     }
 
     private Border CreateBlockElement(
-        string text, AppSettings settings, double scale, int lineHeightPx, int colorRgb = -1, int backgroundRgb = -1, int outlineRgb = -1)
+        string text, AppSettings settings, double scale, int lineHeightPx, int colorRgb = -1, int backgroundRgb = -1,
+        int outlineRgb = -1, BackgroundTexture? texture = null)
     {
         var cover = IsCoverPlacement(settings);
-        var sampledCover = cover && !IsBackgroundless(settings) && backgroundRgb >= 0;
+        var sampledCover = cover && !IsBackgroundless(settings) && (backgroundRgb >= 0 || texture is not null);
 
         Brush background;
         if (IsBackgroundless(settings))
         {
             background = Brushes.Transparent;
         }
+        else if (sampledCover && texture is not null)
+        {
+            // Wtapianie: łatka to rozmyta kopia tła spod tekstu — na grafice podąża za
+            // gradientem, na oknie dialogowym jest płaska; oryginał znika pod nią.
+            background = CreateTextureBrush(texture, 1.0);
+        }
         else if (sampledCover)
         {
-            // Wtapianie: łatka maluje się PRAWDZIWYM kolorem tła gry spod tekstu —
-            // na oknie dialogowym/tooltipie znika jak natywny napis, zamiast świecić
-            // obcym granatowym prostokątem.
             background = new SolidColorBrush(Color.FromArgb(
                 (byte)Math.Clamp(Math.Max(settings.OverlayBackgroundOpacity, 0.97) * 255, 0, 255),
                 (byte)(backgroundRgb >> 16), (byte)(backgroundRgb >> 8), (byte)backgroundRgb));
@@ -272,6 +299,9 @@ public partial class OverlayWindow : Window
             Padding = IsBackgroundless(settings) || sampledCover ? new Thickness(0) : new Thickness(7, 4, 7, 4),
             Child = content,
         };
+
+        // Mini-siatka tła rozciąga się z interpolacją liniową — gradient, nie kafelki.
+        RenderOptions.SetBitmapScalingMode(element, BitmapScalingMode.Linear);
 
         // Płynne pojawianie zamiast wyskakiwania.
         element.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
@@ -434,7 +464,7 @@ public partial class OverlayWindow : Window
                 }
                 element = CreateBlockElement(
                     block.TranslatedText, settings, monitor.Scale, block.LineHeight,
-                    block.ColorRgb, block.BackgroundRgb, block.OutlineRgb);
+                    block.ColorRgb, block.BackgroundRgb, block.OutlineRgb, block.Texture);
                 element.Tag = block.LineHeight;
                 _liveElements[block.Key] = element;
                 RootCanvas.Children.Add(element);

@@ -215,9 +215,18 @@ public static class TextColorSampler
 /// jak i ciemnego tekstu na jasnym oknie (visual novele), gdzie sampler „tylko
 /// jasnych pikseli” brał tło za tekst.
 /// </summary>
+/// <summary>
+/// Mini-siatka kolorów tła spod bloku (RGB, wiersz po wierszu). Rozciągnięta z interpolacją
+/// daje rozmytą kopię tła — na grafice (zachód słońca za napisem) wtapia łatkę o wiele
+/// lepiej niż jeden uśredniony kolor, a na płaskim oknie dialogowym jest po prostu płaska.
+/// </summary>
+public sealed record BackgroundTexture(byte[] Rgb, int Columns, int Rows);
+
 public sealed record BlockColors(int TextRgb, int BackgroundRgb, int OutlineRgb = -1)
 {
     public static readonly BlockColors Unknown = new(-1, -1, -1);
+
+    public BackgroundTexture? Texture { get; init; }
 }
 
 public static class BlockColorSampler
@@ -226,20 +235,31 @@ public static class BlockColorSampler
     private const int FullResolutionArea = 60_000;
 
     /// <summary>
+    /// Pierścień wokół boxu OCR: tam na pewno nie ma liter, więc to najpewniejsza próbka
+    /// tła — gruby kontur glifów potrafi liczebnie „wygrać” z tłem wewnątrz samego boxu.
+    /// </summary>
+    public const int RingMarginPx = 4;
+
+    /// <summary>
     /// Zwraca kolory bloku jako 0xRRGGBB (-1 = nieustalony): tekst, tło oraz obwódka —
     /// czcionki gier prawie zawsze mają ciemny (lub jasny) kontur wokół glifów i to on
-    /// robi „natywność” tłumaczenia. Kontur to piksele sąsiadujące z pikselami tekstu,
-    /// które wyraźnie odstają od tła w stronę przeciwną niż tekst.
+    /// robi „natywność” tłumaczenia. Kontur to piksele sąsiadujące z pikselami tekstu.
+    /// Dodatkowo <see cref="BlockColors.Texture"/> — mini-siatka tła spod tekstu.
     /// </summary>
     public static BlockColors SampleColors(
         byte[] pixelsBgra32, int width, int height, int stride,
         GameTranslatorOverlay.Core.Ocr.RectPx box)
     {
-        var x0 = Math.Max(0, box.X);
-        var y0 = Math.Max(0, box.Y);
-        var x1 = Math.Min(width, box.Right);
-        var y1 = Math.Min(height, box.Bottom);
-        if (x1 <= x0 || y1 <= y0) return BlockColors.Unknown;
+        var innerX0 = Math.Max(0, box.X);
+        var innerY0 = Math.Max(0, box.Y);
+        var innerX1 = Math.Min(width, box.Right);
+        var innerY1 = Math.Min(height, box.Bottom);
+        if (innerX1 <= innerX0 || innerY1 <= innerY0) return BlockColors.Unknown;
+
+        var x0 = Math.Max(0, innerX0 - RingMarginPx);
+        var y0 = Math.Max(0, innerY0 - RingMarginPx);
+        var x1 = Math.Min(width, innerX1 + RingMarginPx);
+        var y1 = Math.Min(height, innerY1 + RingMarginPx);
 
         var step = (long)(x1 - x0) * (y1 - y0) > FullResolutionArea ? 2 : 1;
         var cols = (x1 - x0 + step - 1) / step;
@@ -251,6 +271,7 @@ public static class BlockColorSampler
         var rs = new byte[count];
         var gs = new byte[count];
         var bs = new byte[count];
+        var inner = new bool[count];
         var i = 0;
         for (var y = y0; y < y1; y += step)
         {
@@ -265,6 +286,7 @@ public static class BlockColorSampler
                 rs[i] = r;
                 gs[i] = g;
                 bs[i] = b;
+                inner[i] = x >= innerX0 && x < innerX1 && y >= innerY0 && y < innerY1;
                 i++;
             }
         }
@@ -274,7 +296,11 @@ public static class BlockColorSampler
         if (max - min < 30f)
         {
             // Płaski wycinek bez kontrastu — tekstu nie da się odróżnić, tło = średnia.
-            return new BlockColors(-1, AverageRgb(rs, gs, bs, lums, _ => true));
+            var flat = new bool[count];
+            return new BlockColors(-1, AverageRgb(rs, gs, bs, lums, _ => true))
+            {
+                Texture = BuildTexture(rs, gs, bs, flat, cols, rows),
+            };
         }
 
         // 3-średnie po jasności (tło / tekst / ewentualna obwódka). Dwa klastry
@@ -306,13 +332,34 @@ public static class BlockColorSampler
             }
         }
 
-        var backgroundCluster = Array.IndexOf(counts, counts.Max());
-        var others = Enumerable.Range(0, 3).Where(c => c != backgroundCluster).OrderByDescending(c => counts[c]).ToArray();
+        // Tło = klaster dominujący w PIERŚCIENIU wokół boxu (bez liter); gdy pierścienia
+        // brak (box przy krawędzi klatki), zapasowo największy klaster w ogóle.
+        var ringCounts = new int[3];
+        var innerCounts = new int[3];
+        for (var k = 0; k < count; k++)
+        {
+            if (inner[k]) innerCounts[cluster[k]]++;
+            else ringCounts[cluster[k]]++;
+        }
+        var ringTotal = ringCounts.Sum();
+        var backgroundCluster = ringTotal >= 16
+            ? Array.IndexOf(ringCounts, ringCounts.Max())
+            : Array.IndexOf(counts, counts.Max());
+
+        // Tekst = liczniejszy z pozostałych klastrów WEWNĄTRZ boxu, kontur = mniej liczny.
+        var others = Enumerable.Range(0, 3).Where(c => c != backgroundCluster).OrderByDescending(c => innerCounts[c]).ToArray();
         var textCluster = others[0];
         var outlineCluster = others[1];
 
         var minimumCluster = Math.Max(4, count / 50);
-        if (counts[textCluster] < minimumCluster) return new BlockColors(-1, AverageRgb(rs, gs, bs, lums, _ => true));
+        if (innerCounts[textCluster] < minimumCluster)
+        {
+            var noText = new bool[count];
+            return new BlockColors(-1, AverageRgb(rs, gs, bs, lums, _ => true))
+            {
+                Texture = BuildTexture(rs, gs, bs, noText, cols, rows),
+            };
+        }
 
         var isText = new bool[count];
         for (var k = 0; k < count; k++) isText[k] = cluster[k] == textCluster;
@@ -322,7 +369,118 @@ public static class BlockColorSampler
         var outlineRgb = counts[outlineCluster] >= Math.Max(8, minimumCluster)
             ? SampleOutline(rs, gs, bs, lums, isText, cluster, outlineCluster, cols, rows)
             : -1;
-        return new BlockColors(textRgb, backgroundRgb, outlineRgb);
+
+        // Do tekstury tła wykluczamy litery i wszystko, co ich dotyka (kontur, antyaliasing).
+        var excluded = DilateMask(isText, cols, rows, iterations: 2);
+        if (outlineRgb >= 0)
+        {
+            for (var k = 0; k < count; k++) excluded[k] |= cluster[k] == outlineCluster;
+        }
+
+        return new BlockColors(textRgb, backgroundRgb, outlineRgb)
+        {
+            Texture = BuildTexture(rs, gs, bs, excluded, cols, rows),
+        };
+    }
+
+    private static bool[] DilateMask(bool[] mask, int cols, int rows, int iterations)
+    {
+        var current = (bool[])mask.Clone();
+        for (var it = 0; it < iterations; it++)
+        {
+            var next = (bool[])current.Clone();
+            for (var row = 0; row < rows; row++)
+            {
+                for (var col = 0; col < cols; col++)
+                {
+                    if (!current[row * cols + col] && TouchesText(current, cols, rows, col, row))
+                    {
+                        next[row * cols + col] = true;
+                    }
+                }
+            }
+            current = next;
+        }
+        return current;
+    }
+
+    /// <summary>
+    /// Siatka średnich kolorów tła (do 12×4 komórek). Komórka bez pikseli tła (cała pod
+    /// literami) dziedziczy kolor najbliższej wypełnionej komórki w wierszu, a w ostateczności
+    /// średnią całej siatki — łatka nie może mieć dziur.
+    /// </summary>
+    private static BackgroundTexture BuildTexture(byte[] rs, byte[] gs, byte[] bs, bool[] excluded, int cols, int rows)
+    {
+        var textureCols = Math.Clamp(cols / 12, 2, 12);
+        var textureRows = Math.Clamp(rows / 8, 1, 4);
+        var sums = new long[textureCols * textureRows * 3];
+        var counts = new int[textureCols * textureRows];
+
+        for (var row = 0; row < rows; row++)
+        {
+            var tr = Math.Min(textureRows - 1, row * textureRows / rows);
+            for (var col = 0; col < cols; col++)
+            {
+                var index = row * cols + col;
+                if (excluded[index]) continue;
+                var tc = Math.Min(textureCols - 1, col * textureCols / cols);
+                var cell = tr * textureCols + tc;
+                sums[cell * 3] += rs[index];
+                sums[cell * 3 + 1] += gs[index];
+                sums[cell * 3 + 2] += bs[index];
+                counts[cell]++;
+            }
+        }
+
+        var rgb = new byte[textureCols * textureRows * 3];
+        var filled = new bool[textureCols * textureRows];
+        long totalR = 0, totalG = 0, totalB = 0;
+        var totalCount = 0;
+        for (var cell = 0; cell < counts.Length; cell++)
+        {
+            if (counts[cell] == 0) continue;
+            rgb[cell * 3] = (byte)(sums[cell * 3] / counts[cell]);
+            rgb[cell * 3 + 1] = (byte)(sums[cell * 3 + 1] / counts[cell]);
+            rgb[cell * 3 + 2] = (byte)(sums[cell * 3 + 2] / counts[cell]);
+            filled[cell] = true;
+            totalR += sums[cell * 3];
+            totalG += sums[cell * 3 + 1];
+            totalB += sums[cell * 3 + 2];
+            totalCount += counts[cell];
+        }
+
+        var fallback = totalCount > 0
+            ? new[] { (byte)(totalR / totalCount), (byte)(totalG / totalCount), (byte)(totalB / totalCount) }
+            : new byte[] { 0x0B, 0x0E, 0x11 };
+
+        for (var tr = 0; tr < textureRows; tr++)
+        {
+            for (var tc = 0; tc < textureCols; tc++)
+            {
+                var cell = tr * textureCols + tc;
+                if (filled[cell]) continue;
+                var source = -1;
+                for (var distance = 1; distance < textureCols && source < 0; distance++)
+                {
+                    if (tc - distance >= 0 && filled[tr * textureCols + tc - distance]) source = tr * textureCols + tc - distance;
+                    else if (tc + distance < textureCols && filled[tr * textureCols + tc + distance]) source = tr * textureCols + tc + distance;
+                }
+                if (source >= 0)
+                {
+                    rgb[cell * 3] = rgb[source * 3];
+                    rgb[cell * 3 + 1] = rgb[source * 3 + 1];
+                    rgb[cell * 3 + 2] = rgb[source * 3 + 2];
+                }
+                else
+                {
+                    rgb[cell * 3] = fallback[0];
+                    rgb[cell * 3 + 1] = fallback[1];
+                    rgb[cell * 3 + 2] = fallback[2];
+                }
+            }
+        }
+
+        return new BackgroundTexture(rgb, textureCols, textureRows);
     }
 
     /// <summary>
