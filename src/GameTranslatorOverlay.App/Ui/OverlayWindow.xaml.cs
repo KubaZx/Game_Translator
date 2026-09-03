@@ -25,6 +25,7 @@ public partial class OverlayWindow : Window
     private readonly Dictionary<string, Border> _liveElements = [];
     private readonly Dictionary<string, BackgroundTexture> _liveTextures = [];
     private readonly Dictionary<string, (int Color, int Background, int Outline)> _liveColors = [];
+    private readonly Dictionary<string, string> _liveFit = [];
     private readonly List<Border> _manualElements = [];
     private Border? _subtitleElement;
     private MonitorArea? _monitor;
@@ -53,7 +54,11 @@ public partial class OverlayWindow : Window
 
         // Nakładka nie może trafiać do przechwytywanego obrazu — inaczej OCR
         // czytałby własne tłumaczenia (pętla sprzężenia zwrotnego).
-        IsCaptureExclusionActive = NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
+        // Diagnostyka dev: GTO_DIAG_CAPTURABLE=1 zostawia nakładkę widoczną dla zrzutów
+        // ekranu (żeby móc obejrzeć, co faktycznie rysujemy); filtr anty-sprzężeniowy
+        // sesji live przejmuje wtedy ochronę.
+        IsCaptureExclusionActive = Environment.GetEnvironmentVariable("GTO_DIAG_CAPTURABLE") != "1"
+            && NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
     }
 
     /// <summary>Tworzy HWND bez pokazywania okna — pozwala wcześnie sprawdzić wykluczenie z capture.</summary>
@@ -377,7 +382,22 @@ public partial class OverlayWindow : Window
         return element;
     }
 
-    private void PositionBlockElement(Border element, RectPx box, MonitorArea monitor, AppSettings settings)
+    /// <summary>Szerokość tekstu w DIP dla danej czcionki — bez udziału układu WPF (deterministycznie).</summary>
+    private double MeasureTextWidth(string text, AppSettings settings, double fontSize)
+    {
+        var family = string.IsNullOrWhiteSpace(settings.OverlayFontFamily)
+            ? new FontFamily("Segoe UI")
+            : new FontFamily(settings.OverlayFontFamily);
+        var formatted = new FormattedText(
+            text, System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            new Typeface(family, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal),
+            fontSize, Brushes.Black, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        // Kontur (8 kopii przesuniętych o grubość) poszerza tekst o 2× grubość.
+        var outline = 2 * Math.Max(1, Math.Round(fontSize / 14.0));
+        return formatted.WidthIncludingTrailingWhitespace + outline;
+    }
+
+    private void PositionBlockElement(Border element, RectPx box, MonitorArea monitor, AppSettings settings, string? fitKey = null)
     {
         var scale = monitor.Scale;
         var cover = IsCoverPlacement(settings);
@@ -409,27 +429,35 @@ public partial class OverlayWindow : Window
         element.MaxWidth = Math.Max(140, (monitor.Bounds.Right - box.X) / scale - 12);
 
         // Wtapianie: polski bywa ~20% dłuższy — zmniejszamy czcionkę, ale najwyżej do 85%
-        // oryginału (dalej tekst wystaje poza łatkę, czytelny dzięki konturowi); mocniejsze
-        // kurczenie dawało drobny „Podziękowania” obok wielkiego „Ustawienia”.
-        // Bloki wieloliniowe dostają wysokość wiersza równą oryginałowi.
+        // oryginału (dalej tekst wystaje poza łatkę, czytelny dzięki konturowi).
+        // Szerokość tekstu liczymy DETERMINISTYCZNIE (FormattedText), nie przez Measure
+        // elementu — wynik Measure zależał od stanu układu z poprzedniej aktualizacji
+        // i ten sam blok raz wychodził duży, raz mały. Rozmiar przeliczamy tylko, gdy
+        // zmieni się tekst, box albo wysokość linii; w innym razie czcionki nie ruszamy.
         if (cover && element.Tag is int coverLineHeight && coverLineHeight > 0)
         {
-            var lineCount = Math.Max(1, GetText(element).Count(static c => c == '\n') + 1);
-            var fontSize = ResolveFontSize(settings, coverLineHeight, scale);
-            if (lineCount > 1)
+            var text = GetText(element);
+            var signature = $"{text}|{coverLineHeight}|{box.Width}|{box.Height}|{settings.OverlayFontFamily}";
+            if (fitKey is null || !_liveFit.TryGetValue(fitKey, out var previousSignature) || previousSignature != signature)
             {
-                var pitch = box.Height / scale / lineCount;
-                fontSize = Math.Min(fontSize, Math.Max(9, pitch / 1.25));
-                SetLineHeight(element, pitch);
-            }
-            SetFontSize(element, fontSize);
+                var lineCount = Math.Max(1, text.Count(static c => c == '\n') + 1);
+                var fontSize = ResolveFontSize(settings, coverLineHeight, scale);
+                if (lineCount > 1)
+                {
+                    var pitch = box.Height / scale / lineCount;
+                    fontSize = Math.Min(fontSize, Math.Max(9, pitch / 1.25));
+                    SetLineHeight(element, pitch);
+                }
 
-            var floor = Math.Max(9, fontSize * 0.85);
-            for (var i = 0; i < 8 && GetFontSize(element) > floor; i++)
-            {
-                element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                if (element.DesiredSize.Width <= element.MinWidth * 1.08) break;
-                SetFontSize(element, Math.Max(floor, GetFontSize(element) * 0.93));
+                var floor = Math.Max(9, fontSize * 0.85);
+                var limit = element.MinWidth * 1.08;
+                for (var i = 0; i < 8 && fontSize > floor; i++)
+                {
+                    if (MeasureTextWidth(text, settings, fontSize) <= limit) break;
+                    fontSize = Math.Max(floor, fontSize * 0.93);
+                }
+                SetFontSize(element, fontSize);
+                if (fitKey is not null) _liveFit[fitKey] = signature;
             }
         }
 
@@ -518,6 +546,7 @@ public partial class OverlayWindow : Window
             _liveElements.Remove(staleKey);
             _liveTextures.Remove(staleKey);
             _liveColors.Remove(staleKey);
+            _liveFit.Remove(staleKey);
         }
 
         foreach (var block in blocks)
@@ -563,7 +592,7 @@ public partial class OverlayWindow : Window
                 RootCanvas.Children.Add(element);
             }
 
-            PositionBlockElement(element, block.ScreenBox, monitor, settings);
+            PositionBlockElement(element, block.ScreenBox, monitor, settings, block.Key);
         }
 
         CoverMonitor(monitor);
@@ -675,6 +704,7 @@ public partial class OverlayWindow : Window
         _liveElements.Clear();
         _liveTextures.Clear();
         _liveColors.Clear();
+        _liveFit.Clear();
         HideIfEmpty();
     }
 
@@ -686,6 +716,7 @@ public partial class OverlayWindow : Window
         _liveElements.Clear();
         _liveTextures.Clear();
         _liveColors.Clear();
+        _liveFit.Clear();
         _manualElements.Clear();
         _subtitleElement = null;
         _hiddenByUser = false;

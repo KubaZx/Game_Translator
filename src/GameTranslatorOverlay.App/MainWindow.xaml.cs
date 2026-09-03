@@ -272,6 +272,19 @@ public partial class MainWindow : Window
         var windows = await Task.Run(WindowEnumerator.GetOpenWindows);
         WindowsList.ItemsSource = windows;
         SetStatus($"Znaleziono {windows.Count} okien. Wybierz okno gry albo od razu użyj Ctrl+Shift+T.");
+
+        // Diagnostyka dev: GTO_AUTOLIVE="fragment tytułu" od razu startuje tryb live na
+        // wskazanym oknie — bez klikania, żeby dało się zautomatyzować zrzuty nakładki.
+        var autoLive = Environment.GetEnvironmentVariable("GTO_AUTOLIVE");
+        if (!string.IsNullOrWhiteSpace(autoLive) && _liveSession is null)
+        {
+            var target = windows.FirstOrDefault(w => w.Title.Contains(autoLive, StringComparison.OrdinalIgnoreCase));
+            if (target is not null)
+            {
+                WindowsList.SelectedItem = target;
+                OnStartLiveClick(this, new RoutedEventArgs());
+            }
+        }
     }
 
     private void OnRefreshClick(object sender, RoutedEventArgs e) => _ = RefreshWindowsAsync();
