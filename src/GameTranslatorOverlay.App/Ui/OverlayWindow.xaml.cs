@@ -522,12 +522,12 @@ public partial class OverlayWindow : Window
 
         foreach (var block in blocks)
         {
-            // Element odtwarzamy tylko przy realnej zmianie rozmiaru oryginału —
-            // drobne wahania OCR wygładza histereza po stronie sesji.
-            if (_liveElements.TryGetValue(block.Key, out var element)
-                && element.Tag is int previousLineHeight
-                && previousLineHeight == block.LineHeight)
+            // Istniejący dymek aktualizujemy W MIEJSCU — także przy zmianie rozmiaru oryginału
+            // (najechany element menu rośnie): czcionka i łatka skalują się jak napis w grze,
+            // bez odtwarzania i fade-inu. Fade-in dostają tylko naprawdę nowe bloki.
+            if (_liveElements.TryGetValue(block.Key, out var element))
             {
+                element.Tag = block.LineHeight;
                 if (GetText(element) != block.TranslatedText)
                 {
                     SetText(element, block.TranslatedText);
@@ -553,10 +553,6 @@ public partial class OverlayWindow : Window
             }
             else
             {
-                if (element is not null)
-                {
-                    RootCanvas.Children.Remove(element);
-                }
                 element = CreateBlockElement(
                     block.TranslatedText, settings, monitor.Scale, block.LineHeight,
                     block.ColorRgb, block.BackgroundRgb, block.OutlineRgb, block.Texture);

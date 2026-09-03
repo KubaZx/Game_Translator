@@ -112,7 +112,7 @@ internal static class Program
                     foreach (var block in update.Blocks.Take(12))
                     {
                         var text = block.TranslatedText.Length > 60 ? block.TranslatedText[..60] + "…" : block.TranslatedText;
-                        Console.WriteLine($"         → ({block.ScreenBox.X},{block.ScreenBox.Y} {block.ScreenBox.Width}×{block.ScreenBox.Height} lh={block.LineHeight}) \"{text.Replace('\n', '|')}\"");
+                        Console.WriteLine($"         → ({block.ScreenBox.X},{block.ScreenBox.Y} {block.ScreenBox.Width}×{block.ScreenBox.Height} lh={block.LineHeight}) c={block.ColorRgb:X6} b={block.BackgroundRgb:X6} o={block.OutlineRgb:X6} \"{text.Replace('\n', '|')}\"");
                     }
                 }
             },

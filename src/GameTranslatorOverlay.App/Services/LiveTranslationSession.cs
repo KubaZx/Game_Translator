@@ -773,15 +773,21 @@ public sealed class LiveTranslationSession(
                 // bloku, dopóki zmiana nie jest znacząca. Koniec z „oddychającą” czcionką.
                 // Tolerancje szerokie: box OCR faluje (raz z obwódką, raz bez), a każda
                 // zmiana rozmiaru odtwarza dymek od nowa — widoczne jako skok czcionki.
-                if (Math.Abs(previous.LineHeight - lineHeight) <= Math.Max(2, previous.LineHeight * 0.35))
+                // Tolerancje liczone od MNIEJSZEJ wartości (symetrycznie): najechany element
+                // menu rośnie 68→97 px i musi po zjechaniu wrócić do 68 — przy tolerancji od
+                // większej wartości 68 „mieściło się” w 97 i napis zostawał powiększony.
+                var minLine = Math.Min(previous.LineHeight, lineHeight);
+                if (Math.Abs(previous.LineHeight - lineHeight) <= Math.Max(2, minLine * 0.35))
                 {
                     lineHeight = previous.LineHeight;
                 }
                 var prevBox = previous.WindowRelativeBox;
-                if (Math.Abs(prevBox.X - box.X) <= Math.Max(6, box.Width * 0.05)
-                    && Math.Abs(prevBox.Y - box.Y) <= Math.Max(6, box.Height * 0.25)
-                    && Math.Abs(prevBox.Width - box.Width) <= Math.Max(12, box.Width * 0.15)
-                    && Math.Abs(prevBox.Height - box.Height) <= Math.Max(12, box.Height * 0.35))
+                var minWidth = Math.Min(prevBox.Width, box.Width);
+                var minHeight = Math.Min(prevBox.Height, box.Height);
+                if (Math.Abs(prevBox.X - box.X) <= Math.Max(6, minWidth * 0.05)
+                    && Math.Abs(prevBox.Y - box.Y) <= Math.Max(6, minHeight * 0.25)
+                    && Math.Abs(prevBox.Width - box.Width) <= Math.Max(12, minWidth * 0.15)
+                    && Math.Abs(prevBox.Height - box.Height) <= Math.Max(12, minHeight * 0.35))
                 {
                     box = prevBox;
                 }
