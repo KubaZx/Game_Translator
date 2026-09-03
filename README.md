@@ -9,7 +9,7 @@ i nie blokuje kliknięć.
 > ani pamięci; nie wysyła do gry żadnych kliknięć ani klawiszy. Pracuje wyłącznie na obrazie,
 > który i tak widzisz na ekranie. Szczegóły: [docs/SECURITY.md](docs/SECURITY.md).
 
-## Status projektu (v0.2.1 — wydane)
+## Status projektu (v0.2.2 — wydane)
 
 **Wszystkie etapy 0–12 ukończone.** Gotowe zipy do pobrania:
 **[Releases](https://github.com/KubaZx/Game_Translator/releases)** (portable win-x64,
@@ -30,10 +30,13 @@ bez instalacji — rozpakuj i uruchom).
 | 11 | Profile gier + autodetekcja po procesie (PoE2 w zestawie) | ✅ |
 | 12 | Wersja produkcyjna: portable zip, tray, release z CI, instrukcje, licencje | ✅ |
 
-Tryb live jest strojony na prawdziwych grach (Path of Exile 2, gry ze statycznym obrazem):
-okres łaski maskuje czknięcia OCR, tłumaczenie reaguje w ~0,3–0,7 s, a w trybie „Na oryginale
-(zakrywa)" łatka przejmuje kolor tła i czcionki gry. Automatyczna detekcja tooltipów — w planach
-([docs/ROADMAP.md](docs/ROADMAP.md), tam też zmiany: [CHANGELOG.md](CHANGELOG.md)).
+Tryb live jest strojony na prawdziwych grach (Path of Exile 2, Escape Academy) i mierzony
+narzędziami diagnostycznymi, nie „na oko": detektor zmian odporny na szum tła (migotanie
+mgły nie liczy się jako zmiana), reakcja na nowy tekst ~0,1–0,4 s, okres łaski i stabilizacja
+odczytów maskują czknięcia OCR nad ruchomą grafiką, a w trybie „Na oryginale (zakrywa)" łatka
+jest rozmytą kopią tła spod napisu, tekst dostaje kontur w kolorze z gry i rozmiar oryginału.
+Automatyczna detekcja tooltipów — w planach ([docs/ROADMAP.md](docs/ROADMAP.md), tam też
+zmiany: [CHANGELOG.md](CHANGELOG.md)).
 
 Funkcje wymagające prawdziwego pulpitu (skróty globalne, nakładka, DPI, multi-monitor) mają
 scenariusze testów ręcznych w [docs/MANUAL_TESTING.md](docs/MANUAL_TESTING.md).
@@ -85,9 +88,19 @@ dotnet run --project src/GameTranslatorOverlay.App
 
 Smoke test renderuje syntetyczny tooltip RPG, puszcza go przez prawdziwe OCR Windows,
 grupowanie bloków i pełny pipeline tłumaczenia z cache SQLite (dostawca Mock) — kod wyjścia 0
-oznacza działający pion. Testy jednostkowe/integracyjne (143) nie wymagają klucza API ani GUI.
-Diagnostyka trybu live: `dotnet run --project tools/GameTranslatorOverlay.LiveDiag -- 36`
-(okno testowe z animacjami) albo `-- "fragment tytułu" 60` (podpięcie pod istniejące okno).
+oznacza działający pion. Testy jednostkowe/integracyjne (174) nie wymagają klucza API ani GUI.
+
+Diagnostyka trybu live (wszystko z manifestem PerMonitorV2 — bez niego proces dostaje
+zwirtualizowany, ucięty kadr przy skalowaniu ekranu):
+
+- `dotnet run --project tools/GameTranslatorOverlay.LiveDiag -- 36` — okno testowe z animacjami;
+  `-- "fragment tytułu" 60` — podpięcie pod istniejące okno gry, telemetria co przebieg
+  (boxy, wysokości linii, kolory, liczba linii OCR, podtrzymane bloki),
+- `dotnet run --project tools/GameTranslatorOverlay.OcrLab -- "fragment tytułu" [katalog]` —
+  zrzut klatki + geometria DPI + OCR w kilku wariantach preprocessingu,
+- aplikacja w trybie diagnostycznym: `GTO_AUTOLIVE="fragment tytułu"` startuje live bez
+  klikania, `GTO_DIAG_CAPTURABLE=1` zostawia nakładkę widoczną dla zrzutów ekranu
+  (normalnie jest z nich wykluczona) — do oglądania, co faktycznie rysujemy.
 
 ## Struktura repozytorium
 
@@ -96,9 +109,10 @@ src/
   GameTranslatorOverlay.Core/            czysta logika: pipeline, normalizacja, glossary, modele
   GameTranslatorOverlay.Infrastructure/  SQLite cache, DeepL, DPAPI, ustawienia, katalogi plików
   GameTranslatorOverlay.App/             WPF: UI, capture (GDI), Windows OCR, nakładka, skróty
-tests/                                   xUnit: Core.Tests (106), Infrastructure.Tests (37)
+tests/                                   xUnit: Core.Tests (137), Infrastructure.Tests (37)
 tools/GameTranslatorOverlay.SmokeTest/   smoke test E2E bez GUI
 tools/GameTranslatorOverlay.LiveDiag/    stanowisko diagnostyczne trybu live (telemetria)
+tools/GameTranslatorOverlay.OcrLab/      laboratorium OCR: zrzut klatki, DPI, warianty preprocessingu
 profiles/                                profile gier (generic, path-of-exile-2)
 glossaries/                              słowniki EN→PL (globalny 44, PoE2 118 terminów)
 docs/                                    wizja, architektura, decyzje, bezpieczeństwo, testy
@@ -112,9 +126,12 @@ wysyłany jest **wyłącznie rozpoznany tekst** — nigdy obraz. Program nie zap
 i nie nagrywa rozgrywki. Dane (cache, ustawienia, logi) trzyma w
 `%LOCALAPPDATA%\GameTranslatorOverlay`. Pełna polityka: [docs/PRIVACY.md](docs/PRIVACY.md).
 
-## Znane ograniczenia (v0.2.1)
+## Znane ograniczenia (v0.2.2)
 
 - Gry w trybie **exclusive fullscreen** nie są obsługiwane (użyj borderless/okienkowego).
+- Tryb live jest strojony głównie na menu, ekranach wyboru i dialogach; **w trakcie dynamicznej
+  rozgrywki** (ruch kamery, efekty, animowane tło pod tekstem) jakość bywa niższa — to następny
+  obszar strojenia.
 - Zaznaczanie regionu działa na monitorze, na którym stoi kursor.
 - Tryb live używa PrintWindow/GDI (na DX12, np. PoE2, działa — zmierzone); u nielicznych gier
   może zajść fallback do zrzutu ekranu, o czym aplikacja wprost ostrzega. Windows Graphics
