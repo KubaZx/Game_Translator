@@ -114,6 +114,7 @@ public sealed class LiveTranslationSession(
 
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<string, LiveOverlayBlock> _displayed = [];
+    private readonly NoiseAwareChangeDetector _changeDetector = new();
     private byte[]? _gridBuffer;
     private LuminanceGrid? _previousGrid;
     private RectPx? _pendingDirtyRegion;
@@ -196,6 +197,7 @@ public sealed class LiveTranslationSession(
                     {
                         wasMinimized = true;
                         _previousGrid = null;
+                        _changeDetector.Reset();
                         stabilizer.Reset();
                         _displayed.Clear();
                         Emit(new LiveUpdate("Gra zminimalizowana — nakładka ukryta, czekam na powrót.",
@@ -213,14 +215,14 @@ public sealed class LiveTranslationSession(
 
                 try
                 {
-                    var (changedFraction, strongFraction, processed) = await RunCycleAsync(
+                    var (changedFraction, strongFraction, significantFraction, processed) = await RunCycleAsync(
                         stabilizer, clock, cancellationToken).ConfigureAwait(false);
 
                     _consecutiveFailures = 0;
                     if (!processed)
                     {
                         Emit(new LiveUpdate(
-                            $"Live: obserwuję (zmiana {changedFraction:P0}, mocne {strongFraction:P0}, bloki {_displayed.Count})."),
+                            $"Live: obserwuję (zmiana {changedFraction:P0}, istotne {significantFraction:P0}, mocne {strongFraction:P0}, bloki {_displayed.Count})."),
                             cancellationToken);
                     }
                 }
@@ -273,7 +275,7 @@ public sealed class LiveTranslationSession(
     }
 
     /// <summary>Jeden cykl: capture → detekcja zmian → (opcjonalnie) OCR + tłumaczenie.</summary>
-    private async Task<(double ChangedFraction, double StrongFraction, bool Processed)> RunCycleAsync(
+    private async Task<(double ChangedFraction, double StrongFraction, double SignificantFraction, bool Processed)> RunCycleAsync(
         ChangeStabilizer stabilizer,
         Stopwatch clock,
         CancellationToken cancellationToken)
@@ -285,6 +287,7 @@ public sealed class LiveTranslationSession(
         var partialOcr = false;
         double changedFraction;
         double strongFraction;
+        double significantFraction;
         long captureMs;
 
         var captureWatch = Stopwatch.StartNew();
@@ -294,7 +297,7 @@ public sealed class LiveTranslationSession(
             captureMs = captureWatch.ElapsedMilliseconds;
             if (bitmap is null)
             {
-                return (0, 0, false);
+                return (0, 0, 0, false);
             }
 
             if (usedScreenFallback && !_warnedAboutScreenFallback)
@@ -310,10 +313,11 @@ public sealed class LiveTranslationSession(
             var grid = ScreenCapture.ComputeLuminanceGrid(bitmap, ref _gridBuffer);
             var frameRect = new RectPx(0, 0, bitmap.Width, bitmap.Height);
             var analysis = _previousGrid is null
-                ? new ChangeAnalysis(1.0, frameRect)
-                : FrameChangeDetector.Analyze(_previousGrid, grid, bitmap.Width, bitmap.Height);
+                ? new NoiseAwareAnalysis(1.0, 0.0, 1.0, frameRect)
+                : _changeDetector.Analyze(_previousGrid, grid, bitmap.Width, bitmap.Height);
             changedFraction = analysis.ChangedFraction;
             strongFraction = analysis.StrongChangedFraction;
+            significantFraction = analysis.SignificantFraction;
             _previousGrid = grid;
 
             // Cięcie sceny ocenia się po SZCZYCIE zmian od ostatniego przetworzenia,
@@ -322,7 +326,9 @@ public sealed class LiveTranslationSession(
             // cięcia przepadała i duchy starych bloków przeżywały okres łaski.
             _peakChangedFraction = Math.Max(_peakChangedFraction, changedFraction);
 
-            var frameChanged = changedFraction > options.ChangeThreshold;
+            // Zmieniona klatka = zmiana ISTOTNA (stałe migotanie tła nie liczy się) —
+            // dzięki temu region do OCR obejmuje tylko nowy tekst, a nie cały ekran.
+            var frameChanged = analysis.SignificantFraction > options.ChangeThreshold;
             var forceProcess = false;
 
             // Scena w ruchu (bieg, przesuw kamery): każdy wynik OCR wylądowałby w miejscu,
@@ -348,7 +354,7 @@ public sealed class LiveTranslationSession(
                             $"Live: ruch na ekranie (mocne {strongFraction:P0}) — wstrzymuję tłumaczenie do ustania ruchu.",
                             HideOverlay: true), cancellationToken);
                     }
-                    return (changedFraction, strongFraction, _motionFrames >= 2);
+                    return (changedFraction, strongFraction, significantFraction, _motionFrames >= 2);
                 }
 
                 // Bezpiecznik: „ruch” trwa podejrzanie długo (panorama z napisami,
@@ -361,7 +367,7 @@ public sealed class LiveTranslationSession(
                 _motionFrames = 0;
             }
 
-            if (frameChanged && analysis.ChangedRegion is { } changedNow)
+            if (frameChanged && analysis.SignificantRegion is { } changedNow)
             {
                 // Zmiany kumulują się między klatkami (animacja pojawiania tooltipa) —
                 // do OCR pójdzie unia wszystkiego, co się zmieniło od ostatniego przetworzenia.
@@ -464,7 +470,7 @@ public sealed class LiveTranslationSession(
                 _whiffRetryRequested = false;
                 stabilizer.ForceDirty(clock.Elapsed);
             }
-            return (changedFraction, strongFraction, true);
+            return (changedFraction, strongFraction, significantFraction, true);
         }
 
         // Okno przesunęło się bez zmiany treści — przeliczamy pozycje bloków bez OCR.
@@ -476,10 +482,10 @@ public sealed class LiveTranslationSession(
                 BuildDisplayList(bounds),
                 SubtitleText: null,
                 WindowBounds: bounds), cancellationToken);
-            return (changedFraction, strongFraction, true);
+            return (changedFraction, strongFraction, significantFraction, true);
         }
 
-        return (changedFraction, strongFraction, false);
+        return (changedFraction, strongFraction, significantFraction, false);
     }
 
     private async Task ProcessFrameAsync(

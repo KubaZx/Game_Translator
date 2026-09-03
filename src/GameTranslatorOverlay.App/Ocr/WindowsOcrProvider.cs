@@ -16,6 +16,12 @@ namespace GameTranslatorOverlay.App.Ocr;
 /// </summary>
 public sealed class WindowsOcrProvider : IOcrProvider
 {
+    // Silnik per język tworzony raz: tworzenie go przy każdym przebiegu live (co ~600 ms)
+    // kosztowało czas i było podejrzanym o sporadyczne puste wyniki. WinRT OcrEngine nie
+    // deklaruje bezpieczeństwa wątkowego, więc wywołania na tym samym silniku serializujemy.
+    private readonly Dictionary<string, (OcrEngine Engine, SemaphoreSlim Gate)> _engines = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock _enginesLock = new();
+
     public string Name => "Windows OCR";
 
     public int MaxImageDimension { get; } = (int)OcrEngine.MaxImageDimension;
@@ -38,10 +44,26 @@ public sealed class WindowsOcrProvider : IOcrProvider
             l.LanguageTag.Split('-')[0].Equals(requestedPrimary, StringComparison.OrdinalIgnoreCase));
     }
 
-    public async Task<OcrResult> RecognizeAsync(OcrBitmap bitmap, string languageTag, CancellationToken cancellationToken = default)
+    private (OcrEngine Engine, SemaphoreSlim Gate) GetEngine(string languageTag)
     {
         var language = FindLanguage(languageTag) ?? throw new OcrLanguageNotAvailableException(languageTag);
-        var engine = OcrEngine.TryCreateFromLanguage(language) ?? throw new OcrLanguageNotAvailableException(languageTag);
+        lock (_enginesLock)
+        {
+            if (_engines.TryGetValue(language.LanguageTag, out var cached))
+            {
+                return cached;
+            }
+            var engine = OcrEngine.TryCreateFromLanguage(language) ?? throw new OcrLanguageNotAvailableException(languageTag);
+            var entry = (engine, new SemaphoreSlim(1, 1));
+            _engines[language.LanguageTag] = entry;
+            return entry;
+        }
+    }
+
+    public async Task<OcrResult> RecognizeAsync(OcrBitmap bitmap, string languageTag, CancellationToken cancellationToken = default)
+    {
+        var (engine, gate) = GetEngine(languageTag);
+        var language = engine.RecognizerLanguage;
 
         if (bitmap.Width > MaxImageDimension || bitmap.Height > MaxImageDimension)
         {
@@ -55,7 +77,16 @@ public sealed class WindowsOcrProvider : IOcrProvider
         using var softwareBitmap = SoftwareBitmap.CreateCopyFromBuffer(
             bitmap.PixelsBgra32.AsBuffer(), BitmapPixelFormat.Bgra8, bitmap.Width, bitmap.Height);
 
-        var recognized = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken).ConfigureAwait(false);
+        Windows.Media.Ocr.OcrResult recognized;
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            recognized = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
 
         var lines = new List<OcrLine>(recognized.Lines.Count);
         foreach (var line in recognized.Lines)

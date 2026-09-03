@@ -61,19 +61,41 @@ public sealed class DeepLTranslationProvider(
             throw new TranslationException(TranslationFailureKind.MissingApiKey, "Nie skonfigurowano klucza API DeepL.");
         }
 
+        // Teksty z jednej klatki są dla siebie kontekstem: krótka kwestia („Fine.”, „Leave.”)
+        // tłumaczona w izolacji bywa losowa, a z sąsiednimi blokami trafia w sens.
+        // DeepL nie tłumaczy ani nie bilinguje parametru context.
+        var context = BuildContext(texts);
+
         var results = new List<string>(texts.Count);
         foreach (var chunk in texts.Chunk(Math.Max(1, _options.MaxBatchSize)))
         {
-            results.AddRange(await TranslateChunkAsync(chunk, apiKey, sourceLanguage, targetLanguage, cancellationToken)
+            results.AddRange(await TranslateChunkAsync(chunk, context, apiKey, sourceLanguage, targetLanguage, cancellationToken)
                 .ConfigureAwait(false));
         }
         return results;
     }
 
-    private async Task<IReadOnlyList<string>> TranslateChunkAsync(
-        string[] chunk, string apiKey, string sourceLanguage, string targetLanguage, CancellationToken cancellationToken)
+    private const int MaxContextChars = 1500;
+
+    private static string? BuildContext(IReadOnlyList<string> texts)
     {
-        var request = new DeepLTranslateRequest(chunk, MapLanguage(sourceLanguage), MapLanguage(targetLanguage));
+        if (texts.Count < 2) return null;
+        var builder = new System.Text.StringBuilder();
+        foreach (var text in texts)
+        {
+            var line = text.Replace('\n', ' ').Trim();
+            if (line.Length == 0) continue;
+            if (builder.Length + line.Length + 1 > MaxContextChars) break;
+            if (builder.Length > 0) builder.Append('\n');
+            builder.Append(line);
+        }
+        return builder.Length > 0 ? builder.ToString() : null;
+    }
+
+    private async Task<IReadOnlyList<string>> TranslateChunkAsync(
+        string[] chunk, string? context, string apiKey, string sourceLanguage, string targetLanguage, CancellationToken cancellationToken)
+    {
+        var request = new DeepLTranslateRequest(chunk, MapLanguage(sourceLanguage), MapLanguage(targetLanguage), context);
         var url = $"{GetBaseUrl(apiKey)}/v2/translate";
 
         for (var attempt = 0; ; attempt++)
@@ -216,7 +238,9 @@ public sealed class DeepLTranslationProvider(
     private sealed record DeepLTranslateRequest(
         [property: JsonPropertyName("text")] IReadOnlyList<string> Text,
         [property: JsonPropertyName("source_lang")] string SourceLang,
-        [property: JsonPropertyName("target_lang")] string TargetLang);
+        [property: JsonPropertyName("target_lang")] string TargetLang,
+        [property: JsonPropertyName("context")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Context = null);
 
     private sealed record DeepLTranslateResponse(
         [property: JsonPropertyName("translations")] List<DeepLTranslationItem>? Translations);
