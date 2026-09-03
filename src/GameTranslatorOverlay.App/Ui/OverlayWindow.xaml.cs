@@ -141,7 +141,7 @@ public partial class OverlayWindow : Window
     {
         var sampledCover = IsCoverPlacement(settings) && !IsBackgroundless(settings) && backgroundRgb >= 0;
         var foreground = ResolveForeground(colorRgb, sampledCover ? backgroundRgb : -1);
-        switch (element.Child)
+        switch (Inner(element))
         {
             case OutlinedTextBlock outlined:
                 outlined.Primary.Foreground = foreground;
@@ -237,7 +237,10 @@ public partial class OverlayWindow : Window
         return textBlock;
     }
 
-    private static double GetFontSize(Border element) => element.Child switch
+    /// <summary>Właściwy element tekstowy dymka (z pominięciem hosta łatki, jeśli jest).</summary>
+    private static UIElement? Inner(Border element) => element.Child is CoverPatchHost host ? host.Content : element.Child;
+
+    private static double GetFontSize(Border element) => Inner(element) switch
     {
         OutlinedTextBlock outlined => outlined.FontSize,
         TextBlock text => text.FontSize,
@@ -246,14 +249,14 @@ public partial class OverlayWindow : Window
 
     private static void SetFontSize(Border element, double fontSize)
     {
-        switch (element.Child)
+        switch (Inner(element))
         {
             case OutlinedTextBlock outlined: outlined.FontSize = fontSize; break;
             case TextBlock text: text.FontSize = fontSize; break;
         }
     }
 
-    private static string GetText(Border element) => element.Child switch
+    private static string GetText(Border element) => Inner(element) switch
     {
         OutlinedTextBlock outlined => outlined.Text,
         TextBlock text => text.Text,
@@ -262,7 +265,7 @@ public partial class OverlayWindow : Window
 
     private static void SetText(Border element, string value)
     {
-        switch (element.Child)
+        switch (Inner(element))
         {
             case OutlinedTextBlock outlined: outlined.Text = value; break;
             case TextBlock text: text.Text = value; break;
@@ -271,7 +274,7 @@ public partial class OverlayWindow : Window
 
     private static void SetLineHeight(Border element, double lineHeight)
     {
-        switch (element.Child)
+        switch (Inner(element))
         {
             case OutlinedTextBlock outlined:
                 outlined.SetLineHeight(lineHeight, LineStackingStrategy.BlockLineHeight);
@@ -281,6 +284,12 @@ public partial class OverlayWindow : Window
                 text.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
                 break;
         }
+    }
+
+    private static void SetPatchFill(Border element, Brush fill)
+    {
+        if (element.Child is CoverPatchHost host) host.SetFill(fill);
+        else element.Background = fill;
     }
 
     private Border CreateBlockElement(
@@ -328,6 +337,13 @@ public partial class OverlayWindow : Window
 
         // Kontur w kolorze z gry — to on robi „natywność” czcionki. Zastępuje rozmytą
         // czarną poświatę trybu bez tła, a nad światem 3D pozwala w ogóle zrezygnować z łatki.
+        // W zakrywaniu dłuższy polski tekst wystaje poza łatkę nad grafikę — bez konturu
+        // z gry dostaje domyślny (czarny pod jasnym tekstem, biały pod ciemnym).
+        if (outlineRgb < 0 && sampledCover)
+        {
+            var textLum = colorRgb >= 0 ? Luminance(colorRgb) : 255;
+            outlineRgb = textLum >= 128 ? 0x000000 : 0xFFFFFF;
+        }
         FrameworkElement content = textBlock;
         if (outlineRgb >= 0)
         {
@@ -336,13 +352,21 @@ public partial class OverlayWindow : Window
                 (byte)(outlineRgb >> 16), (byte)(outlineRgb >> 8), (byte)outlineRgb));
         }
 
+        // Wtapianie: miękka łatka wyłącznie pod boxem oryginału; tekst może wystawać.
+        UIElement child = content;
+        if (sampledCover)
+        {
+            child = new CoverPatchHost(content, background);
+            background = Brushes.Transparent;
+        }
+
         var element = new Border
         {
             Background = background,
             // Wtopiona łatka ma udawać tekst gry: bez dymkowych rogów i grubego paddingu.
-            CornerRadius = new CornerRadius(sampledCover ? 1 : 4),
+            CornerRadius = new CornerRadius(sampledCover ? 0 : 4),
             Padding = IsBackgroundless(settings) || sampledCover ? new Thickness(0) : new Thickness(7, 4, 7, 4),
-            Child = content,
+            Child = child,
         };
 
         // Mini-siatka tła rozciąga się z interpolacją liniową — gradient, nie kafelki.
@@ -360,8 +384,9 @@ public partial class OverlayWindow : Window
         var monitorHeightDip = monitor.Bounds.Height / scale;
 
         // Zapas zakrycia: krawędzie antyaliasingu oryginalnych glifów wystają poza
-        // box OCR — bez niego spod łatki prześwituje obwódka starego tekstu.
-        const double coverInsetPx = 3.0;
+        // box OCR — bez niego spod łatki prześwituje obwódka starego tekstu. Miękka
+        // (rozmyta) łatka potrzebuje większego zapasu, bo jej brzeg wygasa.
+        var coverInsetPx = element.Child is CoverPatchHost ? 8.0 : 3.0;
         var inset = cover ? coverInsetPx / scale : 0;
 
         if (cover)
@@ -370,6 +395,10 @@ public partial class OverlayWindow : Window
             // dłuższy, więc blok może urosnąć w dół — nie ściskamy go na siłę.
             element.MinWidth = Math.Max(0, box.Width / scale + 2 * inset);
             element.MinHeight = Math.Max(0, box.Height / scale + 2 * inset);
+            if (element.Child is CoverPatchHost host)
+            {
+                host.SetPatchSize(element.MinWidth, element.MinHeight);
+            }
         }
         else
         {
@@ -379,10 +408,10 @@ public partial class OverlayWindow : Window
 
         element.MaxWidth = Math.Max(140, (monitor.Bounds.Right - box.X) / scale - 12);
 
-        // Wtapianie: polski bywa ~20% dłuższy — zmniejszamy czcionkę, aż tekst zmieści
-        // się w polu oryginału (z małym zapasem), zamiast rozpychać łatkę po sąsiednim UI
-        // gry. Bloki wieloliniowe dostają wysokość wiersza równą oryginałowi, żeby
-        // kolejne linie tłumaczenia kładły się na liniach oryginału.
+        // Wtapianie: polski bywa ~20% dłuższy — zmniejszamy czcionkę, ale najwyżej do 85%
+        // oryginału (dalej tekst wystaje poza łatkę, czytelny dzięki konturowi); mocniejsze
+        // kurczenie dawało drobny „Podziękowania” obok wielkiego „Ustawienia”.
+        // Bloki wieloliniowe dostają wysokość wiersza równą oryginałowi.
         if (cover && element.Tag is int coverLineHeight && coverLineHeight > 0)
         {
             var lineCount = Math.Max(1, GetText(element).Count(static c => c == '\n') + 1);
@@ -395,11 +424,12 @@ public partial class OverlayWindow : Window
             }
             SetFontSize(element, fontSize);
 
-            for (var i = 0; i < 8 && GetFontSize(element) > 9; i++)
+            var floor = Math.Max(9, fontSize * 0.85);
+            for (var i = 0; i < 8 && GetFontSize(element) > floor; i++)
             {
                 element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
                 if (element.DesiredSize.Width <= element.MinWidth * 1.08) break;
-                SetFontSize(element, Math.Max(9, GetFontSize(element) * 0.93));
+                SetFontSize(element, Math.Max(floor, GetFontSize(element) * 0.93));
             }
         }
 
@@ -508,7 +538,7 @@ public partial class OverlayWindow : Window
                 if (block.Texture is not null && IsCoverPlacement(settings) && !IsBackgroundless(settings)
                     && (!_liveTextures.TryGetValue(block.Key, out var shown) || !ReferenceEquals(shown, block.Texture)))
                 {
-                    element.Background = CreateTextureBrush(block.Texture, 1.0);
+                    SetPatchFill(element, CreateTextureBrush(block.Texture, 1.0));
                     _liveTextures[block.Key] = block.Texture;
                 }
 

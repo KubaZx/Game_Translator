@@ -132,6 +132,15 @@ public sealed class LiveTranslationSession(
     private const int JitterConfirmations = 2;
     private const double CleanReadingQuality = 0.9;
     private const double QualityTolerance = 0.1;
+
+    /// <summary>
+    /// Duchy: bloki zdjęte z nakładki (OCR gubił je kilka przebiegów z rzędu nad grafiką).
+    /// Nowy odczyt w ich miejscu wskrzesza ducha zamiast tworzyć blok od zera z pierwszym
+    /// lepszym śmieciowym odczytem i innym rozmiarem — koniec skaczących dymków.
+    /// </summary>
+    private readonly Dictionary<string, (LiveOverlayBlock Block, TimeSpan DroppedAt)> _ghosts = new(StringComparer.Ordinal);
+    private static readonly TimeSpan GhostLifetime = TimeSpan.FromSeconds(10);
+    private TimeSpan _cycleTime;
     private RectPx _lastEmittedBounds;
     private bool _warnedAboutScreenFallback;
     private int _consecutiveFailures;
@@ -471,6 +480,7 @@ public sealed class LiveTranslationSession(
             var peakChanged = _peakChangedFraction;
             _peakChangedFraction = 0;
             _lastProcessedAt = clock.Elapsed;
+            _cycleTime = clock.Elapsed;
             await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, captureMs, peakChanged, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -530,11 +540,13 @@ public sealed class LiveTranslationSession(
     }
 
     /// <summary>
-    /// Wyświetlany blok zajmujący to samo miejsce co nowy odczyt (nachodzenie co najmniej
+    /// Blok z puli zajmujący to samo miejsce co nowy odczyt (nachodzenie co najmniej
     /// w połowie mniejszego z boxów). Blok już przejęty w tym przebiegu nie liczy się.
     /// </summary>
-    private (string Key, LiveOverlayBlock Block)? FindOverlappingDisplayed(
-        KeyedTextBlock candidate, IReadOnlyDictionary<string, LiveOverlayBlock> alreadyReused)
+    private static (string Key, LiveOverlayBlock Block)? FindOverlapping(
+        KeyedTextBlock candidate,
+        IReadOnlyDictionary<string, LiveOverlayBlock> pool,
+        IReadOnlyDictionary<string, LiveOverlayBlock> alreadyReused)
     {
         var box = candidate.Block.Box;
         long area = (long)box.Width * box.Height;
@@ -542,7 +554,7 @@ public sealed class LiveTranslationSession(
 
         (string Key, LiveOverlayBlock Block)? best = null;
         long bestOverlap = 0;
-        foreach (var (key, displayed) in _displayed)
+        foreach (var (key, displayed) in pool)
         {
             if (alreadyReused.ContainsKey(key) || displayed.SourceText.Length == 0) continue;
             var overlap = box.Intersect(displayed.WindowRelativeBox);
@@ -649,9 +661,25 @@ public sealed class LiveTranslationSession(
                 continue;
             }
 
-            var match = FindOverlappingDisplayed(candidate, reused);
+            var match = FindOverlapping(candidate, _displayed, reused);
             if (match is null)
             {
+                // Miejsce po duchu: podobny albo brudniejszy odczyt wskrzesza ducha
+                // (jego tłumaczenie i styl), czysta nowa treść dziedziczy tylko styl.
+                var ghost = FindOverlapping(candidate, _ghosts.ToDictionary(g => g.Key, g => g.Value.Block), reused);
+                if (ghost is { } g)
+                {
+                    _ghosts.Remove(g.Key);
+                    var ghostSimilarity = TextSimilarity.Ratio(candidate.NormalizedText, g.Block.SourceText);
+                    var quality = ReadingQuality.Score(candidate.NormalizedText);
+                    var ghostQuality = ReadingQuality.Score(g.Block.SourceText);
+                    if (ghostSimilarity >= JitterSimilarityThreshold || quality < ghostQuality - QualityTolerance)
+                    {
+                        reused[g.Key] = g.Block with { Misses = 0 };
+                        continue;
+                    }
+                    inheritFrom[candidate.Key] = g.Block;
+                }
                 accepted.Add(candidate);
                 continue;
             }
@@ -806,6 +834,26 @@ public sealed class LiveTranslationSession(
         foreach (var (key, block) in survivors)
         {
             next[key] = block;
+        }
+
+        // Bloki, które właśnie wygasły, zostają duchami (o ile to nie cięcie sceny).
+        if (!sceneCut)
+        {
+            foreach (var (key, block) in _displayed)
+            {
+                if (!next.ContainsKey(key) && block.SourceText.Length > 0)
+                {
+                    _ghosts[key] = (block with { Misses = 0 }, _cycleTime);
+                }
+            }
+        }
+        else
+        {
+            _ghosts.Clear();
+        }
+        foreach (var expired in _ghosts.Where(g => _cycleTime - g.Value.DroppedAt > GhostLifetime || next.ContainsKey(g.Key)).Select(g => g.Key).ToList())
+        {
+            _ghosts.Remove(expired);
         }
 
         // Podejrzenie czknięcia OCR: pełny przebieg nic nie widzi mimo bloków na ekranie
