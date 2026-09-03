@@ -109,7 +109,7 @@ internal static class Program
                 Console.WriteLine($"[{t,6:0.00}s] {update.StatusLine}  [blocks={blocks} hide={update.HideOverlay} clear={update.ClearOverlay}]");
                 if (update.Blocks is { Count: > 0 })
                 {
-                    foreach (var block in update.Blocks.Take(4))
+                    foreach (var block in update.Blocks.Take(12))
                     {
                         var text = block.TranslatedText.Length > 60 ? block.TranslatedText[..60] + "…" : block.TranslatedText;
                         Console.WriteLine($"         → ({block.ScreenBox.X},{block.ScreenBox.Y} {block.ScreenBox.Width}×{block.ScreenBox.Height} lh={block.LineHeight}) \"{text.Replace('\n', '|')}\"");

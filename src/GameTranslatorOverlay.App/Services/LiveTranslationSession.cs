@@ -130,6 +130,8 @@ public sealed class LiveTranslationSession(
     private const double JitterSimilarityThreshold = 0.5;
     private const double JitterOverlapFraction = 0.5;
     private const int JitterConfirmations = 2;
+    private const double CleanReadingQuality = 0.9;
+    private const double QualityTolerance = 0.1;
     private RectPx _lastEmittedBounds;
     private bool _warnedAboutScreenFallback;
     private int _consecutiveFailures;
@@ -499,16 +501,18 @@ public sealed class LiveTranslationSession(
     }
 
     /// <summary>
-    /// Wyświetlany blok, który nowy odczyt najpewniej „drży”: nachodzi na niego co najmniej
-    /// w połowie i ma podobny tekst źródłowy. Blok już przejęty w tym przebiegu nie liczy się.
+    /// Wyświetlany blok zajmujący to samo miejsce co nowy odczyt (nachodzenie co najmniej
+    /// w połowie mniejszego z boxów). Blok już przejęty w tym przebiegu nie liczy się.
     /// </summary>
-    private (string Key, LiveOverlayBlock Block)? FindJitterMatch(
+    private (string Key, LiveOverlayBlock Block)? FindOverlappingDisplayed(
         KeyedTextBlock candidate, IReadOnlyDictionary<string, LiveOverlayBlock> alreadyReused)
     {
         var box = candidate.Block.Box;
         long area = (long)box.Width * box.Height;
         if (area <= 0) return null;
 
+        (string Key, LiveOverlayBlock Block)? best = null;
+        long bestOverlap = 0;
         foreach (var (key, displayed) in _displayed)
         {
             if (alreadyReused.ContainsKey(key) || displayed.SourceText.Length == 0) continue;
@@ -517,10 +521,13 @@ public sealed class LiveTranslationSession(
             long displayedArea = (long)displayed.WindowRelativeBox.Width * displayed.WindowRelativeBox.Height;
             var overlapArea = (long)overlap.Width * overlap.Height;
             if (overlapArea < Math.Min(area, displayedArea) * JitterOverlapFraction) continue;
-            if (TextSimilarity.Ratio(candidate.NormalizedText, displayed.SourceText) < JitterSimilarityThreshold) continue;
-            return (key, displayed);
+            if (overlapArea > bestOverlap)
+            {
+                bestOverlap = overlapArea;
+                best = (key, displayed);
+            }
         }
-        return null;
+        return best;
     }
 
     private async Task ProcessFrameAsync(
@@ -610,7 +617,7 @@ public sealed class LiveTranslationSession(
                 continue;
             }
 
-            var match = FindJitterMatch(candidate, reused);
+            var match = FindOverlappingDisplayed(candidate, reused);
             if (match is null)
             {
                 accepted.Add(candidate);
@@ -618,13 +625,30 @@ public sealed class LiveTranslationSession(
             }
 
             var (oldKey, old) = match.Value;
+            var similarity = TextSimilarity.Ratio(candidate.NormalizedText, old.SourceText);
+            var candidateQuality = ReadingQuality.Score(candidate.NormalizedText);
+            var displayedQuality = ReadingQuality.Score(old.SourceText);
+
+            // Wyraźnie inna i CZYSTA treść (nowa kwestia dialogu) wchodzi od razu.
+            if (similarity < JitterSimilarityThreshold && candidateQuality >= CleanReadingQuality)
+            {
+                _readingCandidates.Remove(oldKey);
+                accepted.Add(candidate);
+                continue;
+            }
+
+            // Reszta (podobny wariant albo podejrzany odczyt) musi się powtórzyć i nie może
+            // być brudniejsza od tego, co już wisi — śmieć z ruchomej grafiki nie wypiera
+            // poprawnego odczytu, a prawdziwa zmiana („Level 20” → „Level 21”) przejdzie
+            // po jednym dodatkowym przebiegu.
             if (!_readingCandidates.TryGetValue(oldKey, out var counts))
             {
                 counts = new Dictionary<string, int>(StringComparer.Ordinal);
                 _readingCandidates[oldKey] = counts;
             }
             counts[candidate.NormalizedText] = counts.GetValueOrDefault(candidate.NormalizedText) + 1;
-            if (counts[candidate.NormalizedText] >= JitterConfirmations)
+            if (counts[candidate.NormalizedText] >= JitterConfirmations
+                && candidateQuality >= displayedQuality - QualityTolerance)
             {
                 _readingCandidates.Remove(oldKey);
                 accepted.Add(candidate);

@@ -49,7 +49,8 @@ public static class TextBlockGrouper
             var matching = new List<int>();
             for (var i = 0; i < clusters.Count; i++)
             {
-                if (Belongs(clusterBoxes[i], line.Box, maxVerticalGap, maxHorizontalGap))
+                if (Belongs(clusterBoxes[i], line.Box, maxVerticalGap, maxHorizontalGap)
+                    && SimilarLineHeight(clusters[i], line))
                 {
                     matching.Add(i);
                 }
@@ -82,12 +83,67 @@ public static class TextBlockGrouper
         return clusters
             .Select(static cluster =>
             {
-                var sorted = cluster.OrderBy(static l => l.Box.Y).ThenBy(static l => l.Box.X).ToList();
+                var rows = SplitIntoRows(cluster);
+                var sorted = rows.SelectMany(static row => row).ToList();
                 var box = sorted.Aggregate(default(RectPx), static (acc, l) => acc.Union(l.Box));
-                var text = string.Join('\n', sorted.Select(static l => l.Text));
+                // Fragmenty leżące w jednym wierszu (OCR potrafi pociąć „Chapter One: Fall Term”
+                // na dwie „linie” obok siebie) łączymy spacją — inaczej tłumaczenie
+                // dostałoby sztuczny podział na dwa wiersze, a nakładka dwuwierszową czcionkę.
+                var text = string.Join('\n', rows.Select(static row => string.Join(' ', row.Select(static l => l.Text))));
                 return new TextBlock(text, box, sorted);
             })
             .ToList();
+    }
+
+    /// <summary>
+    /// Dzieli linie klastra na wiersze wizualne: linia trafia do bieżącego wiersza, gdy
+    /// w pionie nachodzi na niego co najmniej w połowie swojej (lub jego) wysokości.
+    /// Wewnątrz wiersza kolejność czytania wyznacza X.
+    /// </summary>
+    private static List<List<OcrLine>> SplitIntoRows(List<OcrLine> cluster)
+    {
+        var byTop = cluster.OrderBy(static l => l.Box.Y).ThenBy(static l => l.Box.X).ToList();
+        var rows = new List<List<OcrLine>>();
+        var rowTop = 0;
+        var rowBottom = 0;
+
+        foreach (var line in byTop)
+        {
+            if (rows.Count > 0)
+            {
+                var overlap = Math.Min(rowBottom, line.Box.Bottom) - Math.Max(rowTop, line.Box.Y);
+                var reference = Math.Max(1, Math.Min(rowBottom - rowTop, line.Box.Height));
+                if (overlap >= reference * 0.5)
+                {
+                    rows[^1].Add(line);
+                    rowTop = Math.Min(rowTop, line.Box.Y);
+                    rowBottom = Math.Max(rowBottom, line.Box.Bottom);
+                    continue;
+                }
+            }
+
+            rows.Add([line]);
+            rowTop = line.Box.Y;
+            rowBottom = line.Box.Bottom;
+        }
+
+        foreach (var row in rows)
+        {
+            row.Sort(static (a, b) => a.Box.X.CompareTo(b.Box.X));
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// Linia o wysokości różniącej się od typowej wysokości klastra ponad 2,2× to inny
+    /// element interfejsu (podpowiedź „Tab” obok daty, nagłówek nad drobnym opisem) —
+    /// sklejenie ich dałoby blok o sztucznie wysokim boxie i nieczytelne tłumaczenie.
+    /// </summary>
+    private static bool SimilarLineHeight(List<OcrLine> cluster, OcrLine line)
+    {
+        var typical = MedianLineHeight(cluster);
+        var ratio = (double)Math.Max(typical, line.Box.Height) / Math.Max(1, Math.Min(typical, line.Box.Height));
+        return ratio <= 2.2;
     }
 
     private static bool Belongs(RectPx cluster, RectPx line, double maxVerticalGap, double maxHorizontalGap)
