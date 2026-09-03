@@ -215,10 +215,23 @@ public static class TextColorSampler
 /// jak i ciemnego tekstu na jasnym oknie (visual novele), gdzie sampler „tylko
 /// jasnych pikseli” brał tło za tekst.
 /// </summary>
+public sealed record BlockColors(int TextRgb, int BackgroundRgb, int OutlineRgb = -1)
+{
+    public static readonly BlockColors Unknown = new(-1, -1, -1);
+}
+
 public static class BlockColorSampler
 {
-    /// <summary>Zwraca (kolorTekstu, kolorTła) jako 0xRRGGBB; -1 gdy nie da się ustalić.</summary>
-    public static (int TextRgb, int BackgroundRgb) SampleColors(
+    /// <summary>Największy wycinek analizowany piksel po pikselu; większe są próbkowane co 2 px.</summary>
+    private const int FullResolutionArea = 60_000;
+
+    /// <summary>
+    /// Zwraca kolory bloku jako 0xRRGGBB (-1 = nieustalony): tekst, tło oraz obwódka —
+    /// czcionki gier prawie zawsze mają ciemny (lub jasny) kontur wokół glifów i to on
+    /// robi „natywność” tłumaczenia. Kontur to piksele sąsiadujące z pikselami tekstu,
+    /// które wyraźnie odstają od tła w stronę przeciwną niż tekst.
+    /// </summary>
+    public static BlockColors SampleColors(
         byte[] pixelsBgra32, int width, int height, int stride,
         GameTranslatorOverlay.Core.Ocr.RectPx box)
     {
@@ -226,73 +239,147 @@ public static class BlockColorSampler
         var y0 = Math.Max(0, box.Y);
         var x1 = Math.Min(width, box.Right);
         var y1 = Math.Min(height, box.Bottom);
-        if (x1 <= x0 || y1 <= y0) return (-1, -1);
+        if (x1 <= x0 || y1 <= y0) return BlockColors.Unknown;
 
-        var lums = new List<float>();
-        var rs = new List<byte>();
-        var gs = new List<byte>();
-        var bs = new List<byte>();
-        for (var y = y0; y < y1; y += 2)
+        var step = (long)(x1 - x0) * (y1 - y0) > FullResolutionArea ? 2 : 1;
+        var cols = (x1 - x0 + step - 1) / step;
+        var rows = (y1 - y0 + step - 1) / step;
+        var count = cols * rows;
+        if (count < 16) return BlockColors.Unknown;
+
+        var lums = new float[count];
+        var rs = new byte[count];
+        var gs = new byte[count];
+        var bs = new byte[count];
+        var i = 0;
+        for (var y = y0; y < y1; y += step)
         {
             var rowOffset = y * stride;
-            for (var x = x0; x < x1; x += 2)
+            for (var x = x0; x < x1; x += step)
             {
                 var offset = rowOffset + x * 4;
                 var b = pixelsBgra32[offset];
                 var g = pixelsBgra32[offset + 1];
                 var r = pixelsBgra32[offset + 2];
-                lums.Add(0.299f * r + 0.587f * g + 0.114f * b);
-                rs.Add(r);
-                gs.Add(g);
-                bs.Add(b);
+                lums[i] = 0.299f * r + 0.587f * g + 0.114f * b;
+                rs[i] = r;
+                gs[i] = g;
+                bs[i] = b;
+                i++;
             }
         }
-
-        if (lums.Count < 16) return (-1, -1);
 
         var min = lums.Min();
         var max = lums.Max();
         if (max - min < 30f)
         {
             // Płaski wycinek bez kontrastu — tekstu nie da się odróżnić, tło = średnia.
-            return (-1, AverageRgb(rs, gs, bs, lums, threshold: float.MaxValue, takeBelow: true));
+            return new BlockColors(-1, AverageRgb(rs, gs, bs, lums, _ => true));
         }
 
-        // 2-średnie po jasności: kilka iteracji w zupełności wystarcza.
-        var threshold = (min + max) / 2f;
-        for (var i = 0; i < 4; i++)
+        // 3-średnie po jasności (tło / tekst / ewentualna obwódka). Dwa klastry
+        // myliłyby ciemną obwódkę jasnego tekstu z samym tekstem — kontur bywa
+        // klastrem mniejszościowym i „wygrywałby” jako tekst.
+        var centers = new[] { min, (min + max) / 2f, max };
+        var cluster = new int[count];
+        var counts = new int[3];
+        for (var iteration = 0; iteration < 6; iteration++)
         {
-            float sumLow = 0, sumHigh = 0;
-            int countLow = 0, countHigh = 0;
-            foreach (var lum in lums)
+            var sums = new float[3];
+            Array.Clear(counts);
+            for (var k = 0; k < count; k++)
             {
-                if (lum < threshold) { sumLow += lum; countLow++; }
-                else { sumHigh += lum; countHigh++; }
+                var best = 0;
+                var bestDistance = Math.Abs(lums[k] - centers[0]);
+                for (var c = 1; c < 3; c++)
+                {
+                    var distance = Math.Abs(lums[k] - centers[c]);
+                    if (distance < bestDistance) { bestDistance = distance; best = c; }
+                }
+                cluster[k] = best;
+                sums[best] += lums[k];
+                counts[best]++;
             }
-            if (countLow == 0 || countHigh == 0) break;
-            threshold = (sumLow / countLow + sumHigh / countHigh) / 2f;
+            for (var c = 0; c < 3; c++)
+            {
+                if (counts[c] > 0) centers[c] = sums[c] / counts[c];
+            }
         }
 
-        var below = lums.Count(l => l < threshold);
-        var above = lums.Count - below;
-        if (below == 0 || above == 0) return (-1, -1);
+        var backgroundCluster = Array.IndexOf(counts, counts.Max());
+        var others = Enumerable.Range(0, 3).Where(c => c != backgroundCluster).OrderByDescending(c => counts[c]).ToArray();
+        var textCluster = others[0];
+        var outlineCluster = others[1];
 
-        // Znaki zajmują mniejszość pola bloku; przy remisie jaśniejszy klaster to tekst.
-        var textIsDark = below < above;
-        var textRgb = AverageRgb(rs, gs, bs, lums, threshold, takeBelow: textIsDark);
-        var backgroundRgb = AverageRgb(rs, gs, bs, lums, threshold, takeBelow: !textIsDark);
-        return (textRgb, backgroundRgb);
+        var minimumCluster = Math.Max(4, count / 50);
+        if (counts[textCluster] < minimumCluster) return new BlockColors(-1, AverageRgb(rs, gs, bs, lums, _ => true));
+
+        var isText = new bool[count];
+        for (var k = 0; k < count; k++) isText[k] = cluster[k] == textCluster;
+
+        var textRgb = AverageRgb(rs, gs, bs, lums, k => isText[k]);
+        var backgroundRgb = AverageRgb(rs, gs, bs, lums, k => cluster[k] == backgroundCluster);
+        var outlineRgb = counts[outlineCluster] >= Math.Max(8, minimumCluster)
+            ? SampleOutline(rs, gs, bs, lums, isText, cluster, outlineCluster, cols, rows)
+            : -1;
+        return new BlockColors(textRgb, backgroundRgb, outlineRgb);
     }
 
-    private static int AverageRgb(
-        List<byte> rs, List<byte> gs, List<byte> bs, List<float> lums, float threshold, bool takeBelow)
+    /// <summary>
+    /// Kontur to trzeci klaster, ale tylko wtedy, gdy jego piksele faktycznie STYKAJĄ SIĘ
+    /// z tekstem (wyraźna większość) — w przeciwnym razie to np. drugi kolor tła.
+    /// </summary>
+    private static int SampleOutline(
+        byte[] rs, byte[] gs, byte[] bs, float[] lums, bool[] isText, int[] cluster, int outlineCluster,
+        int cols, int rows)
+    {
+        long sumR = 0, sumG = 0, sumB = 0;
+        var outlineCount = 0;
+        var touching = 0;
+
+        for (var row = 0; row < rows; row++)
+        {
+            for (var col = 0; col < cols; col++)
+            {
+                var index = row * cols + col;
+                if (cluster[index] != outlineCluster) continue;
+                outlineCount++;
+                if (!TouchesText(isText, cols, rows, col, row)) continue;
+                touching++;
+                sumR += rs[index];
+                sumG += gs[index];
+                sumB += bs[index];
+            }
+        }
+
+        if (touching < 8 || touching < outlineCount * 0.6) return -1;
+        return (int)(sumR / touching) << 16 | (int)(sumG / touching) << 8 | (int)(sumB / touching);
+    }
+
+    private static bool TouchesText(bool[] isText, int cols, int rows, int col, int row)
+    {
+        for (var dy = -1; dy <= 1; dy++)
+        {
+            var y = row + dy;
+            if (y < 0 || y >= rows) continue;
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                var x = col + dx;
+                if (x < 0 || x >= cols) continue;
+                if (isText[y * cols + x]) return true;
+            }
+        }
+        return false;
+    }
+
+    private static int AverageRgb(byte[] rs, byte[] gs, byte[] bs, float[] lums, Func<int, bool> take)
     {
         long sumR = 0, sumG = 0, sumB = 0;
         var count = 0;
-        for (var i = 0; i < lums.Count; i++)
+        for (var i = 0; i < lums.Length; i++)
         {
-            var isBelow = lums[i] < threshold;
-            if (isBelow != takeBelow) continue;
+            if (!take(i)) continue;
             sumR += rs[i];
             sumG += gs[i];
             sumB += bs[i];

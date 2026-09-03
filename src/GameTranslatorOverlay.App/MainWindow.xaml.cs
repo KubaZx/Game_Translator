@@ -654,7 +654,20 @@ public partial class MainWindow : Window
 
         BtnStartLive.IsEnabled = false;
         BtnStopLive.IsEnabled = true;
+        SetLiveIndicator(LiveIndicatorState.Active);
         SetStatus($"Tryb live uruchomiony dla „{window.Title}” ({options.Fps:0.#} analiz/s).");
+    }
+
+    private enum LiveIndicatorState { Idle, Active, Paused }
+
+    private void SetLiveIndicator(LiveIndicatorState state)
+    {
+        LiveIndicator.Fill = new System.Windows.Media.SolidColorBrush(state switch
+        {
+            LiveIndicatorState.Active => System.Windows.Media.Color.FromRgb(0x43, 0xA0, 0x47),
+            LiveIndicatorState.Paused => System.Windows.Media.Color.FromRgb(0xFF, 0xB3, 0x00),
+            _ => System.Windows.Media.Color.FromRgb(0x54, 0x6E, 0x7A),
+        });
     }
 
     private void HandleLiveUpdate(LiveUpdate update)
@@ -669,6 +682,11 @@ public partial class MainWindow : Window
         {
             // Ruch sceny: bloki są chwilowo nieaktualne — chowamy, wrócą po najbliższym OCR.
             _overlay.Hide();
+            SetLiveIndicator(LiveIndicatorState.Paused);
+        }
+        else if (update.Blocks is not null && !update.Stopped)
+        {
+            SetLiveIndicator(LiveIndicatorState.Active);
         }
         if (update.Stopped)
         {
@@ -703,6 +721,7 @@ public partial class MainWindow : Window
         _liveSession = null;
         BtnStartLive.IsEnabled = true;
         BtnStopLive.IsEnabled = false;
+        SetLiveIndicator(LiveIndicatorState.Idle);
     }
 
     private void OnStopLiveClick(object sender, RoutedEventArgs e)

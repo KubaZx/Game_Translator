@@ -13,6 +13,7 @@ public sealed record LiveOverlayBlock(
     int LineHeight,
     int ColorRgb,
     int BackgroundRgb = -1,
+    int OutlineRgb = -1,
     int Misses = 0);
 
 /// <summary>

@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace GameTranslatorOverlay.App.Services;
 
 public sealed record LiveDisplayBlock(
-    string Key, RectPx ScreenBox, string TranslatedText, int LineHeight = 0, int ColorRgb = -1, int BackgroundRgb = -1);
+    string Key, RectPx ScreenBox, string TranslatedText, int LineHeight = 0, int ColorRgb = -1, int BackgroundRgb = -1, int OutlineRgb = -1);
 
 public sealed record LiveUpdate(
     string StatusLine,
@@ -160,7 +160,8 @@ public sealed class LiveTranslationSession(
                 kv.Value.TranslatedText,
                 kv.Value.LineHeight,
                 kv.Value.ColorRgb,
-                kv.Value.BackgroundRgb))
+                kv.Value.BackgroundRgb,
+                kv.Value.OutlineRgb))
             .ToList();
 
     private async Task LoopAsync(CancellationToken cancellationToken)
@@ -594,7 +595,7 @@ public sealed class LiveTranslationSession(
                 (int)((box.Y - ocrRegion.Y) / scaleBack),
                 Math.Max(1, (int)(box.Width / scaleBack)),
                 Math.Max(1, (int)(box.Height / scaleBack)));
-            var (colorRgb, backgroundRgb) = BlockColorSampler.SampleColors(
+            var (colorRgb, backgroundRgb, outlineRgb) = BlockColorSampler.SampleColors(
                 frame.PixelsBgra32, frame.Width, frame.Height, frame.Stride, sampleBox);
 
             var key = keyed[i].Key;
@@ -628,6 +629,10 @@ public sealed class LiveTranslationSession(
                 {
                     backgroundRgb = previous.BackgroundRgb;
                 }
+                if (previous.OutlineRgb >= 0)
+                {
+                    outlineRgb = previous.OutlineRgb;
+                }
             }
 
             next[key] = new LiveOverlayBlock(
@@ -636,7 +641,8 @@ public sealed class LiveTranslationSession(
                 TextNormalizer.Normalize(translated),
                 lineHeight,
                 colorRgb,
-                backgroundRgb);
+                backgroundRgb,
+                outlineRgb);
             claimedBoxes.Add(box);
             if (!_displayed.ContainsKey(key))
             {

@@ -212,7 +212,7 @@ public class VisionTests
     {
         var pixels = TextOnBackgroundBgra(40, 12, background: 20, text: 230, textFraction: 0.25);
 
-        var (text, bg) = BlockColorSampler.SampleColors(pixels, 40, 12, 40 * 4, new RectPx(0, 0, 40, 12));
+        var (text, bg, _) = BlockColorSampler.SampleColors(pixels, 40, 12, 40 * 4, new RectPx(0, 0, 40, 12));
 
         Assert.True((text & 0xFF) > 200, $"Tekst powinien być jasny, a jest {text:X6}");
         Assert.True((bg & 0xFF) < 60, $"Tło powinno być ciemne, a jest {bg:X6}");
@@ -224,7 +224,7 @@ public class VisionTests
         // Visual novel: czarne litery na białym oknie — tekst to klaster mniejszościowy.
         var pixels = TextOnBackgroundBgra(40, 12, background: 240, text: 15, textFraction: 0.3);
 
-        var (text, bg) = BlockColorSampler.SampleColors(pixels, 40, 12, 40 * 4, new RectPx(0, 0, 40, 12));
+        var (text, bg, _) = BlockColorSampler.SampleColors(pixels, 40, 12, 40 * 4, new RectPx(0, 0, 40, 12));
 
         Assert.True((text & 0xFF) < 60, $"Tekst powinien być ciemny, a jest {text:X6}");
         Assert.True((bg & 0xFF) > 200, $"Tło powinno być jasne, a jest {bg:X6}");
@@ -235,10 +235,46 @@ public class VisionTests
     {
         var pixels = SolidBgra(32, 12, 120);
 
-        var (text, bg) = BlockColorSampler.SampleColors(pixels, 32, 12, 32 * 4, new RectPx(0, 0, 32, 12));
+        var (text, bg, outline) = BlockColorSampler.SampleColors(pixels, 32, 12, 32 * 4, new RectPx(0, 0, 32, 12));
 
         Assert.Equal(-1, text);
         Assert.True(bg >= 0, "Kolor tła powinien być ustalony ze średniej");
+        Assert.Equal(-1, outline);
+    }
+
+    [Fact]
+    public void BlockColorSampler_wykrywa_ciemna_obwodke_jasnego_tekstu()
+    {
+        // Szare tło (150), jasny tekst (240) w kolumnach 10–19, ciemny kontur (20) w kolumnach 9 i 20.
+        const int width = 40;
+        const int height = 12;
+        var pixels = SolidBgra(width, height, 150);
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 9; x <= 20; x++)
+            {
+                var value = (byte)(x is 9 or 20 ? 20 : 240);
+                var offset = (y * width + x) * 4;
+                pixels[offset] = value;
+                pixels[offset + 1] = value;
+                pixels[offset + 2] = value;
+            }
+        }
+
+        var colors = BlockColorSampler.SampleColors(pixels, width, height, width * 4, new RectPx(0, 0, width, height));
+
+        Assert.True((colors.TextRgb & 0xFF) > 200, $"Tekst jasny, a jest {colors.TextRgb:X6}");
+        Assert.True(colors.OutlineRgb >= 0 && (colors.OutlineRgb & 0xFF) < 60, $"Obwódka ciemna, a jest {colors.OutlineRgb:X6}");
+    }
+
+    [Fact]
+    public void BlockColorSampler_bez_obwodki_zwraca_minus_jeden()
+    {
+        var pixels = TextOnBackgroundBgra(40, 12, background: 20, text: 230, textFraction: 0.25);
+
+        var colors = BlockColorSampler.SampleColors(pixels, 40, 12, 40 * 4, new RectPx(0, 0, 40, 12));
+
+        Assert.Equal(-1, colors.OutlineRgb);
     }
 
     [Fact]

@@ -169,8 +169,54 @@ public partial class OverlayWindow : Window
         return textBlock;
     }
 
+    private static double GetFontSize(Border element) => element.Child switch
+    {
+        OutlinedTextBlock outlined => outlined.FontSize,
+        TextBlock text => text.FontSize,
+        _ => 0,
+    };
+
+    private static void SetFontSize(Border element, double fontSize)
+    {
+        switch (element.Child)
+        {
+            case OutlinedTextBlock outlined: outlined.FontSize = fontSize; break;
+            case TextBlock text: text.FontSize = fontSize; break;
+        }
+    }
+
+    private static string GetText(Border element) => element.Child switch
+    {
+        OutlinedTextBlock outlined => outlined.Text,
+        TextBlock text => text.Text,
+        _ => string.Empty,
+    };
+
+    private static void SetText(Border element, string value)
+    {
+        switch (element.Child)
+        {
+            case OutlinedTextBlock outlined: outlined.Text = value; break;
+            case TextBlock text: text.Text = value; break;
+        }
+    }
+
+    private static void SetLineHeight(Border element, double lineHeight)
+    {
+        switch (element.Child)
+        {
+            case OutlinedTextBlock outlined:
+                outlined.SetLineHeight(lineHeight, LineStackingStrategy.BlockLineHeight);
+                break;
+            case TextBlock text:
+                text.LineHeight = lineHeight;
+                text.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+                break;
+        }
+    }
+
     private Border CreateBlockElement(
-        string text, AppSettings settings, double scale, int lineHeightPx, int colorRgb = -1, int backgroundRgb = -1)
+        string text, AppSettings settings, double scale, int lineHeightPx, int colorRgb = -1, int backgroundRgb = -1, int outlineRgb = -1)
     {
         var cover = IsCoverPlacement(settings);
         var sampledCover = cover && !IsBackgroundless(settings) && backgroundRgb >= 0;
@@ -200,10 +246,22 @@ public partial class OverlayWindow : Window
         }
 
         var textBlock = CreateBlockText(text, settings, ResolveFontSize(settings, lineHeightPx, scale), colorRgb, sampledCover ? backgroundRgb : -1);
+        var multiLine = text.Contains('\n');
         if (cover)
         {
-            // W trybie zakrywania tekst centruje się w prostokącie oryginału.
-            textBlock.VerticalAlignment = VerticalAlignment.Center;
+            // Jednoliniowy tekst centruje się w polu oryginału; wieloliniowy trzyma górę,
+            // bo jego wiersze dostają wysokość linii oryginału (PositionBlockElement).
+            textBlock.VerticalAlignment = multiLine ? VerticalAlignment.Top : VerticalAlignment.Center;
+        }
+
+        // Kontur w kolorze z gry — to on robi „natywność” czcionki. Zastępuje rozmytą
+        // czarną poświatę trybu bez tła, a nad światem 3D pozwala w ogóle zrezygnować z łatki.
+        FrameworkElement content = textBlock;
+        if (outlineRgb >= 0)
+        {
+            textBlock.Effect = null;
+            content = new OutlinedTextBlock(textBlock, Color.FromRgb(
+                (byte)(outlineRgb >> 16), (byte)(outlineRgb >> 8), (byte)outlineRgb));
         }
 
         var element = new Border
@@ -212,7 +270,7 @@ public partial class OverlayWindow : Window
             // Wtopiona łatka ma udawać tekst gry: bez dymkowych rogów i grubego paddingu.
             CornerRadius = new CornerRadius(sampledCover ? 1 : 4),
             Padding = IsBackgroundless(settings) || sampledCover ? new Thickness(0) : new Thickness(7, 4, 7, 4),
-            Child = textBlock,
+            Child = content,
         };
 
         // Płynne pojawianie zamiast wyskakiwania.
@@ -246,18 +304,27 @@ public partial class OverlayWindow : Window
 
         element.MaxWidth = Math.Max(140, (monitor.Bounds.Right - box.X) / scale - 12);
 
-        // Wtapianie jednoliniowych napisów: polski bywa ~20% dłuższy — zmniejszamy
-        // czcionkę, aż tekst zmieści się w polu oryginału (z małym zapasem), zamiast
-        // rozpychać łatkę po sąsiednim UI gry albo łamać wiersz.
-        if (cover && element.Child is TextBlock coverText && element.Tag is int coverLineHeight
-            && coverLineHeight > 0 && coverLineHeight >= box.Height * 0.6)
+        // Wtapianie: polski bywa ~20% dłuższy — zmniejszamy czcionkę, aż tekst zmieści
+        // się w polu oryginału (z małym zapasem), zamiast rozpychać łatkę po sąsiednim UI
+        // gry. Bloki wieloliniowe dostają wysokość wiersza równą oryginałowi, żeby
+        // kolejne linie tłumaczenia kładły się na liniach oryginału.
+        if (cover && element.Tag is int coverLineHeight && coverLineHeight > 0)
         {
-            coverText.FontSize = ResolveFontSize(settings, coverLineHeight, scale);
-            for (var i = 0; i < 8 && coverText.FontSize > 9; i++)
+            var lineCount = Math.Max(1, GetText(element).Count(static c => c == '\n') + 1);
+            var fontSize = ResolveFontSize(settings, coverLineHeight, scale);
+            if (lineCount > 1)
+            {
+                var pitch = box.Height / scale / lineCount;
+                fontSize = Math.Min(fontSize, Math.Max(9, pitch / 1.25));
+                SetLineHeight(element, pitch);
+            }
+            SetFontSize(element, fontSize);
+
+            for (var i = 0; i < 8 && GetFontSize(element) > 9; i++)
             {
                 element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
                 if (element.DesiredSize.Width <= element.MinWidth * 1.08) break;
-                coverText.FontSize = Math.Max(9, coverText.FontSize * 0.93);
+                SetFontSize(element, Math.Max(9, GetFontSize(element) * 0.93));
             }
         }
 
@@ -354,9 +421,9 @@ public partial class OverlayWindow : Window
                 && element.Tag is int previousLineHeight
                 && previousLineHeight == block.LineHeight)
             {
-                if (element.Child is TextBlock textBlock && textBlock.Text != block.TranslatedText)
+                if (GetText(element) != block.TranslatedText)
                 {
-                    textBlock.Text = block.TranslatedText;
+                    SetText(element, block.TranslatedText);
                 }
             }
             else
@@ -366,7 +433,8 @@ public partial class OverlayWindow : Window
                     RootCanvas.Children.Remove(element);
                 }
                 element = CreateBlockElement(
-                    block.TranslatedText, settings, monitor.Scale, block.LineHeight, block.ColorRgb, block.BackgroundRgb);
+                    block.TranslatedText, settings, monitor.Scale, block.LineHeight,
+                    block.ColorRgb, block.BackgroundRgb, block.OutlineRgb);
                 element.Tag = block.LineHeight;
                 _liveElements[block.Key] = element;
                 RootCanvas.Children.Add(element);
