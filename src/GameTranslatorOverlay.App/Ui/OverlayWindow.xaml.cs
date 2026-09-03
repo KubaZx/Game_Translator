@@ -23,6 +23,7 @@ public partial class OverlayWindow : Window
     private readonly DispatcherTimer _manualClearTimer = new();
     private readonly DispatcherTimer _subtitleTimer = new();
     private readonly Dictionary<string, Border> _liveElements = [];
+    private readonly Dictionary<string, BackgroundTexture> _liveTextures = [];
     private readonly List<Border> _manualElements = [];
     private Border? _subtitleElement;
     private MonitorArea? _monitor;
@@ -441,6 +442,7 @@ public partial class OverlayWindow : Window
         {
             RootCanvas.Children.Remove(_liveElements[staleKey]);
             _liveElements.Remove(staleKey);
+            _liveTextures.Remove(staleKey);
         }
 
         foreach (var block in blocks)
@@ -455,6 +457,15 @@ public partial class OverlayWindow : Window
                 {
                     SetText(element, block.TranslatedText);
                 }
+
+                // Grafika pod napisem mogła się przewinąć — podmieniamy samą teksturę tła
+                // w miejscu, bez odtwarzania (i fade-inu) dymka.
+                if (block.Texture is not null && IsCoverPlacement(settings) && !IsBackgroundless(settings)
+                    && (!_liveTextures.TryGetValue(block.Key, out var shown) || !ReferenceEquals(shown, block.Texture)))
+                {
+                    element.Background = CreateTextureBrush(block.Texture, 1.0);
+                    _liveTextures[block.Key] = block.Texture;
+                }
             }
             else
             {
@@ -467,6 +478,7 @@ public partial class OverlayWindow : Window
                     block.ColorRgb, block.BackgroundRgb, block.OutlineRgb, block.Texture);
                 element.Tag = block.LineHeight;
                 _liveElements[block.Key] = element;
+                if (block.Texture is not null) _liveTextures[block.Key] = block.Texture;
                 RootCanvas.Children.Add(element);
             }
 
@@ -580,6 +592,7 @@ public partial class OverlayWindow : Window
             RootCanvas.Children.Remove(element);
         }
         _liveElements.Clear();
+        _liveTextures.Clear();
         HideIfEmpty();
     }
 
@@ -589,6 +602,7 @@ public partial class OverlayWindow : Window
         _subtitleTimer.Stop();
         RootCanvas.Children.Clear();
         _liveElements.Clear();
+        _liveTextures.Clear();
         _manualElements.Clear();
         _subtitleElement = null;
         _hiddenByUser = false;

@@ -123,6 +123,13 @@ public sealed class LiveTranslationSession(
     private TimeSpan _lastProcessedAt;
     private int _whiffRetries;
     private bool _whiffRetryRequested;
+
+    /// <summary>Kandydaci na nowy odczyt istniejącego bloku: klucz bloku → (tekst → ile razy widziany).</summary>
+    private readonly Dictionary<string, Dictionary<string, int>> _readingCandidates = new(StringComparer.Ordinal);
+
+    private const double JitterSimilarityThreshold = 0.5;
+    private const double JitterOverlapFraction = 0.5;
+    private const int JitterConfirmations = 2;
     private RectPx _lastEmittedBounds;
     private bool _warnedAboutScreenFallback;
     private int _consecutiveFailures;
@@ -491,6 +498,31 @@ public sealed class LiveTranslationSession(
         return (changedFraction, strongFraction, significantFraction, false);
     }
 
+    /// <summary>
+    /// Wyświetlany blok, który nowy odczyt najpewniej „drży”: nachodzi na niego co najmniej
+    /// w połowie i ma podobny tekst źródłowy. Blok już przejęty w tym przebiegu nie liczy się.
+    /// </summary>
+    private (string Key, LiveOverlayBlock Block)? FindJitterMatch(
+        KeyedTextBlock candidate, IReadOnlyDictionary<string, LiveOverlayBlock> alreadyReused)
+    {
+        var box = candidate.Block.Box;
+        long area = (long)box.Width * box.Height;
+        if (area <= 0) return null;
+
+        foreach (var (key, displayed) in _displayed)
+        {
+            if (alreadyReused.ContainsKey(key) || displayed.SourceText.Length == 0) continue;
+            var overlap = box.Intersect(displayed.WindowRelativeBox);
+            if (overlap.IsEmpty) continue;
+            long displayedArea = (long)displayed.WindowRelativeBox.Width * displayed.WindowRelativeBox.Height;
+            var overlapArea = (long)overlap.Width * overlap.Height;
+            if (overlapArea < Math.Min(area, displayedArea) * JitterOverlapFraction) continue;
+            if (TextSimilarity.Ratio(candidate.NormalizedText, displayed.SourceText) < JitterSimilarityThreshold) continue;
+            return (key, displayed);
+        }
+        return null;
+    }
+
     private async Task ProcessFrameAsync(
         OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr,
         long captureMs, double peakChangedFraction, CancellationToken cancellationToken)
@@ -562,6 +594,47 @@ public sealed class LiveTranslationSession(
             .Where(k => !displayedTranslations.Contains(k.NormalizedText))
             .ToList();
 
+        // Stabilizacja odczytów: nad ruchomą/zajętą grafiką OCR czyta ten sam napis za
+        // każdym razem trochę inaczej („Last Played: 06.08.2026” / „Lasi Played: 06.0840261”).
+        // Każdy wariant to nowy klucz, nowe zapytanie do API i nowy dymek — miganie.
+        // Blok podobny do już wyświetlanego w tym samym miejscu przejmuje jego tłumaczenie;
+        // nowy odczyt zastępuje stary dopiero, gdy powtórzy się (prawdziwa zmiana treści
+        // jest stabilna, drżenie OCR — nie).
+        var reused = new Dictionary<string, LiveOverlayBlock>(StringComparer.Ordinal);
+        var accepted = new List<KeyedTextBlock>(keyed.Count);
+        foreach (var candidate in keyed)
+        {
+            if (_displayed.ContainsKey(candidate.Key))
+            {
+                accepted.Add(candidate);
+                continue;
+            }
+
+            var match = FindJitterMatch(candidate, reused);
+            if (match is null)
+            {
+                accepted.Add(candidate);
+                continue;
+            }
+
+            var (oldKey, old) = match.Value;
+            if (!_readingCandidates.TryGetValue(oldKey, out var counts))
+            {
+                counts = new Dictionary<string, int>(StringComparer.Ordinal);
+                _readingCandidates[oldKey] = counts;
+            }
+            counts[candidate.NormalizedText] = counts.GetValueOrDefault(candidate.NormalizedText) + 1;
+            if (counts[candidate.NormalizedText] >= JitterConfirmations)
+            {
+                _readingCandidates.Remove(oldKey);
+                accepted.Add(candidate);
+                continue;
+            }
+
+            reused[oldKey] = old with { Misses = 0 };
+        }
+        keyed = accepted;
+
         var translateWatch = Stopwatch.StartNew();
         var outcomes = await orchestrator.TranslateTextsAsync(
             keyed.Select(static k => k.Block.Text).ToList(), cancellationToken).ConfigureAwait(false);
@@ -614,16 +687,19 @@ public sealed class LiveTranslationSession(
                 // Histereza stylu: kolejne przebiegi OCR pływają o piksele (wycinek ×2
                 // vs pełna klatka, animacje pod tekstem) — nie przebudowujemy wyglądu
                 // bloku, dopóki zmiana nie jest znacząca. Koniec z „oddychającą” czcionką.
-                if (Math.Abs(previous.LineHeight - lineHeight) <= Math.Max(2, previous.LineHeight / 5))
+                // Tolerancje szerokie: box OCR faluje (raz z obwódką, raz bez), a każda
+                // zmiana rozmiaru odtwarza dymek od nowa — widoczne jako skok czcionki.
+                if (Math.Abs(previous.LineHeight - lineHeight) <= Math.Max(2, previous.LineHeight * 0.35))
                 {
                     lineHeight = previous.LineHeight;
                 }
-                if (Math.Abs(previous.WindowRelativeBox.X - box.X) <= 6
-                    && Math.Abs(previous.WindowRelativeBox.Y - box.Y) <= 6
-                    && Math.Abs(previous.WindowRelativeBox.Width - box.Width) <= 12
-                    && Math.Abs(previous.WindowRelativeBox.Height - box.Height) <= 12)
+                var prevBox = previous.WindowRelativeBox;
+                if (Math.Abs(prevBox.X - box.X) <= Math.Max(6, box.Width * 0.05)
+                    && Math.Abs(prevBox.Y - box.Y) <= Math.Max(6, box.Height * 0.25)
+                    && Math.Abs(prevBox.Width - box.Width) <= Math.Max(12, box.Width * 0.15)
+                    && Math.Abs(prevBox.Height - box.Height) <= Math.Max(12, box.Height * 0.35))
                 {
-                    box = previous.WindowRelativeBox;
+                    box = prevBox;
                 }
                 if (previous.ColorRgb >= 0)
                 {
@@ -637,10 +713,8 @@ public sealed class LiveTranslationSession(
                 {
                     outlineRgb = previous.OutlineRgb;
                 }
-                if (previous.Texture is not null)
-                {
-                    texture = previous.Texture;
-                }
+                // Tekstura tła celowo BEZ histerezy — pod napisem może przewijać się grafika,
+                // a nakładka podmienia ją w miejscu, bez odtwarzania dymka.
             }
 
             next[key] = new LiveOverlayBlock(
@@ -651,7 +725,8 @@ public sealed class LiveTranslationSession(
                 colorRgb,
                 backgroundRgb,
                 outlineRgb,
-                Texture: texture);
+                Texture: texture,
+                SourceText: keyed[i].NormalizedText);
             claimedBoxes.Add(box);
             if (!_displayed.ContainsKey(key))
             {
@@ -662,6 +737,12 @@ public sealed class LiveTranslationSession(
         // Okres łaski: bloki, których ten przebieg nie widział, nie znikają od razu —
         // Windows OCR miewa puste przebiegi na niezmienionej scenie, a bez łaski każde
         // takie czknięcie zdejmowało i przywracało całą nakładkę (miganie).
+        // Bloki przejęte przez drżące odczyty zostają jak rozpoznane (bez nieobecności).
+        foreach (var (key, block) in reused)
+        {
+            next.TryAdd(key, block);
+        }
+
         var sceneCut = peakChangedFraction >= options.SceneCutThreshold;
         var survivors = LiveBlockSurvival.Survivors(
             _displayed,
@@ -701,6 +782,10 @@ public sealed class LiveTranslationSession(
         foreach (var (key, block) in next)
         {
             _displayed[key] = block;
+        }
+        foreach (var staleKey in _readingCandidates.Keys.Where(k => !next.ContainsKey(k)).ToList())
+        {
+            _readingCandidates.Remove(staleKey);
         }
 
         // Pozycje liczymy względem ŚWIEŻYCH granic okna — mogło się przesunąć
