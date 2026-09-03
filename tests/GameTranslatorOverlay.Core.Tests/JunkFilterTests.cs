@@ -13,6 +13,10 @@ public class JunkFilterTests
     [InlineData("x2")]
     [InlineData("-10%")]
     [InlineData("Adds 3 to 7 Fire Damage")]
+    [InlineData("HP")]
+    [InlineData("Lv.20")]
+    [InlineData("T3")]
+    [InlineData("Play")]
     public void IsMeaningful_przepuszcza_sensowny_tekst(string text)
     {
         Assert.True(JunkFilter.IsMeaningful(text));
@@ -27,6 +31,9 @@ public class JunkFilterTests
     [InlineData("###")]
     [InlineData("24")]
     [InlineData("-- ~~ ++")]
+    [InlineData("sc.@ß")]
+    [InlineData("D.7.4")]
+    [InlineData("0.7.4")]
     public void IsMeaningful_odrzuca_smieci(string text)
     {
         Assert.False(JunkFilter.IsMeaningful(text));

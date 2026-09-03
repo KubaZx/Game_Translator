@@ -40,6 +40,13 @@ public static class JunkFilter
             if (t.IndexOfAny(StatMarkers) < 0) return false;
         }
 
+        // Numer wersji / kod z przypadkową literą („D.7.4”, „v0.14”-podobne): OCR ikon
+        // i stopek — tłumaczenie tylko nakłada łatkę na coś, co nie jest tekstem.
+        if (letters <= 1 && digits >= 2 && t.IndexOfAny(StatMarkers) < 0) return false;
+
+        // Krótki token musi być czysty: „sc.@ß” z ikony to artefakt, nie słowo.
+        if (t.Length <= 6 && acceptable < t.Length) return false;
+
         // Zbitki symboli z pojedynczą literą/cyfrą w środku to niemal zawsze artefakt OCR.
         return acceptable >= (t.Length + 1) / 2;
     }
