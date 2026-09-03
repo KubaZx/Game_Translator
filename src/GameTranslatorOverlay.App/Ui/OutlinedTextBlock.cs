@@ -70,6 +70,13 @@ public sealed class OutlinedTextBlock : Grid
         }
     }
 
+    public void SetOutlineColor(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        foreach (var copy in _outlines) copy.Foreground = brush;
+    }
+
     public void SetLineHeight(double lineHeight, LineStackingStrategy strategy)
     {
         Primary.LineHeight = lineHeight;

@@ -24,6 +24,7 @@ public partial class OverlayWindow : Window
     private readonly DispatcherTimer _subtitleTimer = new();
     private readonly Dictionary<string, Border> _liveElements = [];
     private readonly Dictionary<string, BackgroundTexture> _liveTextures = [];
+    private readonly Dictionary<string, (int Color, int Background, int Outline)> _liveColors = [];
     private readonly List<Border> _manualElements = [];
     private Border? _subtitleElement;
     private MonitorArea? _monitor;
@@ -134,6 +135,49 @@ public partial class OverlayWindow : Window
 
     private static double Luminance(int rgb) =>
         0.299 * ((rgb >> 16) & 0xFF) + 0.587 * ((rgb >> 8) & 0xFF) + 0.114 * (rgb & 0xFF);
+
+    /// <summary>Podmiana koloru tekstu/konturu istniejącego dymka bez jego odtwarzania.</summary>
+    private static void ApplyTextColors(Border element, AppSettings settings, int colorRgb, int backgroundRgb, int outlineRgb)
+    {
+        var sampledCover = IsCoverPlacement(settings) && !IsBackgroundless(settings) && backgroundRgb >= 0;
+        var foreground = ResolveForeground(colorRgb, sampledCover ? backgroundRgb : -1);
+        switch (element.Child)
+        {
+            case OutlinedTextBlock outlined:
+                outlined.Primary.Foreground = foreground;
+                if (outlineRgb >= 0)
+                {
+                    outlined.SetOutlineColor(Color.FromRgb((byte)(outlineRgb >> 16), (byte)(outlineRgb >> 8), (byte)outlineRgb));
+                }
+                break;
+            case TextBlock text:
+                text.Foreground = foreground;
+                break;
+        }
+    }
+
+    private static Brush ResolveForeground(int colorRgb, int backgroundRgb)
+    {
+        Brush foreground = Brushes.White;
+        if (colorRgb >= 0 && backgroundRgb >= 0)
+        {
+            if (Math.Abs(Luminance(colorRgb) - Luminance(backgroundRgb)) >= 60)
+            {
+                foreground = new SolidColorBrush(Color.FromRgb(
+                    (byte)(colorRgb >> 16), (byte)(colorRgb >> 8), (byte)colorRgb));
+            }
+            else
+            {
+                foreground = Luminance(backgroundRgb) >= 128 ? Brushes.Black : Brushes.White;
+            }
+        }
+        else if (colorRgb >= 0 && Luminance(colorRgb) >= 90)
+        {
+            foreground = new SolidColorBrush(Color.FromRgb(
+                (byte)(colorRgb >> 16), (byte)(colorRgb >> 8), (byte)colorRgb));
+        }
+        return foreground;
+    }
 
     private static TextBlock CreateBlockText(
         string text, AppSettings settings, double fontSize, int colorRgb = -1, int backgroundRgb = -1)
@@ -443,6 +487,7 @@ public partial class OverlayWindow : Window
             RootCanvas.Children.Remove(_liveElements[staleKey]);
             _liveElements.Remove(staleKey);
             _liveTextures.Remove(staleKey);
+            _liveColors.Remove(staleKey);
         }
 
         foreach (var block in blocks)
@@ -466,6 +511,15 @@ public partial class OverlayWindow : Window
                     element.Background = CreateTextureBrush(block.Texture, 1.0);
                     _liveTextures[block.Key] = block.Texture;
                 }
+
+                // Zmiana tła pod napisem (najechany rząd) przeliczyła kolory — podmieniamy
+                // kolor tekstu i konturu w miejscu, bez odtwarzania dymka.
+                var colors = (block.ColorRgb, block.BackgroundRgb, block.OutlineRgb);
+                if (!_liveColors.TryGetValue(block.Key, out var shownColors) || shownColors != colors)
+                {
+                    ApplyTextColors(element, settings, block.ColorRgb, block.BackgroundRgb, block.OutlineRgb);
+                    _liveColors[block.Key] = colors;
+                }
             }
             else
             {
@@ -479,6 +533,7 @@ public partial class OverlayWindow : Window
                 element.Tag = block.LineHeight;
                 _liveElements[block.Key] = element;
                 if (block.Texture is not null) _liveTextures[block.Key] = block.Texture;
+                _liveColors[block.Key] = (block.ColorRgb, block.BackgroundRgb, block.OutlineRgb);
                 RootCanvas.Children.Add(element);
             }
 
@@ -593,6 +648,7 @@ public partial class OverlayWindow : Window
         }
         _liveElements.Clear();
         _liveTextures.Clear();
+        _liveColors.Clear();
         HideIfEmpty();
     }
 
@@ -603,6 +659,7 @@ public partial class OverlayWindow : Window
         RootCanvas.Children.Clear();
         _liveElements.Clear();
         _liveTextures.Clear();
+        _liveColors.Clear();
         _manualElements.Clear();
         _subtitleElement = null;
         _hiddenByUser = false;

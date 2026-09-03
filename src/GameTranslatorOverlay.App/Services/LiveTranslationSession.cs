@@ -501,6 +501,35 @@ public sealed class LiveTranslationSession(
     }
 
     /// <summary>
+    /// Czy powtórzony odczyt ma prawo wyprzeć obecny. Dwa równorzędne warianty tego samego
+    /// napisu (najechany rząd, ruchome tło) potwierdzałyby się na zmianę i dymek grałby
+    /// w ping-ponga — dlatego wygrywa tylko odczyt wyraźnie czystszy, pełniejszy (dłuższy),
+    /// różniący się wyłącznie cyframi (prawdziwa zmiana liczby) albo zupełnie inna treść.
+    /// </summary>
+    private static double Luminance(int rgb) =>
+        0.299 * ((rgb >> 16) & 0xFF) + 0.587 * ((rgb >> 8) & 0xFF) + 0.114 * (rgb & 0xFF);
+
+    private static bool ShouldReplaceReading(
+        string candidate, string displayed, double similarity, double candidateQuality, double displayedQuality)
+    {
+        if (candidateQuality < displayedQuality - QualityTolerance) return false;
+        if (similarity < JitterSimilarityThreshold) return true;
+        if (candidateQuality > displayedQuality + QualityTolerance) return true;
+
+        var candidateLetters = new string(candidate.Where(char.IsLetter).ToArray());
+        var displayedLetters = new string(displayed.Where(char.IsLetter).ToArray());
+        var candidateDigits = new string(candidate.Where(char.IsDigit).ToArray());
+        var displayedDigits = new string(displayed.Where(char.IsDigit).ToArray());
+        if (string.Equals(candidateLetters, displayedLetters, StringComparison.OrdinalIgnoreCase)
+            && candidateDigits != displayedDigits)
+        {
+            return true;
+        }
+
+        return candidate.Length >= displayed.Length + 2;
+    }
+
+    /// <summary>
     /// Wyświetlany blok zajmujący to samo miejsce co nowy odczyt (nachodzenie co najmniej
     /// w połowie mniejszego z boxów). Blok już przejęty w tym przebiegu nie liczy się.
     /// </summary>
@@ -608,6 +637,9 @@ public sealed class LiveTranslationSession(
         // nowy odczyt zastępuje stary dopiero, gdy powtórzy się (prawdziwa zmiana treści
         // jest stabilna, drżenie OCR — nie).
         var reused = new Dictionary<string, LiveOverlayBlock>(StringComparer.Ordinal);
+        // Nowy odczyt zastępujący stary dziedziczy jego styl (rozmiar, box, kolory) —
+        // podmiana ma zmieniać tekst, nigdy wygląd dymka.
+        var inheritFrom = new Dictionary<string, LiveOverlayBlock>(StringComparer.Ordinal);
         var accepted = new List<KeyedTextBlock>(keyed.Count);
         foreach (var candidate in keyed)
         {
@@ -633,14 +665,11 @@ public sealed class LiveTranslationSession(
             if (similarity < JitterSimilarityThreshold && candidateQuality >= CleanReadingQuality)
             {
                 _readingCandidates.Remove(oldKey);
+                inheritFrom[candidate.Key] = old;
                 accepted.Add(candidate);
                 continue;
             }
 
-            // Reszta (podobny wariant albo podejrzany odczyt) musi się powtórzyć i nie może
-            // być brudniejsza od tego, co już wisi — śmieć z ruchomej grafiki nie wypiera
-            // poprawnego odczytu, a prawdziwa zmiana („Level 20” → „Level 21”) przejdzie
-            // po jednym dodatkowym przebiegu.
             if (!_readingCandidates.TryGetValue(oldKey, out var counts))
             {
                 counts = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -648,9 +677,10 @@ public sealed class LiveTranslationSession(
             }
             counts[candidate.NormalizedText] = counts.GetValueOrDefault(candidate.NormalizedText) + 1;
             if (counts[candidate.NormalizedText] >= JitterConfirmations
-                && candidateQuality >= displayedQuality - QualityTolerance)
+                && ShouldReplaceReading(candidate.NormalizedText, old.SourceText, similarity, candidateQuality, displayedQuality))
             {
                 _readingCandidates.Remove(oldKey);
+                inheritFrom[candidate.Key] = old;
                 accepted.Add(candidate);
                 continue;
             }
@@ -706,7 +736,7 @@ public sealed class LiveTranslationSession(
             }
 
             var lineHeight = TextBlockMetrics.MedianLineHeight(keyed[i].Block);
-            if (_displayed.TryGetValue(key, out var previous))
+            if (_displayed.TryGetValue(key, out var previous) || inheritFrom.TryGetValue(keyed[i].Key, out previous))
             {
                 // Histereza stylu: kolejne przebiegi OCR pływają o piksele (wycinek ×2
                 // vs pełna klatka, animacje pod tekstem) — nie przebudowujemy wyglądu
@@ -725,17 +755,16 @@ public sealed class LiveTranslationSession(
                 {
                     box = prevBox;
                 }
-                if (previous.ColorRgb >= 0)
+                // Kolory trzymają się poprzednich, CHYBA ŻE tło pod napisem realnie się zmieniło
+                // (najechany rząd: ciemny → żółty) — wtedy stare kolory tekstu przestałyby
+                // kontrastować i nakładka podmienia je w miejscu.
+                var backgroundShifted = previous.BackgroundRgb >= 0 && backgroundRgb >= 0
+                    && Math.Abs(Luminance(previous.BackgroundRgb) - Luminance(backgroundRgb)) >= 60;
+                if (!backgroundShifted)
                 {
-                    colorRgb = previous.ColorRgb;
-                }
-                if (previous.BackgroundRgb >= 0)
-                {
-                    backgroundRgb = previous.BackgroundRgb;
-                }
-                if (previous.OutlineRgb >= 0)
-                {
-                    outlineRgb = previous.OutlineRgb;
+                    if (previous.ColorRgb >= 0) colorRgb = previous.ColorRgb;
+                    if (previous.BackgroundRgb >= 0) backgroundRgb = previous.BackgroundRgb;
+                    if (previous.OutlineRgb >= 0) outlineRgb = previous.OutlineRgb;
                 }
                 // Tekstura tła celowo BEZ histerezy — pod napisem może przewijać się grafika,
                 // a nakładka podmienia ją w miejscu, bez odtwarzania dymka.
