@@ -16,7 +16,8 @@ public sealed record LiveOverlayBlock(
     int OutlineRgb = -1,
     int Misses = 0,
     BackgroundTexture? Texture = null,
-    string SourceText = "");
+    string SourceText = "",
+    int PendingBackgroundRgb = -1);
 
 /// <summary>
 /// Okres łaski dla bloków nakładki: Windows OCR potrafi na niezmienionej scenie

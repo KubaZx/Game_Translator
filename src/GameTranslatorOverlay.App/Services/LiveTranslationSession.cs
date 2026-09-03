@@ -132,6 +132,7 @@ public sealed class LiveTranslationSession(
     private const int JitterConfirmations = 2;
     private const double CleanReadingQuality = 0.9;
     private const double QualityTolerance = 0.1;
+    private const double TextureChangeThreshold = 12.0;
 
     /// <summary>
     /// Duchy: bloki zdjęte z nakładki (OCR gubił je kilka przebiegów z rzędu nad grafiką).
@@ -756,6 +757,7 @@ public sealed class LiveTranslationSession(
                 frame.PixelsBgra32, frame.Width, frame.Height, frame.Stride, sampleBox);
             var (colorRgb, backgroundRgb, outlineRgb) = sampled;
             var texture = sampled.Texture;
+            var pendingBackgroundRgb = -1;
 
             var key = keyed[i].Key;
             while (next.ContainsKey(key))
@@ -784,18 +786,28 @@ public sealed class LiveTranslationSession(
                     box = prevBox;
                 }
                 // Kolory trzymają się poprzednich, CHYBA ŻE tło pod napisem realnie się zmieniło
-                // (najechany rząd: ciemny → żółty) — wtedy stare kolory tekstu przestałyby
-                // kontrastować i nakładka podmienia je w miejscu.
+                // (najechany rząd: ciemny → żółty) i nowe oświetlenie UTRZYMAŁO SIĘ przez dwa
+                // kolejne przebiegi — przewijana grafika faluje jasnością wokół progu i bez
+                // tego warunku kolor tekstu skakał co 600 ms.
                 var backgroundShifted = previous.BackgroundRgb >= 0 && backgroundRgb >= 0
                     && Math.Abs(Luminance(previous.BackgroundRgb) - Luminance(backgroundRgb)) >= 60;
-                if (!backgroundShifted)
+                var shiftConfirmed = backgroundShifted && previous.PendingBackgroundRgb >= 0
+                    && Math.Abs(Luminance(previous.PendingBackgroundRgb) - Luminance(backgroundRgb)) < 30;
+                pendingBackgroundRgb = backgroundShifted && !shiftConfirmed ? backgroundRgb : -1;
+                if (!shiftConfirmed)
                 {
                     if (previous.ColorRgb >= 0) colorRgb = previous.ColorRgb;
                     if (previous.BackgroundRgb >= 0) backgroundRgb = previous.BackgroundRgb;
                     if (previous.OutlineRgb >= 0) outlineRgb = previous.OutlineRgb;
                 }
-                // Tekstura tła celowo BEZ histerezy — pod napisem może przewijać się grafika,
-                // a nakładka podmienia ją w miejscu, bez odtwarzania dymka.
+
+                // Tekstura tła: podmieniana tylko przy realnej zmianie (przewijana grafika),
+                // nie przy szumie próbkowania — inaczej rozmyta łatka „oddychała” co przebieg.
+                if (previous.Texture is not null && texture is not null
+                    && BackgroundTexture.MeanDifference(previous.Texture, texture) < TextureChangeThreshold)
+                {
+                    texture = previous.Texture;
+                }
             }
 
             next[key] = new LiveOverlayBlock(
@@ -807,7 +819,8 @@ public sealed class LiveTranslationSession(
                 backgroundRgb,
                 outlineRgb,
                 Texture: texture,
-                SourceText: keyed[i].NormalizedText);
+                SourceText: keyed[i].NormalizedText,
+                PendingBackgroundRgb: pendingBackgroundRgb);
             claimedBoxes.Add(box);
             if (!_displayed.ContainsKey(key))
             {

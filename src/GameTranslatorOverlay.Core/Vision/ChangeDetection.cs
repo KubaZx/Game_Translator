@@ -220,7 +220,21 @@ public static class TextColorSampler
 /// daje rozmytą kopię tła — na grafice (zachód słońca za napisem) wtapia łatkę o wiele
 /// lepiej niż jeden uśredniony kolor, a na płaskim oknie dialogowym jest po prostu płaska.
 /// </summary>
-public sealed record BackgroundTexture(byte[] Rgb, int Columns, int Rows);
+public sealed record BackgroundTexture(byte[] Rgb, int Columns, int Rows)
+{
+    /// <summary>
+    /// Średnia bezwzględna różnica kanałów (0–255) między dwiema teksturami; 255 przy
+    /// różnych wymiarach. Pozwala nie podmieniać łatki, gdy zmienił się tylko szum
+    /// próbkowania — inaczej rozmyta łatka „oddychała” co przebieg.
+    /// </summary>
+    public static double MeanDifference(BackgroundTexture a, BackgroundTexture b)
+    {
+        if (a.Columns != b.Columns || a.Rows != b.Rows || a.Rgb.Length != b.Rgb.Length || a.Rgb.Length == 0) return 255;
+        long sum = 0;
+        for (var i = 0; i < a.Rgb.Length; i++) sum += Math.Abs(a.Rgb[i] - b.Rgb[i]);
+        return (double)sum / a.Rgb.Length;
+    }
+}
 
 public sealed record BlockColors(int TextRgb, int BackgroundRgb, int OutlineRgb = -1)
 {

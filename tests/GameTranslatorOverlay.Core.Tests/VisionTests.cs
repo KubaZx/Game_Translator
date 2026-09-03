@@ -268,6 +268,19 @@ public class VisionTests
     }
 
     [Fact]
+    public void BackgroundTexture_MeanDifference_szum_vs_realna_zmiana()
+    {
+        var a = new BackgroundTexture([100, 100, 100, 200, 200, 200], 2, 1);
+        var noisy = new BackgroundTexture([104, 97, 102, 203, 198, 201], 2, 1);
+        var changed = new BackgroundTexture([20, 20, 20, 240, 240, 240], 2, 1);
+        var other = new BackgroundTexture([1, 2, 3], 1, 1);
+
+        Assert.True(BackgroundTexture.MeanDifference(a, noisy) < 5);
+        Assert.True(BackgroundTexture.MeanDifference(a, changed) > 40);
+        Assert.Equal(255, BackgroundTexture.MeanDifference(a, other));
+    }
+
+    [Fact]
     public void BlockColorSampler_bez_obwodki_zwraca_minus_jeden()
     {
         var pixels = TextOnBackgroundBgra(40, 12, background: 20, text: 230, textFraction: 0.25);
