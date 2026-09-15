@@ -1,82 +1,93 @@
 # Wizja produktu — GameTranslatorOverlay
 
-## Co to jest
+## Cel
 
-GameTranslatorOverlay to desktopowa aplikacja Windows (.NET 10, WPF), która tłumaczy na żywo tekst widoczny w grach (EN→PL) i wyświetla wynik w zewnętrznej, przezroczystej nakładce nad grą. Aplikacja działa całkowicie pasywnie: przechwytuje obraz oficjalnymi mechanizmami Windows, rozpoznaje tekst systemowym OCR i w żaden sposób nie ingeruje w grę.
+Gracz ma móc czytać tekst po polsku bez przerywania rozgrywki i przełączania się
+do osobnego tłumacza. GameTranslatorOverlay rozpoznaje angielski tekst z obrazu
+Windows OCR, tłumaczy go i wyświetla w zewnętrznej nakładce.
 
-Aplikacja jest unpackaged i portable — bez MSIX, bez instalatora wymagającego uprawnień, bez Pythona, bez GPU. Wymagania: Windows 10 2004+ lub Windows 11.
+Rozwijamy wspólny silnik dla różnych gier: przygodowych, fabularnych, logicznych,
+strategicznych i innych tytułów z tekstem na ekranie. Escape Academy jest bieżącym
+przypadkiem pomiarowym; Path of Exile 2 pozostaje jednym z testowanych tytułów
+z dodatkowym profilem i słownikiem. Jakość zależy od przechwytywania i czytelności
+obrazu, więc uniwersalny zakres projektu nie oznacza potwierdzonej zgodności z każdą grą.
 
 ## Dla kogo
 
-- Gracze, którzy grają w tytuły bez polskiej lokalizacji i nie chcą tracić fabuły, opisów przedmiotów ani mechanik.
-- Gracze, którzy znają angielski częściowo — chcą doraźnie tłumaczyć wybrany fragment ekranu jednym skrótem, bez alt-tabowania do translatora.
-- Pierwszy konkretny przypadek użycia: Path of Exile 2 (gra bez oficjalnego polskiego tłumaczenia, z dużą ilością tekstu na tooltipach i w dialogach).
+- Dla graczy potrzebujących tłumaczenia dialogów, zadań, menu i opisów przedmiotów.
+- Dla osób, które chcą tłumaczyć tylko trudny fragment jednym skrótem.
+- Dla graczy budujących własny słownik i poprawiających nazwy lub sformułowania.
+
+Aplikacja jest portable dla Windows 10 2004+ i Windows 11. Wydanie zawiera .NET;
+nie wymaga Pythona, CUDA ani lokalnego modelu AI.
+
+## Co działa obecnie
+
+| Funkcja | Obecne działanie |
+|---|---|
+| Ręczne tłumaczenie | Ctrl+Shift+T, zaznaczenie regionu, wynik w panelu lub nakładce |
+| Automatyczny live | obserwacja wybranego okna, OCR zmian i okresowe ponowne sprawdzanie |
+| Prezentacja | bloki przy oryginale lub z zakrywaniem, albo pasek napisów na dole |
+| Własne słownictwo | edycja słownika, ręczne poprawki, import i eksport |
+| Kontrola użycia | lokalne wyniki, deduplikacja i rezerwacje znaków przed API |
+| Prywatność | lokalny OCR, Cache-only i prywatny cache w pamięci |
+
+Ostatnie wydanie to 0.2.2; późniejsze poprawki są na `main` i w sekcji Niewydane
+w [historii zmian](../CHANGELOG.md). Obejmują odrzucanie starych odpowiedzi,
+lokalne usuwanie przykrytych napisów, potwierdzanie kolejnych odczytów i dokładniejsze
+pozycjonowanie. Nie oznaczają zakończenia prac nad jakością w ruchu.
 
 ## Przepływ danych
 
-```
-użytkownik wybiera okno gry
-        │
-        ▼
-przechwytywanie obrazu (oficjalne API Windows; MVP: GDI, później Windows Graphics Capture)
-        │
-        ▼
-systemowy OCR Windows (Windows.Media.Ocr) — obraz nie opuszcza komputera
-        │
-        ▼
-normalizacja tekstu (czyszczenie artefaktów OCR, filtr śmieci)
-        │
-        ▼
-lokalny słownik (glossary) — terminy gry tłumaczone lokalnie, spójnie
-        │
-        ▼
-SQLite cache — teksty już przetłumaczone nie idą ponownie do sieci
-        │
-        ▼
-DeepL API — WYŁĄCZNIE brakujący, rozpoznany tekst (nigdy screenshoty)
-        │
-        ▼
-przezroczysta nakładka click-through nad grą (osobne okno systemowe, bez fokusu)
-```
+1. Użytkownik wybiera okno gry albo zaznacza region.
+2. PrintWindow/GDI przechwytuje obraz; systemowy OCR rozpoznaje go lokalnie.
+3. Aplikacja grupuje i normalizuje tekst. W live sprawdza również jego aktualność.
+4. Wynik wybierany jest według priorytetu: **ręczna poprawka → słownik → cache → API**.
+5. Brakujący tekst trafia do DeepL, jeżeli pozwala na to tryb pracy i limit użycia.
+6. Aktualne tłumaczenie pojawia się w nakładce przepuszczającej kliknięcia.
 
-Priorytet źródeł tłumaczenia: **ręczna korekta użytkownika > wpis profilu gry > cache globalny > API**.
+Do dostawcy trafia wyłącznie tekst, nigdy obraz. W live stary wynik może uzupełnić
+cache, ale po wykrytym unieważnieniu sceny nie powinien wrócić do nakładki.
+Cache-only wyłącza wysyłanie brakujących tłumaczeń; Mock sprawdza przepływ bez
+prawdziwego tłumaczenia. Windows Graphics Capture pozostaje możliwością na przyszłość.
 
-Do sieci wychodzi tylko rozpoznany tekst i tylko wtedy, gdy nie ma go w słowniku ani w cache. Tryb Cache-only pozwala pracować całkowicie offline (nic nie wychodzi do sieci).
+## Jak rozumiemy jakość
 
-## Tryby działania (kolejność wdrażania)
+Najważniejsza jest przewidywalność: czytelny napis we właściwym miejscu, który
+pozostaje, dopóki jest potrzebny, i znika po zmianie treści. Krótsze opóźnienie ma
+wartość razem ze stabilnością i kontrolą liczby zapytań.
 
-1. **Manual Region Mode** — MVP i pierwszy tryb. Globalny skrót (domyślnie `Ctrl+Shift+T`) → użytkownik zaznacza region ekranu → tekst z regionu jest rozpoznawany, tłumaczony i pokazywany w panelu wyniku / nakładce. Zero automatyki, pełna kontrola i przewidywalny koszt API.
-2. **Tooltip Mode** — tłumaczenie tooltipów (np. opisów przedmiotów) w miejscu ich wyświetlania.
-3. **Subtitle Mode** — tłumaczenie stałego pasa dialogów/napisów.
-4. **Universal Live Mode** — ciągła analiza wybranego obszaru (3–6 fps), OCR uruchamiany tylko przy wykrytej zmianie obrazu, zasada latest-frame-wins (nieaktualne klatki są porzucane, tłumaczy się zawsze najnowszą).
-5. **History Mode** — przegląd historii przetłumaczonych tekstów z sesji.
+Każdą poprawkę sprawdzamy na powtarzalnej scenie przed i po zmianie, a następnie
+w grze. Oddzielamy czas rozpoznania, usunięcia starej treści, gotowości nowego wyniku
+i faktyczny wygląd nakładki. Wynik lokalnego Mocka nie jest pomiarem DeepL.
+Liczba testów i scenariusze kontrolne są opisane w [TESTING.md](TESTING.md).
 
-Funkcja „wyjaśnij prostym językiem" (LLM przez zewnętrzne API) jest opcjonalna, poza MVP i domyślnie **wyłączona**.
+## Profile i słowniki
 
-## Path of Exile 2 — profil, nie hardcode
+Profile ułatwiają dobór ustawień i terminologii. Rdzeń pozostaje wspólny; gra bez
+osobnego profilu korzysta z ustawień ogólnych. Profil PoE2 jest dodatkiem w zestawie,
+a kolejne usprawnienia nie powinny wymagać rozpoznania konkretnego tytułu.
 
-Rdzeń aplikacji jest w pełni uniwersalny i nie zawiera żadnej wiedzy o konkretnej grze. Cała specyfika gry mieszka wyłącznie w opcjonalnych plikach danych:
+## Kierunki do rozważenia
 
-- **Profil gry** (`profiles/<id>/profile.json`) — nazwy procesów i tytuły okien do wykrywania gry, język źródłowy, rekomendowany tryb, parametry OCR (upscale, minimalna wysokość tekstu) i detekcji zmian (próg, fps), powiązany słownik, minimalna wersja aplikacji.
-- **Słownik** (`glossaries/<id>/en-pl.json`) — terminy gry z tłumaczeniami (np. „Energy Shield" → „Tarcza energetyczna"), z priorytetami i opcjonalną wrażliwością na wielkość liter. Dopasowanie zawsze całych słów/fraz, dłuższe frazy przed krótszymi, konflikty rozstrzygają priorytety.
+- Zachowanie stałego interfejsu podczas ruchu kamery, przy usuwaniu nieaktualnego tekstu świata.
+- Śledzenie położenia znanego napisu między odczytami OCR.
+- Czytelniejsze zakrywanie tekstu na wzorzystym i animowanym tle.
+- Automatyczny dobór tempa pracy do menu, dialogu i ruchu.
 
-Profil PoE2 jest po prostu pierwszym dostarczonym profilem (Etap 11 roadmapy). Usunięcie go nie zmienia niczego w działaniu aplikacji dla dowolnej innej gry — bez profilu wszystko działa na ustawieniach ogólnych.
+To kierunki dalszych pomiarów, nie wdrożone funkcje. Automatyczne wydzielanie
+tooltipów, osobny tryb historii i wyjaśnianie treści przez LLM także nie są obecnie
+funkcjami aplikacji. Szczegóły i historia prac: [ROADMAP.md](ROADMAP.md).
 
-## Czego produkt świadomie NIE robi
+## Granice działania
 
-Twarde ograniczenia — to nie są braki, tylko decyzje projektowe:
+Aplikacja nie modyfikuje gry, nie czyta jej pamięci, nie wstrzykuje kodu i nie
+wysyła do niej klawiszy lub kliknięć. Skróty sterują wyłącznie tłumaczem.
+OCR działa lokalnie; klucz API jest przechowywany z ochroną DPAPI i używany
+wyłącznie przy połączeniu z dostawcą. Zasady: [SECURITY.md](SECURITY.md),
+[PRIVACY.md](PRIVACY.md).
 
-- **Zero lokalnych modeli AI.** Bez Ollamy, lokalnych LLM, PaddleOCR/EasyOCR/Tesseract, Pythona, CUDA, Dockera. OCR wyłącznie systemowy (Windows.Media.Ocr — wymaga zainstalowanego pakietu językowego Windows; przy jego braku aplikacja pokazuje czytelny komunikat z instrukcją doinstalowania).
-- **Zero ingerencji w grę.** Bez wstrzykiwania DLL, hookowania, czytania i modyfikacji pamięci procesu, modyfikacji plików gry, przechwytywania pakietów sieciowych, automatyzacji rozgrywki i wysyłania jakiegokolwiek inputu do gry. Globalny skrót steruje wyłącznie tłumaczem. Nakładka to osobne okno systemowe (click-through, bez przejmowania fokusu) — gra nawet nie wie, że istnieje.
-- **Zero wysyłania obrazu do sieci.** Do API tłumaczeniowego idzie wyłącznie rozpoznany tekst — nigdy screenshoty. Domyślnie żadne zrzuty ekranu nie są zapisywane na dysk.
-- **Zero zbierania danych.** Klucz API tylko lokalnie (DPAPI, CurrentUser), nigdy w logach ani w repo. Tryb prywatny: bez historii, bez logowania treści tłumaczeń, cache tylko w pamięci, czyszczony po sesji.
-
-## Ograniczenia znane i udokumentowane
-
-- Exclusive fullscreen nie jest obsługiwany — aplikacja działa dla okien i borderless fullscreen (standard w nowych grach, w tym PoE2).
-- Windows.Media.Ocr nie udostępnia per-słowo confidence — filtr śmieci działa na poziomie rozpoznanego tekstu.
-- Przy korzystaniu z zewnętrznego API tłumaczeniowego rozpoznany tekst opuszcza komputer — aplikacja komunikuje to jasno, a tryb Cache-only pozwala to całkowicie wyłączyć.
-
-## Disclaimer
-
-GameTranslatorOverlay jest zewnętrzną nakładką i nie modyfikuje gry. Projekt nie gwarantuje zgodności z regulaminem każdej gry — użytkownik powinien sprawdzić zasady konkretnego tytułu przed użyciem. Projekt nie jest powiązany z twórcami żadnej gry.
+Obsługujemy okna i borderless; exclusive fullscreen pozostaje poza zakresem.
+Silny ruch, słaby kontrast, ozdobne czcionki i przechwytywanie wymagające zrzutu
+ekranu mogą pogorszyć rezultat. Projekt nie gwarantuje zgodności z regulaminem
+każdego tytułu i nie jest powiązany z twórcami gier.

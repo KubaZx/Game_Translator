@@ -8,7 +8,7 @@ ingerencji w grę. Decyzje technologiczne (i ich uzasadnienia) są w
 ## 1. Podział na projekty
 
 Rozwiązanie (`GameTranslatorOverlay.slnx`) składa się z trzech projektów produkcyjnych
-i dwóch testowych:
+i dwóch testowych; osobne projekty w `tools/` służą do lokalnej diagnostyki:
 
 ```
 src/
@@ -30,7 +30,7 @@ na dowolnym runnerze.
 Zawartość:
 
 - **Interfejsy (kontrakty)**: `IOcrProvider`, `ITranslationProvider`, `ITranslationCache`,
-  `IGlossaryService` oraz kontrakty planowanych usług (rozdz. 5).
+  `IGlossaryService` oraz modele współdzielone z usługami aplikacji (rozdz. 5).
 - **Modele domenowe**: wynik OCR (tekst + prostokąty), zapytanie/wynik tłumaczenia,
   profil gry, słownik i jego terminy, ustawienia.
 - **Logika przetwarzania tekstu**: normalizacja tekstu z OCR (sklejanie linii, białe znaki,
@@ -39,7 +39,7 @@ Zawartość:
 - **Logika słownika**: dopasowanie całych słów/fraz (nigdy fragmentów słów), dłuższe frazy
   przed krótszymi, rozstrzyganie konfliktów priorytetem, wykrywanie konfliktów
   (ten sam `source` → różne `target`).
-- **Priorytet źródeł tłumaczenia**: ręczna korekta > wpis profilu gry > cache globalny > API.
+- **Priorytet źródeł tłumaczenia**: ręczna korekta > słownik > cache > API.
 - **Kontrola kosztów**: deduplikacja zapytań in-flight, debounce niestabilnego tekstu,
   limity (miesięczny, znaków na sesję), tryb Cache-only.
 
@@ -76,42 +76,25 @@ Celowo **nie ma** osobnego assembly `Providers.DeepL` — DeepL siedzi w Infrast
 Reguła podziału w jednym zdaniu: **Core = co i dlaczego, Infrastructure = skąd i dokąd
 (dysk/sieć), App = ekran, piksele i klawiatura.**
 
-## 2. Pionowy przepływ danych
+## 2. Przepływ danych
 
-Każde tłumaczenie — niezależnie od trybu — przechodzi ten sam pion:
+1. **Capture:** wybrane okno lub region, PrintWindow/GDI, bitmapa lokalna.
+2. **OCR:** Windows.Media.Ocr zwraca linie i prostokąty.
+3. **Tekst:** normalizacja, grupowanie i filtr śmieci; w live także stabilizacja
+   odczytów i sprawdzenie aktualności sceny.
+4. **Wyniki lokalne:** odczyt ręcznej poprawki, dokładne dopasowanie słownika,
+   następnie zwykły cache. Trafienie kończy wyszukiwanie wyniku bez API.
+5. **Dostawca:** brakujące teksty po deduplikacji i rezerwacji znaków, batchowanie,
+   wynik zachowywany w cache, o ile nadal pozwala na to token konfiguracji.
+6. **Prezentacja:** panel lub nakładka. Sesja live odrzuca wynik wykrytej
+   nieaktualnej sceny przed jego publikacją.
 
-```
- okno gry / region ekranu
-        │
-        ▼
- 1. CAPTURE          GDI: BitBlt / PrintWindow  →  bitmapa (tylko wybrane okno/region)
-        │
-        ▼
- 2. OCR              Windows.Media.Ocr  →  linie tekstu + prostokąty (lokalnie!)
-        │
-        ▼
- 3. NORMALIZACJA     sklejanie linii, białe znaki, filtr śmieci, segmentacja
-        │
-        ▼
- 4. GLOSSARY         lokalny słownik: całe frazy, dłuższe najpierw, priorytety
-        │
-        ▼
- 5. CACHE            SQLite: korekta > profil > cache globalny; hit = koniec, bez sieci
-        │  (tylko miss)
-        ▼
- 6. TŁUMACZENIE      DeepL API — wyłącznie rozpoznany TEKST, nigdy screenshot;
-        │            batch, deduplikacja in-flight, wynik trafia do cache
-        ▼
- 7. OVERLAY          nakładka click-through nad grą (lub panel wyniku w trybie ręcznym)
-```
+Do dostawcy trafia wyłącznie tekst; bitmapy pozostają lokalnie. Próbki obrazu
+służą również do stylu nakładki i sprawdzania obecności tekstu. Cache-only wyłącza
+krok dostawcy. OCR i oczekiwanie na sieć nie blokują wątku interfejsu.
 
-Zasady przekrojowe:
-
-- **Do sieci wychodzi wyłącznie tekst** — bitmapa kończy życie na kroku 2.
-- Kroki 2–6 są asynchroniczne (`async/await` + `CancellationToken`); UI nigdy nie czeka.
-- W trybie Cache-only krok 6 jest wyłączony — miss w cache = brak tłumaczenia, nie zapytanie.
-- Program działa w 100% pasywnie: bez wstrzykiwania DLL, hooków, czytania pamięci procesu,
-  modyfikacji plików gry i wysyłania inputu do gry.
+Aplikacja działa pasywnie: bez ingerencji w pamięć lub pliki gry, wstrzykiwania
+kodu i wysyłania sterowania do gry. Aktualność live opisuje rozdział 8.
 
 ## 3. Kluczowe interfejsy
 
@@ -119,7 +102,7 @@ Kontrakty mieszkają w Core; implementacje w Infrastructure (sieć/dysk) lub App
 
 ### IOcrProvider
 
-Rozpoznaje tekst na bitmapie. Implementacja MVP: `WindowsOcrProvider`
+Rozpoznaje tekst na bitmapie. Obecna implementacja: `WindowsOcrProvider`
 (`Windows.Media.Ocr.OcrEngine`, w App).
 
 - Wejście: bitmapa + język źródłowy.
@@ -180,21 +163,24 @@ Pierwszy działający tryb (Etap 6 roadmapy) — punkt odniesienia dla całej ar
 Każdy krok pionu jest anulowalny — jeśli użytkownik zdąży poprosić o nowy region, stare
 zadanie dostaje `CancellationToken.Cancel()` i jego wynik nigdzie nie trafia.
 
-## 5. Usługi aplikacji — MVP vs później
+## 5. Usługi aplikacji
 
-| Usługa | Odpowiedzialność | Projekt | Etap |
-|---|---|---|---|
-| **WindowDiscovery** | lista okien najwyższego poziomu, wybór okna gry, dopasowanie do profilu po `processNames`/`windowTitles` | App | **MVP** (Etap 2) |
-| **Capture** | zrzut regionu/okna przez GDI; później WGC dla trybu live | App | **MVP** (Etap 2); WGC — Etap 8 |
-| **TextProcessing** | normalizacja, filtr śmieci, segmentacja, stabilizacja (debounce) | Core | **MVP** (Etap 3–4) |
-| **ChangeDetection** | porównywanie klatek (próg z profilu, np. `threshold: 0.02`), OCR tylko przy zmianie | Core (logika) + App (klatki) | Etap 8 (tryb live) |
-| **Overlay** | okno nakładki: click-through, bez fokusu, Topmost, pozycjonowanie wyników, DPI/multi-monitor | App | Etap 7 (MVP kończy się panelem wyniku; pełna nakładka to Etap 7) |
-| **Profile** | ładowanie/walidacja `profile.json`, dobór profilu do okna, `minAppVersion` | Infrastructure (pliki) + Core (model) | Etap 11 (profil PoE2) |
-| **Diagnostics** | logi Serilog, licznik zużycia API, ostrzeżenia o limitach, ekran diagnostyki błędów | Infrastructure + App | podstawy w MVP (logi), pełny ekran później |
+| Element | Odpowiedzialność | Projekt |
+|---|---|---|
+| `ScreenCapture` | przechwycenie okna/regionu, geometria i lokalne próbki pikseli | App |
+| `WindowsOcrProvider` | systemowy OCR i jego adapter | App |
+| `LiveTranslationSession` | pętla capture/OCR, aktualność sceny, stan bloków i publikacja aktualizacji | App |
+| `TranslationOrchestrator` | składanie pipeline'u, konfiguracja i jej token życia | App |
+| `TranslationPipeline`, `UsageTracker` | wyniki lokalne, deduplikacja, dostawca i rezerwacje znaków | Core |
+| `BoundedTranslationWork` | ograniczona liczba nadzorowanych zadań i ich domknięcie | Core |
+| `LiveSceneValidity`, `LiveReadingStabilizer` | generacja sceny i kolejne potwierdzenia tekstu | Core |
+| `LiveBlockGeometry`, `LiveSubtitleContent` | niezależna stabilizacja położenia/rozmiaru i źródła paska napisów | Core |
+| `TextPresenceProbe` | konserwatywna ocena całego jednolitego pola starego tekstu | Core |
+| `OverlayWindow` | prezentacja bloków/paska, click-through, DPI i ręczne ukrywanie | App |
 
-Tryby pracy (kolejność wdrażania): **1) Manual Region (MVP, Etap 6)** → 2) Tooltip Mode →
-3) Subtitle Mode → 4) Universal Live Mode (Etap 8–9) → 5) History Mode. Funkcja „wyjaśnij
-prostym językiem" (LLM) — opcjonalna, poza MVP, domyślnie OFF.
+Tryb ręczny, live w blokach i pasek napisów są zaimplementowane. Automatyczne
+wydzielanie tooltipów, History Mode i wyjaśnianie przez LLM pozostają poza obecną
+implementacją. Capture live nadal używa GDI/PrintWindow; WGC jest opcją do rozważenia.
 
 ## 6. DPI i multi-monitor
 
@@ -203,8 +189,8 @@ prostym językiem" (LLM) — opcjonalna, poza MVP, domyślnie OFF.
 - Współrzędne trzymamy w **pikselach fizycznych ekranu** (tak pracują GDI i Win32);
   na piksele WPF (DIP) przeliczamy dopiero przy rysowaniu, mnożnikiem DPI konkretnego
   monitora.
-- Zaznaczenie regionu może przecinać monitory o różnym DPI — capture idzie po
-  współrzędnych wirtualnego pulpitu, a warstwa rysująca przelicza per-monitor.
+- Warstwa zaznaczania regionu działa na monitorze pod kursorem. Geometrię wyniku
+  przeliczamy na fizyczne współrzędne pulpitu.
 - Nakładka pozycjonuje się względem prostokąta okna gry (fizyczne piksele), więc
   przeniesienie gry na inny monitor = przeliczenie od nowa, bez „rozjechanych" ramek.
 - Ograniczenie (udokumentowane): **exclusive fullscreen nie jest obsługiwany** — GDI ani
@@ -254,18 +240,58 @@ Zasady słownika: dopasowanie **całych słów/fraz** (nigdy fragmentów słów)
 przed krótszymi, priorytety rozstrzygają konflikty; konflikty (ten sam `source` → różne
 `target`) są wykrywane i raportowane.
 
-## 8. Tryb live i latest-frame-wins (Etap 8)
+## 8. Aktualność i praca trybu live
 
-Universal Live Mode analizuje obraz w pętli 3–6 fps. Obowiązuje zasada
-**latest-frame-wins**:
+Jedna pętla sesji obsługuje capture, OCR i stan nakładki. Domyślnie próbkuje obraz
+przy 6 FPS, wymaga 250 ms stabilności, może wymusić przetwarzanie po 600 ms,
+a przy ruchu ma maksymalną pauzę OCR 2,5 s. Niezmieniony obraz jest też ponownie
+skanowany co 4 s; powtórki mogą wynikać z potwierdzania odczytu lub podejrzenia whiffa.
+Parametry profilu mogą zmieniać część tego zachowania.
 
-- Liczy się wyłącznie NAJNOWSZA klatka. Jeśli pion (OCR→tłumaczenie) jeszcze mieli
-  poprzednią, a przyszła nowa z wykrytą zmianą — stare zadanie jest **anulowane**
-  (`CancellationToken`), jego wynik ląduje w koszu, a pion startuje od nowej klatki.
-- Nie budujemy kolejki klatek — kolejka to rosnące opóźnienie, a nakładka pokazująca
-  tekst sprzed 3 sekund jest gorsza niż brak tekstu.
-- ChangeDetection pilnuje, żeby OCR w ogóle nie ruszał, gdy obraz się nie zmienił
-  (próg `threshold` z profilu); do tego debounce niestabilnego tekstu (animacje,
-  przewijanie) — tłumaczymy dopiero tekst, który „ustał".
-- Wyniki niezmienionego tekstu idą z cache — pętla live przy statycznym ekranie
-  kosztuje 0 zapytań API.
+### Generacja sceny i praca w toku
+
+- Wykryte globalne cięcie albo potwierdzony silny ruch unieważnia generację sceny.
+  Sesja czyści stare bloki, pamięć odtwarzania i pasek napisów. Automatyczne
+  czyszczenie nie odwołuje decyzji użytkownika o ręcznym ukryciu nakładki.
+- Podczas dłuższego OCR i tłumaczenia sesja przechwytuje dodatkowe klatki kontrolne.
+  Pierwsza okresowa kontrola OCR czeka 1,5 interwału; kolejne wracają do zwykłego
+  rytmu. OCR trwający co najmniej jeden interwał wymaga także świeżej kontroli
+  po zakończeniu. Przy 6 FPS pierwsza kontrola trwającego OCR może nastąpić o 83 ms później.
+- Po unieważnieniu kończy się oczekiwanie nieaktualnej klatki na tłumaczenie.
+  Już wysłane zadanie może dokończyć się i uzupełnić cache. Nowa klatka korzysta
+  z drugiego miejsca; przy obu zajętych sesja sprawdza scenę bez kolejki starych opisów.
+- `BoundedTranslationWork` nadzoruje najwyżej dwa zadania tłumaczeń. Stop anuluje
+  i domyka także pracę pozostawioną przez poprzednie widoki.
+- Zmiana konfiguracji ma osobny token, który blokuje późny zapis do poprzedniego
+  cache. Zmiana sceny i zmiana konfiguracji mają różne skutki dla tego zapisu.
+
+### Tekst lokalny i prezentacja
+
+Podobny nowy odczyt wymaga kolejnych wiarygodnych potwierdzeń. Powrót starego tekstu
+albo brak obserwacji w badanym obszarze przerywa serię. Potwierdzona zamiana usuwa
+stary blok przed oczekiwaniem na dostawcę. Brak OCR nad całym dawnym polem, które
+stało się jednolite i miało znany kontrast, również pozwala na lokalne usunięcie.
+Cienkie znaki, tekstura, niepewne kolory i ucięte pole nie są dowodem pustego obszaru.
+
+Podczas oczekiwania kontrolowane są też pola zaakceptowanych źródeł. Jeśli źródło
+zostało jednoznacznie przykryte, klatka nie jest publikowana, a wszystkie jej
+obszary trafiają do ponownego odczytu. Pozwala to zachować również pierwsze menu,
+które jeszcze nie dostało wyniku. Lokalne usunięcie aktualizuje tylko powiązane
+źródła paska napisów i nie odnawia jego czasu wygasania.
+
+Położenie ma tolerancję 2 fizycznych pikseli na każdej osi, oddzielną od stabilizacji
+rozmiaru. To aktualizacja przy odczycie OCR, nie śledzenie między odczytami.
+Silny ruch nadal może wyczyścić cały widok; rozpoznawanie stałego HUD-u nie jest
+zaimplementowane.
+
+### Diagnostyka i ograniczenia
+
+`LiveFrameDiagnostics` opisuje czas przygotowania aktualizacji, operację OCR oraz
+liczbę i koszt kontroli obrazu. Etapy czasowo nakładają się, a odrzucona klatka
+nie ma diagnostyki ukończonego przebiegu. Te dane nie mierzą faktycznego rysowania.
+
+[LiveDiag](../tools/GameTranslatorOverlay.LiveDiag/README.md) i
+[SceneReplay](../tools/GameTranslatorOverlay.SceneReplay/README.md) używają Mocka,
+prywatnego cache i zablokowanego HTTP. Wyniki porównawcze oraz ich ograniczenia
+opisuje [ROADMAP.md](ROADMAP.md); testy integracji z rzeczywistym pulpitem należy
+odróżniać od czystej logiki [TESTING.md](TESTING.md).

@@ -1,160 +1,134 @@
-# TESTING.md — strategia testów automatycznych
+# Testy i pomiary — GameTranslatorOverlay
 
-Dokument opisuje, co testujemy automatycznie, gdzie te testy leżą i jak je uruchamiać.
-Testy wymagające żywego pulpitu Windows (OCR na realnym oknie, nakładka, globalne skróty)
-są **wyłącznie ręczne** — patrz [docs/MANUAL_TESTING.md](MANUAL_TESTING.md).
+Stan sprawdzony 15 września 2026: **346 testów xUnit** — **309 Core** i
+**37 Infrastructure**, kompilacja bez ostrzeżeń oraz zielone CI. Smoke test
+Windows OCR z lokalnym Mockiem również przeszedł.
 
-## Podział testów
+Rozdzielamy testy logiki, lokalne sondy z rzeczywistym capture/OCR i ocenę
+fizycznej nakładki przez użytkownika. Wynik jednej grupy nie zastępuje pozostałych.
 
-| Warstwa | Projekt | Co testuje | Zależności |
-|---|---|---|---|
-| Jednostkowe | `tests/GameTranslatorOverlay.Core.Tests` | czysta logika z `src/GameTranslatorOverlay.Core` | brak (zero I/O, zero Windows) |
-| Integracyjne | `tests/GameTranslatorOverlay.Infrastructure.Tests` | `src/GameTranslatorOverlay.Infrastructure`: SQLite, DeepL (na atrapie HTTP), DPAPI | pliki tymczasowe, Windows (DPAPI) — CI działa na `windows-latest`, więc przechodzą |
-| Ręczne | — | UI, capture, OCR na żywo, nakładka, skróty | pulpit Windows, osobny dokument |
+## Podział
 
-Framework: **xUnit** w obu projektach testowych.
+| Grupa | Miejsce | Zależności i zakres |
+|---|---|---|
+| Logika i regresje | `tests/GameTranslatorOverlay.Core.Tests` | xUnit, atrapy i dane w pamięci; bez aktywnej gry, WPF i prawdziwego OCR |
+| Integracje | `tests/GameTranslatorOverlay.Infrastructure.Tests` | SQLite w plikach tymczasowych, atrapa HTTP, DPAPI na Windows |
+| Smoke test | `tools/GameTranslatorOverlay.SmokeTest` | rzeczywisty Windows OCR na syntetycznym obrazie i lokalny pipeline |
+| Sondy sesji | `tools/GameTranslatorOverlay.LiveDiag`, `tools/GameTranslatorOverlay.SceneReplay` | lokalny pulpit Windows, własne okno lub wskazana gra, Mock |
+| Ocena wizualna | [MANUAL_TESTING.md](MANUAL_TESTING.md) | użytkownik, konkretna gra, DPI, monitory, układ i skróty |
 
-## Testy jednostkowe (Core.Tests)
+CI uruchamia projekty xUnit na `windows-latest`. Smoke test i sondy pulpitu
+wykonuje się osobno; nie są częścią standardowego `dotnet test`.
 
-### Normalizacja tekstu OCR
+## Co obejmuje Core.Tests
 
-Normalizacja czyści wynik OCR (białe znaki, łamania linii, artefakty), ale **nie może
-zniekształcać danych liczbowych** — to najczęstsze treści w tooltipach gier. Obowiązkowe
-przypadki (każdy jako osobny test lub `[Theory]` z `[InlineData]`):
+- Normalizację OCR z zachowaniem liczb, znaków i zakresów; grupowanie linii,
+  filtr śmieci, podobieństwo odczytów, hashe i geometrię.
+- Dopasowanie słownika, konflikty, priorytet ręcznych poprawek i lokalnych wyników.
+- Deduplikację tłumaczeń, Cache-only, rezerwacje znaków dla równoległych operacji,
+  ponowny odczyt cache oraz anulowanie zapisu po zmianie konfiguracji pipeline'u.
+- Ograniczenie pracy do zadanej liczby zadań, obserwowanie błędów i domykanie sesji.
+- Zmiany sceny, termin przetwarzania przy ciągłym i przerywanym ruchu, wybudzanie
+  przy stabilizacji i harmonogram kontroli podczas OCR.
+- Kolejne potwierdzenia podobnej nowej treści. Powrót poprzedniego tekstu lub
+  pusty odczyt w badanym obszarze przerywa serię kandydata.
+- Ostrożny dowód pustego, jednolitego pola: kontrast, całe ROI, cienkie znaki,
+  stride/padding, alpha i nieprawidłowe dane.
+- Niezależną stabilizację pozycji i rozmiaru oraz usuwanie źródeł paska napisów.
+- Parser opcji LiveDiag, dołączony do testów bez zależności od aplikacji WPF.
 
-- `+25%` — znak plusa i procent zachowane,
-- `-10%` — minus nie ginie i nie zamienia się w myślnik,
-- `10–15` — zakres (en dash) zachowany; warianty `10-15` i `10—15` nie sklejają się w `1015`,
-- `1.5 seconds` — kropka dziesiętna nietknięta (nie „1,5", nie „15"),
-- `Level 20`, `3/5`, `x2` — liczby przy słowach, ułamki i mnożniki bez zmian,
-- wielokrotne spacje/taby → pojedyncza spacja; puste linie na brzegach ucięte,
-- normalizacja jest **idempotentna**: `Normalize(Normalize(x)) == Normalize(x)`.
+Czyste helpery nie dowodzą poprawnego rysowania przez WPF ani jakości Windows OCR.
+Ich powiązanie z sesją sprawdzają osobne sondy i obserwacje użytkownika.
 
-### Łączenie linii w bloki (tooltips)
+## Co obejmuje Infrastructure.Tests
 
-OCR zwraca pojedyncze linie z pozycjami; grupowanie ma złożyć z nich logiczne bloki
-(np. cały tooltip przedmiotu):
+- SQLite: odczyt/zapis, migracje, import/eksport oraz zachowanie ręcznych poprawek.
+- DeepL na fałszywym `HttpMessageHandler`: format żądań i odpowiedzi, wybór endpointu,
+  batchowanie, błędy 403/456/429, retry, timeout i uwierzytelnianie w nagłówku.
+- DPAPI: szyfrowanie i odszyfrowanie danych dla bieżącego użytkownika Windows.
 
-- linie blisko siebie w pionie → jeden blok; duża przerwa → nowy blok,
-- kolejność linii w bloku zgodna z układem na ekranie (góra→dół, lewo→prawo),
-- pojedyncza linia = poprawny blok jednoliniowy,
-- pusta lista wejściowa → pusta lista bloków (bez wyjątku).
-
-### Filtr śmieciowych wyników OCR
-
-`Windows.Media.Ocr` nie daje per-słowo confidence, więc filtr działa na tekście:
-
-- odrzuca: pojedyncze znaki interpunkcyjne, losowe zbitki symboli, teksty poniżej progu
-  sensownej długości bez żadnej litery/cyfry,
-- **nie** odrzuca: krótkich, ale znaczących tekstów (`x2`, `3/5`, `+25%`, `HP`),
-- test graniczny na każdą regułę progową (wartość na progu i tuż obok).
-
-### Hash / stabilne ID tekstu
-
-Klucz cache i deduplikacji:
-
-- identyczny tekst → identyczny hash (deterministycznie, między uruchomieniami),
-- tekst różniący się tylko białymi znakami przed normalizacją → ten sam hash po normalizacji,
-- realnie różne teksty → różne hashe (spot-check, nie dowód matematyczny).
-
-### Glossary (słownik)
-
-Zasady z briefu produktu — testujemy wprost:
-
-- dopasowanie **całych słów/fraz**: termin `Shield` nie łapie się w `Shielded`,
-- fraza dłuższa wygrywa z krótszą: przy terminach `Energy Shield` i `Shield` tekst
-  `Energy Shield` dostaje tłumaczenie frazy dłuższej,
-- `caseSensitive: false` → dopasowanie bez rozróżniania wielkości liter; `true` → z rozróżnianiem,
-- konflikt (ten sam `source` → różne `target`): wygrywa wyższy `priority`; wykrycie konfliktu
-  jest raportowane (test na samą detekcję),
-- pusty słownik → tekst przechodzi nietknięty.
-
-### Pipeline tłumaczenia
-
-Orkiestracja na interfejsach (`ITranslationProvider` = atrapa/`MockTranslationProvider`):
-
-- kolejność źródeł: **glossary → cache → API**; trafienie na wcześniejszym etapie
-  nie woła późniejszych (weryfikacja przez licznik wywołań atrapy),
-- priorytet wyników: ręczna korekta > wpis profilu gry > cache globalny > API,
-- **deduplikacja in-flight**: dwa równoległe żądania o ten sam tekst → jedno wywołanie providera,
-- **tryb cache-only**: provider API nie jest wołany nigdy; brak wpisu w cache → wynik
-  „brak tłumaczenia", nie wyjątek,
-- **limit znaków sesji**: po przekroczeniu limitu pipeline nie wysyła kolejnych zapytań
-  do API i sygnalizuje stan limitu,
-- **anulowanie**: `CancellationToken` odwołany w trakcie → operacja kończy się
-  `OperationCanceledException`, bez zapisu częściowych wyników do cache.
-
-## Testy integracyjne (Infrastructure.Tests)
-
-### SQLite cache (pliki tymczasowe)
-
-Każdy test tworzy bazę w pliku tymczasowym (`Path.GetTempFileName()` / katalog tymczasowy
-per test) i sprząta po sobie — testy są niezależne i mogą biec równolegle:
-
-- zapis → odczyt roundtrip,
-- **priorytet ręcznych korekt**: korekta nadpisuje wynik z cache/API przy odczycie,
-- **czyszczenie cache z zachowaniem korekt**: po operacji „wyczyść cache" ręczne korekty zostają,
-- **import/eksport**: eksport do pliku → import do świeżej bazy → identyczna zawartość
-  (w tym korekty),
-- **migracje**: baza z `PRAGMA user_version` = N-1 otwarta nową wersją kodu → schemat
-  zmigrowany, dane zachowane, `user_version` podbite; świeża baza → od razu najnowsza wersja.
-
-### DeepLTranslationProvider (fake `HttpMessageHandler`)
-
-Provider dostaje `HttpClient` z podstawionym handlerem — **żaden test nie dotyka sieci**:
-
-- sukces: poprawny JSON z `/v2/translate` → poprawnie sparsowane tłumaczenia; żądanie
-  idzie na `api-free.deepl.com` dla klucza z sufiksem `:fx`, na `api.deepl.com` dla pro,
-- **403** → błąd „nieprawidłowy klucz API" (typowany, nie goły `HttpRequestException`),
-- **456** → błąd „limit wyczerpany",
-- **429** → ograniczony retry (handler liczy próby: retry następuje, ma górny limit,
-  po wyczerpaniu zwraca błąd rate-limit),
-- **timeout** → czytelny błąd, bez zawieszenia (test z krótkim timeoutem i handlerem,
-  który nie odpowiada),
-- **chunkowanie batchy**: >50 tekstów → podział na żądania po maks. 50, wyniki złożone
-  w oryginalnej kolejności,
-- klucz API **nigdy** nie pojawia się w URL-u zapytania (tylko nagłówek `Authorization`).
-
-### DPAPI
-
-- roundtrip: `Protect` → `Unprotect` (CurrentUser) zwraca oryginał,
-- dane zaszyfrowane ≠ plaintext (zaszyfrowany blob nie zawiera klucza jawnym tekstem).
-
-Testy DPAPI wymagają Windows — CI używa `windows-latest`, lokalnie działa każdy Windows 10 2004+.
+Testy nie wywołują prawdziwego DeepL ani nie czytają klucza użytkownika.
+Pliki tymczasowe są odizolowane od danych aplikacji.
 
 ## Uruchamianie
 
-Całość:
+Windows i .NET 10 SDK, katalog główny repozytorium:
 
 ```powershell
-dotnet test
+dotnet build GameTranslatorOverlay.slnx -c Release
+dotnet build src/GameTranslatorOverlay.App -c Release --no-restore
+dotnet test GameTranslatorOverlay.slnx -c Release --no-build --no-restore
 ```
 
-Pojedynczy projekt:
+App budujemy jawnie: samo uruchomienie testów nie jest potwierdzeniem kompilacji
+aplikacji WPF. Przykładowe zawężenie testów:
 
 ```powershell
-dotnet test tests/GameTranslatorOverlay.Core.Tests
-dotnet test tests/GameTranslatorOverlay.Infrastructure.Tests
+dotnet test tests/GameTranslatorOverlay.Core.Tests -c Release --filter "FullyQualifiedName~LiveReadingStabilizer"
+dotnet test tests/GameTranslatorOverlay.Infrastructure.Tests -c Release
 ```
 
-Filtry kategorii — testy oznaczamy `[Trait("Category", "...")]` wartościami `Unit`
-lub `Integration`:
+Osobno Windows OCR na syntetycznym tekście:
 
 ```powershell
-dotnet test --filter "Category=Unit"
-dotnet test --filter "Category=Integration"
-dotnet test --filter "FullyQualifiedName~Glossary"   # po nazwie
+dotnet run --project tools/GameTranslatorOverlay.SmokeTest -c Release --no-build --no-restore
 ```
 
-## Zasady twarde
+Smoke test wymaga pakietu językowego OCR. Sprawdza rozpoznane linie, pełny pipeline
+i ponowne użycie cache. Nie otwiera ani nie steruje grą.
 
-1. **CI nie potrzebuje sekretów.** Wszystkie testy automatyczne używają wyłącznie
-   `MockTranslationProvider` albo fake `HttpMessageHandler`. Żaden test nie woła
-   prawdziwego DeepL i żaden nie czyta klucza API. Pipeline CI (GitHub Actions,
-   `windows-latest`: restore → build → test) musi przejść na czystym runnerze.
-2. **Syntetyczne obrazy testowe.** Jeżeli test potrzebuje bitmapy (np. przyszłe testy
-   ścieżki capture/OCR), generujemy ją w kodzie (tekst rysowany na jednolitym tle) —
-   **nigdy** nie commitujemy zrzutów ekranu z gier (prawa autorskie + rozmiar repo).
-3. **Zero zależności od pulpitu.** Test, który wymaga okna, fokusu, skrótu globalnego
-   albo prawdziwego OCR, nie jest testem automatycznym — trafia do MANUAL_TESTING.md.
-4. **Testy integracyjne sprzątają po sobie** (pliki tymczasowe usuwane w `Dispose`/`finally`).
+## Powtarzalne sondy
+
+[LiveDiag](../tools/GameTranslatorOverlay.LiveDiag/README.md) mierzy capture,
+OCR, oczekiwanie na tłumaczenie Mock i moment przygotowania aktualizacji sesji.
+Przy wyborze gry należy podać jej tytuł oraz jawny profil; każde uruchomienie
+ma świeży cache w pamięci. Domyślny raport nie zawiera rozpoznanego tekstu ani obrazów.
+
+[SceneReplay](../tools/GameTranslatorOverlay.SceneReplay/README.md) obsługuje
+własne okna i powtarzalne scenariusze:
+
+| Obszar | Scenariusze |
+|---|---|
+| Zmiana widoku i spóźniona odpowiedź | `displayed`, `inflight`, `noisy` |
+| Powrót, szybkie zmiany i zatrzymanie | `aba`, `churn`, `stop` |
+| Zmiana treści i pomyłki OCR | `local-reading`, `reading-jitter`, `reading-whiff` |
+| Przykrycie lokalne i zachowanie menu | `local-occlusion`, `local-occlusion-hover`, `local-occlusion-inflight` |
+| Pozycja i szum geometrii | `moving-text`, `position-jitter` |
+| Koszt kontroli podczas OCR | `ocr-timing` |
+
+Przykład (katalog docelowy musi istnieć, plik raportu musi być nowy):
+
+```powershell
+dotnet run --project tools/GameTranslatorOverlay.SceneReplay -c Release -- --scenario local-occlusion --output C:\measurements\occlusion.jsonl
+```
+
+Obie sondy używają lokalnego Mocka, blokują HTTP i nie otwierają ustawień ani
+cache aplikacji użytkownika. Nie uruchamiamy równolegle sond ani ciężkiej kompilacji
+podczas porównania czasów. Testy pozycji mierzą callback po zatrzymaniu kroku;
+nie sprawdzają ciągłego śledzenia obrazu.
+
+## Jak interpretować wyniki
+
+- Kod wyjścia 0 oznacza ukończoną sondę. Sprawdź także `fixtureValid` i wynik
+  scenariusza (`expectedBehavior`, `desiredPositionBehavior` lub odpowiednie
+  metryki danego wariantu), a nie sam kod wyjścia.
+- Capture → update kończy się przed fizycznym rysowaniem nakładki i nie wyznacza
+  całego opóźnienia od pojawienia się tekstu w grze.
+- Mock z opóźnieniem 2000 ms symuluje wolnego dostawcę. Wynik nie jest pomiarem DeepL.
+- Czasy operacji OCR i kontroli obrazu nakładają się. Nie sumujemy ani nie
+  odejmujemy ich jako niezależnych etapów.
+- Liczby zapytań i znaków Mock porównujemy przy tej samej treści i scenariuszu.
+  Różny ruch kamery może zmienić liczbę odczytów i nie dowodzi oszczędności API.
+- Podejrzenie whiffa jest sygnałem algorytmu, nie potwierdzonym błędem rozpoznania.
+- Zapasowe przechwycenie ekranu może zniekształcić próbę izolowanego własnego okna.
+
+## Zasady danych i zakres dowodu
+
+Do repozytorium trafiają kod, syntetyczne scenariusze i opisy. Nie dodajemy
+zrzutów gier, kluczy, ustawień, cache użytkownika ani paczek lokalnej instalacji.
+Raporty porównawcze i kopie binariów zachowujemy oddzielnie.
+
+Testy xUnit nie zależą od aktywnego pulpitu. Sondy z prawdziwym przechwytywaniem
+są uruchamiane jawnie na stanowisku lokalnym; fizyczną prezentację, skróty,
+ręczne ukrywanie i zachowanie przy zmianie monitorów sprawdzamy zgodnie z
+[MANUAL_TESTING.md](MANUAL_TESTING.md).

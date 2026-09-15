@@ -4,6 +4,23 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
+Zmiany dostępne w kodzie na `main` po wydaniu 0.2.2. Nie są jeszcze częścią
+osobnego wydania ani archiwum 0.2.2.
+
+### Dla gracza
+
+- Poprawki wspólne dla różnych gier, mierzone m.in. w Escape Academy.
+- Szybsze usuwanie potwierdzonych starych opisów i ochrona przed ich powrotem
+  po spóźnionej odpowiedzi dostawcy.
+- Stabilniejsze kolejne odczyty i dokładniejsze położenie tekstu.
+- Krótsze zbędne oczekiwanie w sesji, z zachowaniem kontroli zapytań i znaków.
+
+### Dokumentacja
+
+- Odświeżone README, instrukcja, wizja produktu, architektura i opis testów.
+- Rozróżnienie wydania 0.2.2, bieżącego kodu `main` i niewdrożonych kierunków rozwoju.
+- Aktualny stan: 346 testów (309 Core + 37 Infrastructure) i opis ograniczeń pomiarów.
+
 ### Naprawione
 
 - Pierwsza okresowa kontrola obrazu podczas OCR czeka 1,5 zwykłego interwału;

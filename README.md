@@ -1,172 +1,173 @@
 # GameTranslatorOverlay
 
-Uniwersalny tłumacz gier dla Windows. Przechwytuje obraz wybranego okna lub regionu ekranu,
-rozpoznaje tekst **systemowym OCR Windows**, tłumaczy go (lokalny słownik → cache SQLite →
-DeepL API) i wyświetla polską wersję w **niezależnej nakładce**, która nie przejmuje sterowania
-i nie blokuje kliknięć.
+**Polskie tłumaczenia tekstu z gier, bezpośrednio nad grą.**
 
-> **Zasada nr 1:** program działa w 100% pasywnie. Nie modyfikuje gry, jej plików, procesu
-> ani pamięci; nie wysyła do gry żadnych kliknięć ani klawiszy. Pracuje wyłącznie na obrazie,
-> który i tak widzisz na ekranie. Szczegóły: [docs/SECURITY.md](docs/SECURITY.md).
+GameTranslatorOverlay to uniwersalny tłumacz EN→PL dla Windows. Odczytuje tekst
+z obrazu przez systemowy OCR, tłumaczy go i wyświetla w osobnej nakładce,
+która przepuszcza kliknięcia. Możesz tłumaczyć wybrany fragment skrótem
+klawiszowym albo korzystać z automatycznego trybu live.
 
-## Status projektu (v0.2.2 — wydane)
+Projekt rozwijamy z myślą o różnych grach: dialogach, menu, zadaniach i opisach
+przedmiotów. Escape Academy i Path of Exile 2 służyły do prób; profil konkretnej
+gry jest opcjonalnym dodatkiem. Obsługa danego tytułu zależy od przechwytywania
+obrazu i czytelności tekstu.
 
-**Wszystkie etapy 0–12 ukończone.** Gotowe zipy do pobrania:
-**[Releases](https://github.com/KubaZx/Game_Translator/releases)** (portable win-x64,
-bez instalacji — rozpakuj i uruchom).
+[Pobierz wydanie](https://github.com/KubaZx/Game_Translator/releases) ·
+[Instrukcja](docs/USER_GUIDE.md) · [Plan rozwoju](docs/ROADMAP.md) ·
+[Historia zmian](CHANGELOG.md) · [CI](https://github.com/KubaZx/Game_Translator/actions/workflows/ci.yml)
 
-| Etap | Zakres | Status |
-|---|---|---|
-| 0–1 | Analiza, dokumentacja, szkielet, CI | ✅ |
-| 2 | Lista okien, wybór, przechwycenie, podgląd | ✅ |
-| 3 | Systemowe OCR Windows (`Windows.Media.Ocr`) | ✅ |
-| 4 | Tłumaczenie: DeepL + Mock, klucz w DPAPI | ✅ |
-| 5 | Cache SQLite (priorytet ręcznych korekt, eksport/import) | ✅ |
-| 6 | **MVP: Ctrl+Shift+T → region → polski wynik w panelu** | ✅ |
-| 7 | Nakładka click-through + wykluczenie z przechwytywania | ✅ |
-| 8 | Tryb live: wykrywanie zmian, stabilizacja, odrzucanie wyników poprzedniej sceny | ✅ |
-| 9 | Strategie live: przy oryginale (z wtapianiem w tło gry) / napisy na dole | ✅ |
-| 10 | Edytor słownika, import/eksport JSON, konflikty | ✅ |
-| 11 | Profile gier + autodetekcja po procesie (PoE2 w zestawie) | ✅ |
-| 12 | Wersja produkcyjna: portable zip, tray, release z CI, instrukcje, licencje | ✅ |
+## Stan projektu
 
-Tryb live jest strojony na prawdziwych grach (Path of Exile 2, Escape Academy) i mierzony
-narzędziami diagnostycznymi, nie „na oko": detektor zmian odporny na szum tła (migotanie
-mgły nie liczy się jako zmiana), sprawdzanie aktualności podczas oczekiwania i możliwość
-rozpoczęcia nowego tłumaczenia przed końcem odpowiedzi starej sceny. Podobna nowa treść
-wymaga kolejnych potwierdzeń OCR, a pojedyncze błędne warianty nie sumują się. Pętla może
-obudzić się przy terminie stabilności, ograniczając czekanie na następną próbkę obrazu. Czas gotowości
-tekstu zależy także od OCR i dostawcy; okres łaski i stabilizacja odczytów maskują
-czknięcia OCR nad ruchomą grafiką, a w trybie „Na oryginale (zakrywa)" łatka
-jest rozmytą kopią tła spod napisu, tekst dostaje kontur w kolorze z gry i rozmiar oryginału.
-Lokalne poprawki po 0.2.2 ograniczają nadmiarowe sprawdzanie obrazu podczas OCR,
-usuwają potwierdzony stary tekst przed oczekiwaniem na nowy wynik i oddzielają
-stabilizację pozycji od rozmiaru napisu. Wcześniejsze usuwanie obejmuje także
-przykrycie całego pola tekstu jednolitym panelem; na teksturowanym tle pozostaje
-ostrożny okres łaski. Drobne przesunięcia nie zależą już od długości napisu,
-a szum pozycji do 2 fizycznych pikseli nadal jest tłumiony. Zmiany są wspólne
-dla gier i profili; silny ruch kamery nadal może czasowo usuwać nakładkę.
-Automatyczna detekcja tooltipów — w planach ([docs/ROADMAP.md](docs/ROADMAP.md), tam też
-zmiany: [CHANGELOG.md](CHANGELOG.md)).
+**Ostatnie opublikowane wydanie: 0.2.2.** Gałąź `main` zawiera również późniejsze
+poprawki jakości live opisane w sekcji **Niewydane** w [CHANGELOG.md](CHANGELOG.md).
+Paczka wydania 0.2.2 nie zawiera tych późniejszych zmian; aktualny kod można
+zbudować instrukcją poniżej. Numer wersji aplikacji pozostaje 0.2.2 do kolejnego wydania.
 
-Funkcje wymagające prawdziwego pulpitu (skróty globalne, nakładka, DPI, multi-monitor) mają
-scenariusze testów ręcznych w [docs/MANUAL_TESTING.md](docs/MANUAL_TESTING.md).
+Stan weryfikacji na 15 września 2026: **346 testów** — 309 Core i 37 Infrastructure;
+kompilacja bez ostrzeżeń, test Windows OCR z lokalnym dostawcą Mock oraz CI przeszły.
+Próby wizualne w różnych grach, przy różnych DPI i monitorach pozostają osobnym
+zadaniem. Projekt nadal rozwijamy, szczególnie pod kątem dynamicznej rozgrywki.
+
+## Co potrafi
+
+- **Tłumaczenie ręczne:** `Ctrl+Shift+T` i zaznaczenie fragmentu ekranu.
+- **Tryb live:** automatyczne rozpoznawanie zmian tekstu w wybranym oknie gry.
+- **Dwa sposoby prezentacji:** bloki przy oryginale, także z zakrywaniem tekstu,
+  albo wspólny pasek napisów na dole.
+- **Słowniki i własne poprawki:** edytor, import i eksport, spójne nazwy i terminy.
+- **Pamięć tłumaczeń:** cache SQLite, łączenie powtarzających się zapytań oraz limity użycia.
+- **Praca bez wysyłania tłumaczeń:** Cache-only korzysta z lokalnych wyników;
+  Mock służy do sprawdzania działania bez klucza API.
+- **Profile opcjonalne:** ustawienia ogólne i profil PoE2 w zestawie; pozostałe gry
+  korzystają ze wspólnego silnika.
+
+Priorytet wyniku: **ręczna poprawka → słownik → cache → dostawca tłumaczenia**.
+
+## Ostatnie poprawki na `main`
+
+Stare napisy są usuwane po wykrytej zmianie sceny, a spóźniona odpowiedź nie powinna
+przywracać poprzedniego widoku. Potwierdzone lokalne zastąpienie lub przykrycie
+tekstu jednolitym panelem może usunąć tylko ten napis, zachowując pozostałe menu.
+
+Nowa scena może rozpocząć tłumaczenie podczas kończenia poprzedniej odpowiedzi.
+Sesja nadzoruje najwyżej dwa zadania tłumaczeń i rezerwuje znaki przed wysłaniem.
+Pojedyncze, rozdzielone poprawnym odczytem pomyłki OCR nie sumują się w potwierdzenie
+nowego tekstu. Stabilizacja położenia działa oddzielnie od rozmiaru napisu.
+
+### Wybrane pomiary kontrolne
+
+| Scenariusz | Przed poprawką | Po poprawce |
+|---|---:|---:|
+| Usunięcie starej etykiety po lokalnym przykryciu | 2,86 s | 0,29 s |
+| Gotowość nowego opisu, gdy panel zmienia się podczas tłumaczenia | 4,11 s | 2,50 s |
+| Maksymalne odsunięcie napisu po małym przesunięciu źródła | 18 px | 2 px |
+
+Pierwsze dwie próby używały własnego okna, rzeczywistego Windows OCR i **Mocka
+z celowym opóźnieniem 2 s**. Trzecia używała syntetycznego OCR z geometrią wyznaczaną
+z obrazu, w 12 krokach po 3 fizyczne piksele. Pomiary kończą się przy przygotowaniu
+aktualizacji przez sesję: nie mierzą czasu odpowiedzi DeepL ani fizycznego rysowania
+nakładki. Nie są gwarancją wyniku w każdej grze. Warunki i ograniczenia:
+[roadmapa](docs/ROADMAP.md), [SceneReplay](tools/GameTranslatorOverlay.SceneReplay/README.md).
 
 ## Wymagania
 
-- Windows 10 (2004+) albo Windows 11,
-- pakiet językowy Windows dla języka źródłowego (np. angielski — sprawdź w
-  *Ustawienia → Czas i język → Język i region*),
-- klucz DeepL API do tłumaczenia online (darmowy plan: 500 000 znaków/mies.; klucz darmowy
-  kończy się na `:fx`). Bez klucza działa dostawca testowy **Mock** oraz tryb **Cache-only**,
-- **zero** Pythona, Ollamy, lokalnych modeli AI, CUDA i dedykowanego GPU.
+- Windows 10 (2004+) lub Windows 11; aplikacja portable dla win-x64.
+- Pakiet językowy Windows OCR dla języka gry, np. angielski.
+- Klucz **DeepL API**, jeśli chcesz tłumaczyć online. Mock i Cache-only działają bez klucza.
+- Gra w trybie okienkowym lub borderless fullscreen.
 
-## Szybki start (użytkownik)
+Paczka portable zawiera środowisko .NET. Nie wymaga Pythona, CUDA ani pobierania
+lokalnych modeli AI. Do samodzielnego budowania potrzebny jest **.NET 10 SDK** na Windows.
 
-1. Pobierz najnowszy zip z **[Releases](https://github.com/KubaZx/Game_Translator/releases)**
-   i rozpakuj gdziekolwiek (alternatywnie zbuduj sam: `tools/package.ps1`).
-2. Uruchom `GameTranslatorOverlay.exe`.
-3. Wklej klucz DeepL w sekcji „Klucz API” i kliknij **Zapisz klucz** (trafia zaszyfrowany
-   przez DPAPI do `%LOCALAPPDATA%\GameTranslatorOverlay\secrets`), potem **Testuj**.
-4. Uruchom grę w trybie okienkowym albo borderless fullscreen.
-5. Wciśnij **Ctrl+Shift+T**, zaznacz myszą tooltip/dialog — polskie tłumaczenie pojawi się
-   w panelu obok (albo w nakładce, zależnie od ustawienia „Wyświetlanie wyniku").
-6. **Tryb live**: wybierz okno gry z listy i kliknij **▶ Start live** — tłumaczenia pojawiają
-   się same nad tekstem gry. Położenie „Na oryginale (zakrywa)" wtapia tłumaczenie w tło gry.
-7. **Ctrl+Shift+H** chowa/pokazuje nakładkę. Błędne tłumaczenie poprawisz przyciskiem
-   **Popraw** (korekta zostaje na zawsze), a termin dodasz do słownika przyciskiem **+ Słownik**.
+## Szybki start
 
-Tryb **prywatny** (checkbox) wyłącza zapis na dysk; tryb **Cache-only** pokazuje wyłącznie
-tłumaczenia z lokalnej bazy i niczego nie wysyła do internetu.
+1. Pobierz i rozpakuj [wydanie portable](https://github.com/KubaZx/Game_Translator/releases).
+   Uruchom `GameTranslatorOverlay.exe`.
+2. Do tłumaczenia online wybierz **DeepL**, wpisz klucz API, kliknij **Zapisz klucz**
+   i **Testuj**. Do próby działania wybierz **Mock** — dodaje `[PL]`, nie tłumaczy tekstu.
+3. Uruchom grę w oknie lub borderless i wybierz jej okno na liście aplikacji.
+4. Kliknij **▶ Start live**. Ustaw **Przy oryginale** lub **Napisy na dole**.
+   W trybie bloków opcja **Na oryginale (zakrywa)** umieszcza wynik na tekście gry.
+5. Doraźnie użyj **Ctrl+Shift+T**, aby zaznaczyć tekst. **Ctrl+Shift+H** ukrywa
+   lub pokazuje nakładkę, a **⏹ Stop** kończy live.
 
-## Szybki start (deweloper)
+Nie potrzebujesz osobnego profilu dla każdej gry. Szczegóły konfiguracji,
+prywatności i rozwiązywania problemów są w [instrukcji użytkownika](docs/USER_GUIDE.md).
 
-```bash
-dotnet build
+## Znane ograniczenia
+
+- **Exclusive fullscreen** nie jest obsługiwany.
+- Silny ruch kamery nadal może usuwać całą nakładkę. Rozróżnianie stałego interfejsu
+  i poruszającego się świata oraz śledzenie pozycji między odczytami OCR to kierunki rozwoju.
+- Wcześniejsze usuwanie przykrytego tekstu wymaga pewnych danych. Teksturowane tło,
+  niepełny wycinek lub słaby kontrast mogą wydłużyć podtrzymywanie starego napisu.
+- Ozdobne i małe czcionki, animacje oraz efekty pod tekstem mogą pogarszać OCR i wygląd nakładki.
+- Czas nowego tłumaczenia zależy także od OCR, sieci i dostawcy. Samo zmniejszenie
+  opóźnienia aplikacji nie skraca odpowiedzi DeepL.
+- Przechwytywanie używa PrintWindow/GDI. Jeśli potrzebny jest zrzut ekranu w obszarze
+  gry, aplikacja ostrzega: inne okna nachodzące na grę mogą znaleźć się w odczycie.
+- Automatyczne wykrywanie osobnego obszaru tooltipu jest planowane. Obecnie możesz
+  zaznaczyć tooltip ręcznie lub odczytać go w ramach zwykłego live.
+- Wykluczenie nakładki z przechwytywania może sprawić, że nie będzie widoczna na nagraniu.
+  Zaznaczanie regionu działa na monitorze, na którym znajduje się kursor.
+
+## Prywatność i sposób działania
+
+Program przechwytuje wybrane okno lub region i rozpoznaje tekst lokalnie.
+**Do dostawcy tłumaczeń wysyłany jest tekst, nigdy obraz.** Aplikacja nie zapisuje
+zrzutów gry podczas zwykłego działania; osobne narzędzia diagnostyczne mają opisane
+opcje zapisu obrazów.
+
+Klucz API jest przechowywany lokalnie z ochroną Windows DPAPI i używany do
+uwierzytelniania żądań do DeepL. Dane aplikacji znajdują się w
+`%LOCALAPPDATA%\GameTranslatorOverlay`. Tryb prywatny używa cache w pamięci;
+Cache-only wyłącza wysyłanie brakujących tłumaczeń do dostawcy.
+
+Aplikacja nie modyfikuje plików ani pamięci gry, nie wstrzykuje kodu i nie wysyła
+klawiszy lub kliknięć do gry. Szczegóły: [bezpieczeństwo](docs/SECURITY.md)
+i [prywatność](docs/PRIVACY.md). Projekt nie jest powiązany z twórcami gier;
+zgodność z regulaminem konkretnego tytułu należy sprawdzić osobno.
+
+## Budowanie i testy
+
+Na Windows, z .NET 10 SDK, w katalogu repozytorium:
+
+```powershell
+dotnet build GameTranslatorOverlay.slnx -c Release
+dotnet build src/GameTranslatorOverlay.App -c Release --no-restore
+dotnet test GameTranslatorOverlay.slnx -c Release --no-build --no-restore
+dotnet run --project tools/GameTranslatorOverlay.SmokeTest -c Release --no-build --no-restore
 ```
 
-```bash
-dotnet test
-```
+Testy xUnit używają atrap i lokalnych danych; nie potrzebują klucza DeepL ani
+aktywnej gry. Smoke test sprawdza rzeczywisty Windows OCR na syntetycznym obrazie.
+Pełny podział: [TESTING.md](docs/TESTING.md).
 
-```bash
-dotnet run --project tools/GameTranslatorOverlay.SmokeTest
-```
+Uruchomienie z kodu: `dotnet run --project src/GameTranslatorOverlay.App`.
+Pełna paczka portable z bieżącego kodu: `./tools/package.ps1` — wynik w `dist/`.
+Samo pakowanie nie tworzy wydania GitHub; CI publikuje wydanie po tagu `v*`.
 
-```bash
-dotnet run --project src/GameTranslatorOverlay.App
-```
+## Narzędzia diagnostyczne
 
-Smoke test renderuje syntetyczny tooltip RPG, puszcza go przez prawdziwe OCR Windows,
-grupowanie bloków i pełny pipeline tłumaczenia z cache SQLite (dostawca Mock) — kod wyjścia 0
-oznacza działający pion. Testy jednostkowe/integracyjne nie wymagają klucza API ani GUI.
+| Narzędzie | Zastosowanie |
+|---|---|
+| [LiveDiag](tools/GameTranslatorOverlay.LiveDiag/README.md) | pomiar sesji na własnym oknie lub wskazanej grze; Mock, prywatny cache, raport JSONL bez tekstów |
+| [SceneReplay](tools/GameTranslatorOverlay.SceneReplay/README.md) | powtarzalne własne sceny: stare odpowiedzi, lokalne przykrycie, szum OCR, pozycja i czasy |
+| `tools/GameTranslatorOverlay.OcrLab` | zapis klatki, geometria DPI i porównanie wariantów OCR |
+| `tools/GameTranslatorOverlay.SmokeTest` | Windows OCR i pipeline na syntetycznym tekście |
 
-Diagnostyka trybu live (wszystko z manifestem PerMonitorV2 — bez niego proces dostaje
-zwirtualizowany, ucięty kadr przy skalowaniu ekranu):
+LiveDiag i SceneReplay blokują HTTP i nie czytają klucza ani cache użytkownika.
+Sondy nie zastępują oceny wyglądu nakładki w grze. Próby wymagające obserwacji
+użytkownika opisano w [MANUAL_TESTING.md](docs/MANUAL_TESTING.md).
 
-- `dotnet run --project tools/GameTranslatorOverlay.LiveDiag -- 36` — okno testowe z animacjami;
-  `-- "fragment tytułu" 60` — podpięcie pod istniejące okno gry, telemetria co przebieg
-  (boxy, wysokości linii, kolory, liczba linii OCR, podtrzymane bloki),
-- `dotnet run --project tools/GameTranslatorOverlay.OcrLab -- "fragment tytułu" [katalog]` —
-  zrzut klatki + geometria DPI + OCR w kilku wariantach preprocessingu,
-- aplikacja w trybie diagnostycznym: `GTO_AUTOLIVE="fragment tytułu"` startuje live bez
-  klikania, `GTO_DIAG_CAPTURABLE=1` zostawia nakładkę widoczną dla zrzutów ekranu
-  (normalnie jest z nich wykluczona) — do oglądania, co faktycznie rysujemy.
+## Kod i dokumentacja
 
-## Struktura repozytorium
+- `src/GameTranslatorOverlay.Core` — logika tekstu, tłumaczenia, kosztów i stabilizacji.
+- `src/GameTranslatorOverlay.Infrastructure` — DeepL, SQLite, DPAPI i obsługa plików.
+- `src/GameTranslatorOverlay.App` — interfejs WPF, przechwytywanie, Windows OCR i nakładka.
+- `tests/` — testy Core i Infrastructure; `tools/` — narzędzia lokalne.
+- `profiles/` i `glossaries/` — opcjonalne profile oraz słowniki.
 
-```
-src/
-  GameTranslatorOverlay.Core/            czysta logika: pipeline, normalizacja, glossary, modele
-  GameTranslatorOverlay.Infrastructure/  SQLite cache, DeepL, DPAPI, ustawienia, katalogi plików
-  GameTranslatorOverlay.App/             WPF: UI, capture (GDI), Windows OCR, nakładka, skróty
-tests/                                   xUnit: Core.Tests (137), Infrastructure.Tests (37)
-tools/GameTranslatorOverlay.SmokeTest/   smoke test E2E bez GUI
-tools/GameTranslatorOverlay.LiveDiag/    stanowisko diagnostyczne trybu live (telemetria)
-tools/GameTranslatorOverlay.OcrLab/      laboratorium OCR: zrzut klatki, DPI, warianty preprocessingu
-profiles/                                profile gier (generic, path-of-exile-2)
-glossaries/                              słowniki EN→PL (globalny 44, PoE2 118 terminów)
-docs/                                    wizja, architektura, decyzje, bezpieczeństwo, testy
-.github/workflows/ci.yml                 build + testy (windows-latest) + release na tag v*
-```
-
-## Prywatność w skrócie
-
-Przechwytywany jest tylko wybrany region/okno. OCR działa lokalnie. Do API tłumaczeniowego
-wysyłany jest **wyłącznie rozpoznany tekst** — nigdy obraz. Program nie zapisuje screenshotów
-i nie nagrywa rozgrywki. Dane (cache, ustawienia, logi) trzyma w
-`%LOCALAPPDATA%\GameTranslatorOverlay`. Pełna polityka: [docs/PRIVACY.md](docs/PRIVACY.md).
-
-## Znane ograniczenia (v0.2.2)
-
-- Gry w trybie **exclusive fullscreen** nie są obsługiwane (użyj borderless/okienkowego).
-- Tryb live jest strojony głównie na menu, ekranach wyboru i dialogach; **w trakcie dynamicznej
-  rozgrywki** (ruch kamery, efekty, animowane tło pod tekstem) jakość bywa niższa — to następny
-  obszar strojenia.
-- Zaznaczanie regionu działa na monitorze, na którym stoi kursor.
-- Tryb live używa PrintWindow/GDI (na DX12, np. PoE2, działa — zmierzone); u nielicznych gier
-  może zajść fallback do zrzutu ekranu, o czym aplikacja wprost ostrzega. Windows Graphics
-  Capture pozostaje możliwym ulepszeniem.
-- Wtapianie tłumaczeń jest niemal idealne na jednolitych tłach (dialogi, tooltipy, menu);
-  napisy wiszące bezpośrednio nad światem 3D dostają dyskretny podkład w kolorze otoczenia.
-- Nakładka jest wykluczona z przechwytywania ekranu — nie zobaczysz jej na nagraniach OBS
-  (to celowe: OCR nie może czytać własnych tłumaczeń).
-- Automatyczna detekcja tooltipów (bez zaznaczania) — planowana; dziś tooltipy tłumaczy
-  tryb ręczny.
-- Jakość OCR zależy od czcionki gry; małe/ozdobne czcionki mogą wymagać większego regionu.
-
-Instrukcja użytkownika: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) • Pakowanie wydania:
-`tools/package.ps1` → `dist/GameTranslatorOverlay-vX.Y.Z-win-x64.zip`.
-
-## Dokumentacja
-
-[PRODUCT_VISION](docs/PRODUCT_VISION.md) • [ARCHITECTURE](docs/ARCHITECTURE.md) •
-[TECHNOLOGY_DECISIONS](docs/TECHNOLOGY_DECISIONS.md) • [ROADMAP](docs/ROADMAP.md) •
-[SECURITY](docs/SECURITY.md) • [PRIVACY](docs/PRIVACY.md) •
-[API_PROVIDERS](docs/API_PROVIDERS.md) • [TESTING](docs/TESTING.md) •
-[MANUAL_TESTING](docs/MANUAL_TESTING.md)
-
----
-
-*GameTranslatorOverlay nie jest powiązany z twórcami żadnej z obsługiwanych gier. Korzystanie
-z nakładek może podlegać regulaminom poszczególnych gier — sprawdź zasady swojej gry.*
+[Wizja produktu](docs/PRODUCT_VISION.md) · [Architektura](docs/ARCHITECTURE.md) ·
+[Decyzje techniczne](docs/TECHNOLOGY_DECISIONS.md) · [Dostawcy API](docs/API_PROVIDERS.md) ·
+[Plan rozwoju](docs/ROADMAP.md) · [Historia zmian](CHANGELOG.md)

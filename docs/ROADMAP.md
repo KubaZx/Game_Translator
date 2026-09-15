@@ -1,10 +1,32 @@
 # Roadmap — GameTranslatorOverlay
 
-Etapy realizowane sekwencyjnie; każdy etap ma jednoznaczne kryterium ukończenia. Wersjonowanie SemVer, start 0.1.0. Pierwsze MVP = ukończony Etap 6.
+## Obecny stan — 15 września 2026
+
+Ostatnie opublikowane wydanie to **0.2.2**. Na `main` są już późniejsze poprawki
+live: aktualność sceny i lokalnych opisów, nadzorowane tłumaczenia w toku,
+stabilizacja kolejnych odczytów oraz położenia. Przeszło **346 testów**, jawna
+kompilacja App, smoke test Windows OCR i CI. Wyniki pomiarów opisano w rundach poniżej.
+
+Produkt jest rozwijany dla różnych gier. Escape Academy służy do pomiarów;
+PoE2 jest jednym z obsługiwanych przypadków z dodatkowym profilem. Aktualny priorytet
+to stabilność i czytelność w rozgrywce. Etapy poniżej zachowują historię powstawania
+produktu; status implementacji nie zastępuje testów wizualnych na kolejnych grach.
+
+## Kierunki dalszych prac — do pomiaru, niewdrożone
+
+1. Zachowywanie stałych elementów interfejsu podczas ruchu świata gry.
+2. Śledzenie położenia napisu między kolejnymi odczytami OCR.
+3. Lepsza czytelność i zakrywanie na wzorzystym oraz animowanym tle.
+4. Dostosowywanie tempa pracy do menu, dialogu i ruchu.
+
+Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
+Silny ruch nadal może czyścić całą nakładkę; obecna stabilizacja pozycji działa przy
+kolejnych odczytach OCR. Automatyczna detekcja obszaru tooltipu pozostaje otwarta.
+History Mode i wyjaśnianie tekstu przez LLM nie są funkcjami obecnej aplikacji.
+
+## Historia etapów
 
 Statusy: ✅ zrobione · 🔨 w trakcie · ⬜ planowane
-
-## Etapy
 
 ### Etap 0 — Analiza i dokumenty ✅
 
@@ -72,13 +94,13 @@ Słowniki wg schematu `glossaries/<id>/en-pl.json` (dopasowanie całych słów/f
 
 **Kryterium ukończenia:** użytkownik dodaje termin do słownika i poprawia tłumaczenie z poziomu UI; korekta wygrywa z każdym innym źródłem; słownik da się wyeksportować i zaimportować bez utraty danych; konflikty są raportowane.
 
-### Etap 11 — Profile gier + profil PoE2 ✅ (autodetekcja profilu po procesie gry; walidacja minAppVersion — planowana)
+### Etap 11 — Opcjonalne profile gier ✅ (autodetekcja po procesie gry; walidacja minAppVersion — planowana)
 
 Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po nazwie procesu/tytule okna, parametry OCR i detekcji zmian, powiązany słownik, `minAppVersion`). Pierwszy dostarczony profil: Path of Exile 2 wraz ze słownikiem terminów.
 
 **Kryterium ukończenia:** aplikacja wykrywa uruchomione PoE2 i proponuje profil; profil ustawia parametry i słownik; usunięcie profilu nie zmienia działania aplikacji dla innych gier.
 
-### Etap 12 — Wersja produkcyjna 🔨 (portable zip + tools/package.ps1 + USER_GUIDE + licencje + tray; do zrobienia: publikacja releasu)
+### Etap 12 — Dystrybucja portable (wydanie 0.2.2 opublikowane; pełna ocena ręczna według checklisty nadal osobna)
 
 Release: `dotnet publish` win-x64, aplikacja portable. Instrukcje użytkownika, `MANUAL_TESTING.md` (testy wymagające pulpitu Windows: OCR na żywo, nakładka, skróty — wyłącznie ręczne), licencje zależności, polityka prywatności, disclaimer. Artefakt Release z CI na tag lub manualnie.
 
@@ -129,7 +151,7 @@ Budowanie i testy:
 24. Release buduje się przez `dotnet publish` win-x64 zgodnie z instrukcją w dokumentacji; artefakt powstaje z CI na tag lub manualnie.
 25. Testy ręczne (OCR na żywo, nakładka, skróty globalne) są opisane w `MANUAL_TESTING.md` i dają się wykonać wg dokumentacji.
 
-## Priorytety produktu
+## Historyczne priorytety pierwszej wersji
 
 Przy każdym konflikcie decyzyjnym rozstrzyga niższy numer:
 
@@ -142,7 +164,7 @@ Przy każdym konflikcie decyzyjnym rozstrzyga niższy numer:
 7. Nakładka.
 8. Tryb live.
 9. Profile gier.
-10. Wyjaśnianie mechanik (opcjonalny LLM, domyślnie OFF).
+10. Dalsze funkcje po potwierdzeniu jakości i kosztu; integracji LLM obecnie nie ma.
 
 
 
