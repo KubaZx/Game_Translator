@@ -23,8 +23,8 @@ poprawki jakości live opisane w sekcji **Niewydane** w [CHANGELOG.md](CHANGELOG
 Paczka wydania 0.2.2 nie zawiera tych późniejszych zmian; aktualny kod można
 zbudować instrukcją poniżej. Numer wersji aplikacji pozostaje 0.2.2 do kolejnego wydania.
 
-Stan weryfikacji na 15 września 2026: **346 testów** — 309 Core i 37 Infrastructure;
-kompilacja bez ostrzeżeń, test Windows OCR z lokalnym dostawcą Mock oraz CI przeszły.
+Stan lokalnej weryfikacji na 15 września 2026: **371 testów** — 334 Core i 37 Infrastructure;
+kompilacja bez ostrzeżeń i test Windows OCR z lokalnym dostawcą Mock przeszły.
 Próby wizualne w różnych grach, przy różnych DPI i monitorach pozostają osobnym
 zadaniem. Projekt nadal rozwijamy, szczególnie pod kątem dynamicznej rozgrywki.
 
@@ -43,7 +43,7 @@ zadaniem. Projekt nadal rozwijamy, szczególnie pod kątem dynamicznej rozgrywki
 
 Priorytet wyniku: **ręczna poprawka → słownik → cache → dostawca tłumaczenia**.
 
-## Ostatnie poprawki na `main`
+## Ostatnie poprawki w kodzie
 
 Stare napisy są usuwane po wykrytej zmianie sceny, a spóźniona odpowiedź nie powinna
 przywracać poprzedniego widoku. Potwierdzone lokalne zastąpienie lub przykrycie
@@ -53,6 +53,13 @@ Nowa scena może rozpocząć tłumaczenie podczas kończenia poprzedniej odpowie
 Sesja nadzoruje najwyżej dwa zadania tłumaczeń i rezerwuje znaki przed wysłaniem.
 Pojedyncze, rozdzielone poprawnym odczytem pomyłki OCR nie sumują się w potwierdzenie
 nowego tekstu. Stabilizacja położenia działa oddzielnie od rozmiaru napisu.
+
+Już wyświetlony napis może pozostać podczas ruchu tła, jeśli wszystkie piksele jego
+obszaru źródłowego nadal dokładnie pasują. Dotyczy to także pustego odczytu OCR.
+Zmienione lub zasłonięte napisy tracą tę ochronę; spóźnione wyniki poprzedniej sceny
+nadal są odrzucane. W próbie własnego menu z Windows OCR i Mock 200 ms liczba
+próbek ze zgubionym menu spadła z 77 do 0, bez zmiany liczby zapytań (3 / 79 znaków).
+Są to obserwacje stanu sesji, nie liczba osobnych mignięć ani ocena wyglądu w grze.
 
 ### Wybrane pomiary kontrolne
 
@@ -97,8 +104,10 @@ prywatności i rozwiązywania problemów są w [instrukcji użytkownika](docs/US
 ## Znane ograniczenia
 
 - **Exclusive fullscreen** nie jest obsługiwany.
-- Silny ruch kamery nadal może usuwać całą nakładkę. Rozróżnianie stałego interfejsu
-  i poruszającego się świata oraz śledzenie pozycji między odczytami OCR to kierunki rozwoju.
+- Zachowanie stałego menu wymaga identycznego obrazu źródła i rozmiaru okna. Ochrona
+  nie działa przy skalowaniu OCR ani zapasowym przechwytywaniu ekranu; animowane
+  i przezroczyste tło może ją wyłączyć. Silny ruch nadal może wtedy usunąć całą nakładkę.
+  Śledzenie pozycji między odczytami OCR pozostaje kierunkiem rozwoju.
 - Wcześniejsze usuwanie przykrytego tekstu wymaga pewnych danych. Teksturowane tło,
   niepełny wycinek lub słaby kontrast mogą wydłużyć podtrzymywanie starego napisu.
 - Ozdobne i małe czcionki, animacje oraz efekty pod tekstem mogą pogarszać OCR i wygląd nakładki.

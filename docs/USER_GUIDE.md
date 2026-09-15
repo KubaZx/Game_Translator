@@ -65,6 +65,10 @@ opcjonalnym dodatkiem ze słownikiem terminów.
 - Przy trudnej czcionce lub konkretnym opisie użyj **Ctrl+Shift+T** i zaznacz
   interesujący fragment. Automatyczne wydzielanie obszaru tooltipu jest w planach.
 
+Stałe menu może pozostać podczas ruchu tła, jeśli obraz pod jego napisami nie zmienił
+się ani o piksel. Zmieniony lub zasłonięty napis traci tę ochronę. Animowane tło,
+skalowanie odczytu lub zapasowe przechwytywanie ekranu mogą uniemożliwić zachowanie menu.
+
 Bieżący kod usuwa potwierdzone stare opisy przed nadejściem nowego tłumaczenia
 i dokładniej dopasowuje pozycję. Na wzorzystym tle albo przy niepewnym OCR stary
 napis może być chwilowo podtrzymany. Te mechanizmy ograniczają błędy, ale nie

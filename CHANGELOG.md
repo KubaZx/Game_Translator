@@ -4,7 +4,7 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
-Zmiany dostępne w kodzie na `main` po wydaniu 0.2.2. Nie są jeszcze częścią
+Zmiany w kodzie projektu po wydaniu 0.2.2. Nie są jeszcze częścią
 osobnego wydania ani archiwum 0.2.2.
 
 ### Dla gracza
@@ -19,9 +19,18 @@ osobnego wydania ani archiwum 0.2.2.
 
 - Odświeżone README, instrukcja, wizja produktu, architektura i opis testów.
 - Rozróżnienie wydania 0.2.2, bieżącego kodu `main` i niewdrożonych kierunków rozwoju.
-- Aktualny stan: 346 testów (309 Core + 37 Infrastructure) i opis ograniczeń pomiarów.
+- Aktualny stan lokalny: 371 testów (334 Core + 37 Infrastructure) i opis ograniczeń pomiarów.
 
 ### Naprawione
+
+- Silny ruch może zachować już przetłumaczone, nieruchome napisy, jeśli pełny obszar
+  źródłowy z marginesem 3 px ma identyczne RGB. Sprawdzanie używa istniejących klatek
+  i skrótu SHA-256 w pamięci, bez przechowywania obrazu ani dodatkowego OCR/API.
+  Ten sam dowód chroni przed kolejnymi pustymi odczytami. Zmieniony napis nadal jest
+  usuwany, a generacja sceny unieważnia spóźnione wyniki. Brak ochrony dla skalowania
+  OCR, fallback, zmiany rozmiaru okna, niepełnego pola lub niepewnego kontrastu.
+  Sondy własnego menu obejmują duży i częściowy ruch tła, podmianę/usunięcie napisów
+  oraz wymuszone błędy OCR; nie zastępują prób wyglądu w grach.
 
 - Pierwsza okresowa kontrola obrazu podczas OCR czeka 1,5 zwykłego interwału;
   kolejne wracają do normalnego rytmu. OCR trwający co najmniej jeden interwał

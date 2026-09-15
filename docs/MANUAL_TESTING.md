@@ -581,3 +581,19 @@ nakładki, profil, DPI i rozdzielczość. Do lokalnych prób wystarcza Mock.
 Przy zgłoszeniu rozdziel: opóźnienie, pozostawanie starej treści, błędne zniknięcie
 aktualnego napisu i przesunięcie względem oryginału. Czasy kontroli sceny i OCR
 nakładają się; nie dodawaj ani nie odejmuj ich jako niezależnych etapów.
+
+## Regresja M20/M21/M22 — stałe menu przy ruchu tła (2026-09-15)
+
+Automatyczne scenariusze `hud-motion`, `hud-motion-whiff` i `hud-motion-small-whiff`
+sprawdzają stan sesji bez gry; ich wynik nie oznacza zaliczenia fizycznej prezentacji
+M17–M22. Przy późniejszej próbie w grze sprawdź:
+
+1. Już przetłumaczone, nieruchome menu na stałym tle podczas ruchu świata.
+2. Zastąpienie lub zasłonięcie jednej jego etykiety: stara znika, pozostałe zostają.
+3. Rzeczywistą zmianę całego widoku i odpowiedź dostawcy przychodzącą po zmianie.
+4. Pasek napisów: usunięcie części treści nie odnawia jego czasu wygaśnięcia.
+5. Ukrycie skrótem, minimalizację/przywrócenie, zmianę rozmiaru/DPI oraz Stop.
+
+Ochrona wymaga identycznych pikseli źródła z marginesem 3 px i tej samej wielkości
+przechwyconego okna. Nie dotyczy klatek ze skalowaniem OCR ani przechwytywania
+zapasowego z ekranu. Brak ochrony w takich warunkach nie dowodzi regresji tej funkcji.

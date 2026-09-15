@@ -1,7 +1,7 @@
 # Testy i pomiary — GameTranslatorOverlay
 
-Stan sprawdzony 15 września 2026: **346 testów xUnit** — **309 Core** i
-**37 Infrastructure**, kompilacja bez ostrzeżeń oraz zielone CI. Smoke test
+Stan sprawdzony lokalnie 15 września 2026: **371 testów xUnit** — **334 Core** i
+**37 Infrastructure**, kompilacja bez ostrzeżeń. Smoke test
 Windows OCR z lokalnym Mockiem również przeszedł.
 
 Rozdzielamy testy logiki, lokalne sondy z rzeczywistym capture/OCR i ocenę
@@ -34,6 +34,8 @@ wykonuje się osobno; nie są częścią standardowego `dotnet test`.
   pusty odczyt w badanym obszarze przerywa serię kandydata.
 - Ostrożny dowód pustego, jednolitego pola: kontrast, całe ROI, cienkie znaki,
   stride/padding, alpha i nieprawidłowe dane.
+- Dokładny skrót RGB niezmienionego tekstu: pojedynczy zmieniony piksel, pomijanie
+  alpha/paddingu, pełne pole, geometria, granice kosztu i błędne dane (25 przypadków).
 - Niezależną stabilizację pozycji i rozmiaru oraz usuwanie źródeł paska napisów.
 - Parser opcji LiveDiag, dołączony do testów bez zależności od aplikacji WPF.
 
@@ -95,6 +97,7 @@ własne okna i powtarzalne scenariusze:
 | Przykrycie lokalne i zachowanie menu | `local-occlusion`, `local-occlusion-hover`, `local-occlusion-inflight` |
 | Pozycja i szum geometrii | `moving-text`, `position-jitter` |
 | Koszt kontroli podczas OCR | `ocr-timing` |
+| Stałe menu i puste OCR przy ruchu | `hud-motion`, `hud-motion-whiff`, `hud-motion-small-whiff` |
 
 Przykład (katalog docelowy musi istnieć, plik raportu musi być nowy):
 

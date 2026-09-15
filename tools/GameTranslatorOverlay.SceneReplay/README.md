@@ -71,3 +71,43 @@ Scenariusze `local-occlusion`, `local-occlusion-hover` i `local-occlusion-inflig
 - `local-occlusion-inflight`: zmienia panel 250 ms po pierwszym OCR Inspect i menu, przed pierwszym wynikiem Mock. `inflightPreconditionMet` wymaga rzeczywistego odstępu od OCR do Rendering wynoszącego co najmniej 250 i mniej niż 2000 ms, zera zakończonych żądań/rozliczonych znaków oraz dodatniej rezerwacji znaków. Nie czeka na początkowy callback. Oczekiwane: `oldInspectCallbacksAfterChange=0`, nowy opis pokazany wraz z menu, które pozostaje od tego wyniku.
 
 Obserwacja trwa 12 s. `fixtureValid` wymaga co najmniej dwóch odczytów docelowego tekstu (Inspect dla hover, opisu dla pozostałych), braku fallback, niespodziewanego stopu i globalnego sceneCut, a dla wariantów z opisem także co najmniej 3 s obserwacji po jego pokazaniu. Inflight dodatkowo wymaga opisanego warunku rozpoczęcia pomiaru. **Exit 0 oznacza ważny ukończony pomiar; `expectedBehavior` określa wynik regresji.** Poza kryteriami wariantu wynik wymaga `clearCallbacks=0`, `hideCallbacks=0` i zachowania menu. Summary zapisuje m.in. `firstInspectRemovedMs`, `firstDescriptionOcrMs`, `firstDescriptionReadyMs`, `inspectReturnUpdates`, `menuLossUpdates` oraz warunek i liczniki inflight. Oba rodzaje sond używają świeżego prywatnego cache, blokują HTTP i zapisują JSONL bez obrazów i treści OCR; zamknięcie sesji nie liczy się jako usunięcie starego napisu.
+
+## Stałe menu podczas ruchu tła
+
+`hud-motion`, `hud-motion-whiff` i `hud-motion-small-whiff` w `StaticHudReplay.cs`
+przechwytują wyłącznie własne okno 1200×760 DIP. Dwie etykiety są na stałym,
+nieprzezroczystym panelu; napis w świecie przesuwa się, a tło zmienia jasność co
+71 ms. Po fazie stabilnego menu następuje zamiana jednej etykiety (2200 ms),
+usunięcie obu (1400 ms), zatrzymanie tła i nowy końcowy opis. Początek i koniec
+korzystają z rzeczywistego Windows OCR. Mock ma stałe 200 ms, cache jest prywatny
+w pamięci, HTTP zablokowane; raport nie zapisuje obrazów ani treści OCR.
+
+- `hud-motion`: rzeczywisty Windows OCR przez cały test; stałe menu obserwowane 4200 ms.
+- `hud-motion-whiff`: po początkowym wyniku wymusza puste odczyty w fazach ruchu.
+  Pozwala sprawdzić zachowanie menu także przy błędzie OCR i globalnym cięciu.
+- `hud-motion-small-whiff`: zmienia tylko pas o szerokości 400 DIP (około 1/3 okna),
+  również wymusza puste odczyty. Faza menu trwa 10500 ms i musi zawierać przynajmniej
+  trzy ukończone przebiegi bez `SceneCut`. To sprawdza wygaśnięcie po wielu brakach OCR
+  przy ruchu zbyt małym dla progu globalnego cięcia.
+
+Narzędzie odrzuca opcje opóźnień oraz `--ocr scripted`. Przykład:
+
+```powershell
+dotnet run --project tools/GameTranslatorOverlay.SceneReplay -c Release -- --scenario hud-motion --output C:\measurements\hud.jsonl
+```
+
+`fixtureValid` wymaga początku i końca, wystarczającej liczby zmian tła i odczytów,
+braku fallback/stopu, co najmniej 30 próbek stanu podczas pierwszej fazy oraz
+obserwacji po końcowym opisie przez przynajmniej sekundę. Warianty z pustymi wynikami
+muszą rzeczywiście je wykonać; wariant małego ruchu dodatkowo spełnić opisane warunki
+trzech przebiegów. **Exit 0 oznacza ważność próby, nie przejście regresji.**
+
+`expectedBehavior` wymaga zachowania niezmienionych etykiet w każdej aktualizacji
+sesji i próbce zegara, usunięcia starej zmienionej etykiety oraz całego usuniętego menu
+w ciągu 700 ms i braku ich późniejszego powrotu. `inventoryLossUpdates` oraz
+`journalLossUpdates` liczą obserwacje stanu przy callbackach, a `missingHudPolls`
+obserwacje zegara w fazach 1–2; nie są liczbą osobnych mignięć. `stablePolls` obejmuje
+samą fazę 1. `journalRemovedMs` i `inventoryRemovedMs` mierzą pierwszą aktualizację
+bez starego napisu od zdarzenia WPF Rendering. Próby nie rysują fizycznej nakładki
+ani nie mierzą DeepL. Wynik nie potwierdza jakości na przezroczystym/animowanym HUD,
+przy skalowaniu OCR, zapasowym przechwytywaniu ekranu ani w każdej grze.

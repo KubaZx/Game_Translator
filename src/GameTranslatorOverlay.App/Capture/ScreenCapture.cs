@@ -161,6 +161,31 @@ public static class ScreenCapture
         finally { bitmap.UnlockBits(data); }
     }
 
+    /// <summary>Hashes only a bounded complete ROI of an existing capture, without saving pixels.</summary>
+    public static Core.Vision.TextRegionFingerprint? ComputeTextFingerprint(Bitmap bitmap, RectPx box, ref byte[]? rowBuffer)
+    {
+        if (!Core.Vision.TextRegionFingerprint.CanSample(box.Width, box.Height)
+            || box.X < 0 || box.Y < 0 || (long)box.X + box.Width > bitmap.Width
+            || (long)box.Y + box.Height > bitmap.Height)
+            return null;
+        var rowBytes = box.Width * 4;
+        if (rowBuffer is null || rowBuffer.Length < rowBytes) rowBuffer = new byte[rowBytes];
+        using var builder = new Core.Vision.TextRegionFingerprint.Builder(box.Width, box.Height);
+        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            for (var y = box.Y; y < box.Bottom; y++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(
+                    data.Scan0 + y * data.Stride + box.X * 4, rowBuffer, 0, rowBytes);
+                builder.AppendBgra32(rowBuffer.AsSpan(0, rowBytes));
+            }
+            return builder.Finish();
+        }
+        finally { bitmap.UnlockBits(data); }
+    }
+
     /// <summary>Zapis klatki OCR do PNG — wyłącznie diagnostyka narzędzi dev (LiveDiag).</summary>
     public static void SavePng(OcrBitmap frame, string path)
     {

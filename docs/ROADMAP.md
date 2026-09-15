@@ -4,24 +4,25 @@
 
 Ostatnie opublikowane wydanie to **0.2.2**. Na `main` są już późniejsze poprawki
 live: aktualność sceny i lokalnych opisów, nadzorowane tłumaczenia w toku,
-stabilizacja kolejnych odczytów oraz położenia. Przeszło **346 testów**, jawna
-kompilacja App, smoke test Windows OCR i CI. Wyniki pomiarów opisano w rundach poniżej.
+stabilizacja kolejnych odczytów oraz położenia. Kolejna lokalna poprawka zachowuje
+napisy o identycznym obrazie źródła podczas ruchu tła. Przeszło **371 testów**, jawna
+kompilacja App i smoke test Windows OCR. Wyniki opisano w rundach poniżej.
 
 Produkt jest rozwijany dla różnych gier. Escape Academy służy do pomiarów;
 PoE2 jest jednym z obsługiwanych przypadków z dodatkowym profilem. Aktualny priorytet
 to stabilność i czytelność w rozgrywce. Etapy poniżej zachowują historię powstawania
 produktu; status implementacji nie zastępuje testów wizualnych na kolejnych grach.
 
-## Kierunki dalszych prac — do pomiaru, niewdrożone
+## Kierunki dalszych prac
 
-1. Zachowywanie stałych elementów interfejsu podczas ruchu świata gry.
+1. Rozszerzenie zachowywania stałych napisów: obecny dowód wymaga identycznych RGB; skalowanie, fallback i animowane tło pozostają otwarte.
 2. Śledzenie położenia napisu między kolejnymi odczytami OCR.
 3. Lepsza czytelność i zakrywanie na wzorzystym oraz animowanym tle.
 4. Dostosowywanie tempa pracy do menu, dialogu i ruchu.
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
-Silny ruch nadal może czyścić całą nakładkę; obecna stabilizacja pozycji działa przy
-kolejnych odczytach OCR. Automatyczna detekcja obszaru tooltipu pozostaje otwarta.
+Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
+stabilizacja pozycji działa przy kolejnych odczytach OCR. Automatyczna detekcja obszaru tooltipu pozostaje otwarta.
 History Mode i wyjaśnianie tekstu przez LLM nie są funkcjami obecnej aplikacji.
 
 ## Historia etapów
@@ -316,3 +317,42 @@ nie służą do wyliczania procentowej poprawy jakości lub kosztu. Ocena wyglą
 nowej instalacji przez użytkownika pozostaje otwarta. Całość: 346 testów
 (309 Core + 37 Infrastructure), jawny build App i smoke test OCR przeszły.
 Szczegółowe raporty oraz zachowane binaria porównawcze pozostają poza repozytorium.
+
+### Runda 2026-09-15 — stałe napisy podczas ruchu tła
+
+Wprowadzono dokładny dowód niezmienności RGB dla już wyświetlonych źródeł. Ruch
+świata nie usuwa takiego napisu, lecz nadal unieważnia generację starych wyników
+w toku. Zmiana lub zasłonięcie jego pola usuwa ochronę. Dowód jest sprawdzany także
+przy pustym OCR: zarówno po dużej zmianie sceny, jak i po kolejnych brakach odczytu
+przy ruchu poniżej progu globalnego cięcia. Pozostałe progi i terminy nie zmieniły się.
+
+Porównanie z kodem e1ab7c3, własne okno i prawdziwy capture, Mock 200 ms:
+
+| Sonda | Obserwacje zegara bez wymaganego menu przed → po | Mock przed = po |
+|---|---:|---:|
+| Windows OCR, duży ruch tła | 77 → 0 | 3 zapytania / 79 znaków |
+| Windows OCR na początku/końcu, wymuszone puste odczyty podczas ruchu | 79 → 0 | 2 zapytania / 65 znaków |
+
+Liczniki opisują stan sesji w próbkach, nie osobne mignięcia. Obie próby po poprawce
+zachowały niezmienne menu i nie przywróciły usuniętych napisów. W końcowej powtórce
+zmienione etykiety znikały w około 16–95 ms. Wcześniejsze powtórki dochodziły do
+156 ms; nie jest to gwarancja czasu w grze ani przy innym rytmie próbkowania.
+
+Dodatkowa sonda małego ruchu ujawniła błąd pierwszej wersji poprawki: po kilku pustych
+odczytach nadal wygasał niezmieniony blok. Przed dopięciem tej gałęzi były 62 próbki
+bez menu, po nim 0, przy pięciu wymuszonych pustych odczytach i czterech przebiegach
+w fazie stabilnego menu bez SceneCut. To porównanie dwóch lokalnych kandydatów,
+nie osobny wynik względem wydania 0.2.2.
+
+Weryfikacja: 371 testów (334 Core + 37 Infrastructure), jawna kompilacja App bez
+ostrzeżeń, smoke test Windows OCR. Przeszło 15 dotychczasowych scenariuszy sesji;
+po dopięciu zachowania przy pustym OCR powtórzono bez regresji jego próbę oraz
+trzy warianty lokalnego przykrycia i dwie sondy dużego ruchu. Mały ruch również
+przeszedł. Sprawdzone callbacki i logika nie oznaczają zaliczenia wizualnego M17–M22.
+
+Ograniczenia: referencja wyłącznie z natywnej, nieskalowanej klatki bez fallback,
+stały rozmiar okna, pełne pole z marginesem 3 px, znany kontrast i najwyżej 262144
+pikseli na blok. Animowane lub przezroczyste tło nie daje takiego dowodu. Pierwsze
+jeszcze niewyświetlone tłumaczenie menu nadal może zostać odrzucone przy ruchu.
+Cała runda odbyła się bez gry i bez DeepL. Próby wyglądu, innych DPI oraz rozszerzenie
+na pozostałe sposoby przechwytywania pozostają do wykonania.

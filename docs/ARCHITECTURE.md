@@ -251,8 +251,11 @@ Parametry profilu mogą zmieniać część tego zachowania.
 ### Generacja sceny i praca w toku
 
 - Wykryte globalne cięcie albo potwierdzony silny ruch unieważnia generację sceny.
-  Sesja czyści stare bloki, pamięć odtwarzania i pasek napisów. Automatyczne
-  czyszczenie nie odwołuje decyzji użytkownika o ręcznym ukryciu nakładki.
+  Sesja czyści pamięć odtwarzania i usuwa nieaktualne bloki. Wyjątkiem są już
+  wyświetlone źródła, których pełne piksele nadal pasują do zapamiętanego skrótu RGB.
+  Pasek napisów usuwa treść powiązaną ze znikającymi blokami, bez odnowienia czasu.
+  Bez zachowanych bloków czyszczone są oba widoki. Automatyczne czyszczenie
+  nie odwołuje decyzji użytkownika o ręcznym ukryciu nakładki.
 - Podczas dłuższego OCR i tłumaczenia sesja przechwytuje dodatkowe klatki kontrolne.
   Pierwsza okresowa kontrola OCR czeka 1,5 interwału; kolejne wracają do zwykłego
   rytmu. OCR trwający co najmniej jeden interwał wymaga także świeżej kontroli
@@ -281,8 +284,17 @@ które jeszcze nie dostało wyniku. Lokalne usunięcie aktualizuje tylko powiąz
 
 Położenie ma tolerancję 2 fizycznych pikseli na każdej osi, oddzielną od stabilizacji
 rozmiaru. To aktualizacja przy odczycie OCR, nie śledzenie między odczytami.
-Silny ruch nadal może wyczyścić cały widok; rozpoznawanie stałego HUD-u nie jest
-zaimplementowane.
+`TextRegionFingerprint` porównuje wszystkie RGB źródła z marginesem 3 px, ignorując
+alpha i padding. W pamięci pozostają tylko SHA-256, geometria pola i rozmiar całej
+klatki. Referencja powstaje z natywnej klatki OCR; każda kontrola wykorzystuje już
+przechwycony obraz i bufor jednego wiersza. Pole musi być pełne, mieć 4–262144 pikseli,
+niejednolity obraz i znany kontrast tekstu. Skalowany odczyt, fallback, zmiana rozmiaru
+lub brak dowodu zachowują wcześniejsze reguły usuwania. Dowód może też zachować
+pominięty przez OCR blok, jeśli żaden nowy zaakceptowany blok nie zajmuje jego miejsca.
+
+Jest to ochrona identycznego obrazu, bez semantycznego rozpoznawania HUD-u. Animowane
+lub przezroczyste tło może ją wyłączyć. Generacja sceny nadal odrzuca wszystkie stare
+wyniki w toku, także pierwsze tłumaczenie jeszcze niewyświetlonego menu.
 
 ### Diagnostyka i ograniczenia
 

@@ -50,7 +50,7 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter] [--ocr scripted|windows]\n" +
+            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff] [--ocr scripted|windows]\n" +
                 "  [--provider-delay-ms 0..5000] [--phase-ms 0..200] [--ocr-delay-ms 100..600 only ocr-timing]\n" +
                 "Wlasne widoczne okno; prawdziwy capture i LiveTranslationSession. Mock domyslnie 2000 ms, bez sieci.\n" +
                 "Faza domyslnie 0 ms; niezerowa tylko dla displayed/inflight. Scenariusze local-reading/reading-jitter/reading-whiff odrzucaja oba parametry.\n" +
@@ -94,6 +94,12 @@ internal static class Program
                 }
             }
             if (output is null) throw new ArgumentException("Wymagany nowy plik --output.");
+            if (scenario is "hud-motion" or "hud-motion-whiff" or "hud-motion-small-whiff")
+            {
+                if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "windows"))
+                    throw new ArgumentException("HUD motion uses Windows OCR and Mock 200; optional timing overrides are not supported.");
+                return StaticHudReplay.Run(output, scenario != "hud-motion", scenario == "hud-motion-small-whiff");
+            }
             if (scenario == "ocr-timing")
             {
                 if (providerDelaySpecified || phaseSpecified || (args.Contains("--ocr") && ocrMode != "scripted"))

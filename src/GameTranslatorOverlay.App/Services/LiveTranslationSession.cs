@@ -154,6 +154,8 @@ public sealed class LiveTranslationSession(
     private readonly BoundedTranslationWork<IReadOnlyList<TranslationOutcome>> _translationWork = new(2);
     private sealed class SceneSupersededException : Exception;
     private readonly Dictionary<string, LiveOverlayBlock> _displayed = [];
+    private sealed record BlockFingerprint(RectPx SourceBox, RectPx FrameRect, TextRegionFingerprint Image);
+    private readonly Dictionary<string, BlockFingerprint> _blockFingerprints = [];
     private readonly NoiseAwareChangeDetector _changeDetector = new();
     private byte[]? _gridBuffer;
     private LuminanceGrid? _previousGrid;
@@ -300,6 +302,7 @@ public sealed class LiveTranslationSession(
                         _invalidatedTranslations.Clear();
                         stabilizer.Reset();
                         _displayed.Clear();
+                        _blockFingerprints.Clear();
                         Emit(new LiveUpdate("Gra zminimalizowana — nakładka ukryta, czekam na powrót.",
                             ClearOverlay: true), cancellationToken);
                     }
@@ -394,6 +397,7 @@ public sealed class LiveTranslationSession(
         OcrBitmap? frameForOcr = null;
         var ocrScaleBack = 1.0;
         var ocrRegion = default(RectPx);
+        var capturedFrameRect = default(RectPx);
         var partialOcr = false;
         double changedFraction;
         double strongFraction;
@@ -422,7 +426,8 @@ public sealed class LiveTranslationSession(
 
             bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
             var frameRect = new RectPx(0, 0, bitmap.Width, bitmap.Height);
-            var analysis = ObserveCapturedFrame(bitmap, frameRect, cancellationToken);
+            capturedFrameRect = frameRect;
+            var analysis = ObserveCapturedFrame(bitmap, frameRect, usedScreenFallback, cancellationToken);
             changedFraction = analysis.ChangedFraction;
             strongFraction = analysis.StrongChangedFraction;
             significantFraction = analysis.SignificantFraction;
@@ -547,7 +552,7 @@ public sealed class LiveTranslationSession(
             _cycleTime = clock.Elapsed;
             try
             {
-                await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, captureMs, peakChanged,
+                await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, capturedFrameRect, captureMs, peakChanged,
                         captureStartedTimestamp, usedScreenFallback, clock, cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -589,7 +594,7 @@ public sealed class LiveTranslationSession(
     /// All calls run on the same session loop: no concurrent access to scene state.
     /// </summary>
     private NoiseAwareAnalysis ObserveCapturedFrame(
-        System.Drawing.Bitmap bitmap, RectPx frameRect, CancellationToken cancellationToken)
+        System.Drawing.Bitmap bitmap, RectPx frameRect, bool usedScreenFallback, CancellationToken cancellationToken)
     {
         var grid = ScreenCapture.ComputeLuminanceGrid(bitmap, ref _gridBuffer);
         var hasPrevious = _previousGrid is not null;
@@ -601,9 +606,10 @@ public sealed class LiveTranslationSession(
 
         if (_sceneValidity.Observe(analysis, hasPrevious))
         {
-            // Do this before OCR/matching. Clearing ghosts only after matching let
-            // a previous scene's text enter 'reused' and survive the scene cut.
-            InvalidateScene(cancellationToken);
+            // The generation still changes, so pending old OCR/provider work is
+            // discarded. Only already displayed regions with exact native RGB
+            // evidence may stay. Screen fallback can contain our own overlay.
+            InvalidateScene(cancellationToken, usedScreenFallback ? null : bitmap);
             _pendingDirtyRegion = frameRect;
         }
         if (analysis.SignificantFraction > options.ChangeThreshold
@@ -612,22 +618,42 @@ public sealed class LiveTranslationSession(
         return analysis;
     }
 
-    private void InvalidateScene(CancellationToken cancellationToken)
+    private void InvalidateScene(CancellationToken cancellationToken, System.Drawing.Bitmap? current = null)
     {
-        var hadVisibleBlocks = _displayed.Count > 0;
-        if (hadVisibleBlocks)
-        {
-            // A fallback bitmap can still contain our overlay from before this
-            // clear. Preserve the anti-feedback filter through the next fresh read.
-            _invalidatedTranslations.UnionWith(_displayed.Values.Select(static b => b.NormalizedTranslation));
-        }
-        _displayed.Clear();
         _ghosts.Clear();
         _readings.Clear();
-        _subtitleContent.Clear();
         _readingRetryRequested = false;
         _whiffRetries = 0;
         _whiffRetryRequested = false;
+
+        if (current is not null && _displayed.Count > 0)
+        {
+            var frameRect = new RectPx(0, 0, current.Width, current.Height);
+            var removedKeys = _displayed.Keys.Where(key =>
+                !_blockFingerprints.TryGetValue(key, out var reference)
+                || reference.FrameRect != frameRect
+                || !reference.Image.Matches(ScreenCapture.ComputeTextFingerprint(
+                    current, reference.SourceBox, ref _presenceRowBuffer))).ToArray();
+            if (removedKeys.Length < _displayed.Count)
+            {
+                RemoveLocalBlocks(removedKeys, cancellationToken);
+                var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
+                if (bounds != _lastEmittedBounds)
+                {
+                    _lastEmittedBounds = bounds;
+                    Emit(new LiveUpdate("Live: aktualizuję pozycje zachowanych napisów.",
+                        BuildDisplayList(bounds), WindowBounds: bounds), cancellationToken);
+                }
+                return;
+            }
+        }
+
+        // A fallback bitmap can contain our overlay from before this clear.
+        // Preserve the anti-feedback filter through the next fresh read.
+        _invalidatedTranslations.UnionWith(_displayed.Values.Select(static b => b.NormalizedTranslation));
+        _displayed.Clear();
+        _blockFingerprints.Clear();
+        _subtitleContent.Clear();
         // Subtitle presentation can outlive an empty block list. Always clear both
         // layers; MainWindow preserves the user's explicit hidden-state choice.
         Emit(new LiveUpdate("Live: zmiana widoku — usuwam nieaktualne napisy.",
@@ -770,7 +796,7 @@ public sealed class LiveTranslationSession(
                     cancellationToken);
             }
             var frameRect = new RectPx(0, 0, bitmap.Width, bitmap.Height);
-            var analysis = ObserveCapturedFrame(bitmap, frameRect, cancellationToken);
+            var analysis = ObserveCapturedFrame(bitmap, frameRect, usedScreenFallback, cancellationToken);
             // These samples advance _previousGrid. Tell the normal stabilizer about
             // changes seen only while busy, or a small new dialog could wait for the
             // four-second rescan even though we already observed its appearance.
@@ -808,6 +834,7 @@ public sealed class LiveTranslationSession(
                 removed = true;
             }
             _ghosts.Remove(key);
+            _blockFingerprints.Remove(key);
             _readings.Reset(key);
         }
         if (!removed && updatedSubtitle is null) return;
@@ -868,7 +895,7 @@ public sealed class LiveTranslationSession(
     }
 
     private async Task ProcessFrameAsync(
-        OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr,
+        OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr, RectPx capturedFrameRect,
         long captureMs, double peakChangedFraction, long captureStartedTimestamp,
         bool usedScreenFallback, Stopwatch clock, CancellationToken cancellationToken)
     {
@@ -1127,6 +1154,7 @@ public sealed class LiveTranslationSession(
         var freshKeys = new List<string>();
         var claimedBoxes = new List<RectPx>();
         var next = new Dictionary<string, LiveOverlayBlock>();
+        var nextFingerprints = new Dictionary<string, BlockFingerprint>(_blockFingerprints);
 
         // Przy częściowym OCR bloki spoza przetworzonego regionu zostają bez zmian.
         if (partialOcr)
@@ -1214,6 +1242,17 @@ public sealed class LiveTranslationSession(
                 Texture: texture,
                 SourceText: keyed[i].NormalizedText,
                 PendingBackgroundRgb: pendingBackgroundRgb);
+            // Reference the source box, not the presentation box stabilized above.
+            // A rescaled OCR image cannot prove equality with future native pixels.
+            // A small complete margin also notices adjacent glyphs added to a label.
+            var sourceBox = keyed[i].Block.Box.Inflate(3);
+            var fingerprint = !usedScreenFallback && scaleBack == 1.0
+                && TextPresenceProbe.CanCheckKnownText(sampled.TextRgb, sampled.BackgroundRgb)
+                ? TextRegionFingerprint.FromBitmap(frame, sourceBox.Offset(-ocrRegion.X, -ocrRegion.Y)) : null;
+            if (fingerprint is not null)
+                nextFingerprints[key] = new BlockFingerprint(sourceBox, capturedFrameRect, fingerprint);
+            else
+                nextFingerprints.Remove(key);
             claimedBoxes.Add(box);
             if (!_displayed.ContainsKey(key))
             {
@@ -1231,6 +1270,22 @@ public sealed class LiveTranslationSession(
         }
 
         var sceneCut = peakChangedFraction >= options.SceneCutThreshold;
+        if (!usedScreenFallback && scaleBack == 1.0)
+        {
+            // A forced OCR during world motion may miss a still-identical HUD.
+            // Exact current pixels also protect it through repeated empty reads
+            // when motion is below the scene-cut threshold. Never extend the miss
+            // grace without this proof or across an overlapping replacement box.
+            foreach (var (key, old) in _displayed)
+            {
+                if (next.ContainsKey(key) || claimedBoxes.Any(b => b.IntersectsWith(old.WindowRelativeBox))
+                    || !_blockFingerprints.TryGetValue(key, out var reference)
+                    || reference.FrameRect != capturedFrameRect) continue;
+                if (reference.Image.Matches(TextRegionFingerprint.FromBitmap(
+                    frame, reference.SourceBox.Offset(-ocrRegion.X, -ocrRegion.Y))))
+                    next[key] = old with { Misses = 0 };
+            }
+        }
         var survivors = LiveBlockSurvival.Survivors(
             _displayed,
             next.Keys.ToHashSet(StringComparer.Ordinal),
@@ -1286,6 +1341,9 @@ public sealed class LiveTranslationSession(
         {
             _displayed[key] = block;
         }
+        _blockFingerprints.Clear();
+        foreach (var (key, reference) in nextFingerprints)
+            if (next.ContainsKey(key)) _blockFingerprints[key] = reference;
         _readings.Prune(next.Keys.ToHashSet(StringComparer.Ordinal));
 
         // Pozycje liczymy względem ŚWIEŻYCH granic okna — mogło się przesunąć
