@@ -44,19 +44,26 @@ internal static class Program
             return 3;
         }
         using var frame = captured;
+        if (fallback && args.Contains("--window-only", StringComparer.Ordinal))
+        {
+            Console.WriteLine("PrintWindow wymaga fallbacku ekranowego; --window-only: nie zapisano obrazu.");
+            return 4;
+        }
         Console.WriteLine($"== {target.DisplayName}: PrintWindow {frame.Width}×{frame.Height}, fallback ekranowy: {fallback} ==");
         var originalPath = Path.Combine(outputDir, "frame-original.png");
         frame.Save(originalPath, ImageFormat.Png);
         Console.WriteLine($"Klatka PrintWindow: {originalPath}");
 
-        using (var screen = ScreenCapture.CaptureScreenRegion(bounds))
+        // Do samej kontroli kadru gry mozna pominac pulpit z innymi oknami.
+        if (!args.Contains("--window-only", StringComparer.Ordinal))
         {
+            using var screen = ScreenCapture.CaptureScreenRegion(bounds);
             var screenPath = Path.Combine(outputDir, "frame-screen.png");
             screen.Save(screenPath, ImageFormat.Png);
             Console.WriteLine($"Zrzut ekranu (CopyFromScreen) tych samych bounds: {screen.Width}×{screen.Height} → {screenPath}");
         }
 
-        if (args.Length > 2 && args[2] == "--geometry-only") return 0;
+        if (args.Contains("--geometry-only", StringComparer.Ordinal)) return 0;
 
         var ocr = new WindowsOcrProvider();
         var variants = new (string Name, Func<Bitmap, Bitmap> Transform)[]

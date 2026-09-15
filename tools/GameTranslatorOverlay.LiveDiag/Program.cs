@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.App.Ocr;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.Core.Glossary;
@@ -14,123 +16,235 @@ using GameTranslatorOverlay.Infrastructure.Content;
 using GameTranslatorOverlay.Infrastructure.Providers;
 using GameTranslatorOverlay.Infrastructure.Settings;
 using GameTranslatorOverlay.Infrastructure.Storage;
+using GameTranslatorOverlay.LiveDiag;
 using Microsoft.Extensions.Logging;
-
-// Stanowisko diagnostyczne trybu live: własne okno testowe (ciemne tło, subtelny
-// „ambient”, tekst zmieniający się w czasie, na końcu ruchomy prostokąt symulujący bieg)
-// + LiveTranslationSession z Mockiem, wypisująca każde zdarzenie na konsolę.
 
 internal static class Program
 {
+    private const string Help = """
+        LiveDiag [sekundy]
+        LiveDiag "fragment tytułu istniejącego okna" [sekundy]
+          --profile ID|none   Jawny profil; domyślnie none, jak aplikacja bez profilu.
+          --upscale 0..4      Ustawienie OCR bez profilu; 0=auto, separator: kropka.
+          --output PLIK      Nowy lokalny plik JSONL; wyłącznie metryki, bez tekstów.
+          --dump-frames      Zgoda na zapis wybranych klatek z podejrzeniem whiffa.
+          --include-text     Zgoda na wypisywanie tekstów w konsoli (nigdy w JSONL).
+          --list-windows     Tylko wypisz dostępne okna, bez capture.
+          --help             Tylko pomoc, bez dostępu do pulpitu.
+        Czas: 1–86400 s; domyślnie 36 s dla sceny testowej, 25 s dla istniejącego okna.
+        Mock, cache w pamięci, bez ustawień i sekretów użytkownika, HTTP zablokowane.
+        Nie mierzy chwili pojawienia się tekstu ani faktycznej prezentacji nakładki.
+        """;
+
     [STAThread]
     private static int Main(string[] args)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
-
-        // Użycie: LiveDiag [sekundy]  — okno testowe z animacjami
-        //         LiveDiag "fragment tytułu" [sekundy] — podłączenie pod ISTNIEJĄCE okno
-        string? attachTitle = null;
-        var seconds = 36;
-        if (args.Length > 0 && !int.TryParse(args[0], out seconds))
+        LiveDiagOptions cli;
+        try { cli = LiveDiagOptions.Parse(args); }
+        catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message + "\nUżyj --help."); return 2; }
+        if (cli.Help) { Console.WriteLine(Help); return 0; }
+        if (cli.ListWindows)
         {
-            attachTitle = args[0];
-            seconds = args.Length > 1 && int.TryParse(args[1], out var s2) ? s2 : 25;
-        }
-
-        var hwnd = IntPtr.Zero;
-
-        if (attachTitle is not null)
-        {
-            var target = GameTranslatorOverlay.App.Interop.WindowEnumerator.GetOpenWindows()
-                .FirstOrDefault(w => w.Title.Contains(attachTitle, StringComparison.OrdinalIgnoreCase));
-            if (target is null)
+            try
             {
-                Console.WriteLine($"Nie znalazłem okna zawierającego „{attachTitle}”. Dostępne okna:");
-                foreach (var w in GameTranslatorOverlay.App.Interop.WindowEnumerator.GetOpenWindows())
-                {
-                    Console.WriteLine($"  • {w.DisplayName}");
-                }
-                return 2;
+                foreach (var window in WindowEnumerator.GetOpenWindows())
+                    Console.WriteLine(window.DisplayName);
+                return 0;
             }
-            Console.WriteLine($"== podłączam się pod: {target.DisplayName} ==");
-            hwnd = target.Handle;
+            catch (Exception ex) { Console.Error.WriteLine($"Nie można odczytać listy okien ({ex.GetType().Name})."); return 3; }
         }
-        else
+
+        LiveDiagReport report;
+        try { report = new LiveDiagReport(cli.OutputPath); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            using var windowReady = new ManualResetEventSlim();
-            var uiThread = new Thread(() =>
-            {
-                var window = BuildTestWindow();
-                window.SourceInitialized += (_, _) =>
-                {
-                    hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
-                    windowReady.Set();
-                };
-                window.Show();
-                Dispatcher.Run();
-            })
-            {
-                IsBackground = true,
-            };
-            uiThread.SetApartmentState(ApartmentState.STA);
-            uiThread.Start();
-            windowReady.Wait();
+            Console.Error.WriteLine($"Nie można utworzyć nowego pliku metryk ({ex.GetType().Name}). Istniejący plik nie jest nadpisywany.");
+            return 5;
         }
+        using (report)
+        {
+            var exitCode = Run(cli, report);
+            return report.WriteFailed ? 5 : exitCode;
+        }
+    }
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), "gto-livediag-" + Guid.NewGuid().ToString("N"));
-        var paths = new AppPaths(tempRoot);
-        paths.EnsureCreated();
-        var settings = new AppSettings { Provider = "Mock" };
-        var cache = new SqliteTranslationCache(paths.DatabasePath);
-        cache.Initialize();
+    private static int Run(LiveDiagOptions cli, LiveDiagReport report)
+    {
+        // This isolated path is never the application's user directory. No database is opened.
+        var runId = Guid.NewGuid().ToString("N");
+        var diagnosticRoot = Path.Combine(Path.GetTempPath(), "gto-livediag-" + runId);
+        var paths = new AppPaths(diagnosticRoot);
+        var settings = new AppSettings
+        {
+            Provider = MockTranslationProvider.ProviderName,
+            PrivateMode = true,
+            ActiveProfileId = cli.ProfileId,
+            OcrUpscale = cli.Upscale,
+        };
         using var loggerFactory = LoggerFactory.Create(static b => b.SetMinimumLevel(LogLevel.Warning));
+        using var http = new HttpClient(new NoNetworkHandler());
+        using var stopping = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancelHandler = (_, e) => { e.Cancel = true; stopping.Cancel(); };
+        Console.CancelKeyPress += cancelHandler;
+        LiveTranslationSession? session = null;
+        Window? testWindow = null;
+        Thread? testThread = null;
+        var exitCode = 3;
+        var reason = "setup_failed";
+        var shutdownComplete = true;
 
-        var orchestrator = new TranslationOrchestrator(
-            settings, cache, new GlossaryService(),
-            GlossaryCatalog.CreateDefault(paths), ProfileCatalog.CreateDefault(paths), new UserGlossaryStore(paths),
-            new MockTranslationProvider(), new DeepLTranslationProvider(new HttpClient(), static () => null),
-            new WindowsOcrProvider(), new UsageTracker(), loggerFactory);
-        orchestrator.Initialize();
-
-        // Zrzuty mogą zawierać treść dowolnego podpiętego okna — katalog czyścimy na
-        // starcie, żeby klatki z poprzednich sesji nie zalegały w temp bezterminowo.
-        var frameDumpDir = Path.Combine(Path.GetTempPath(), "gto-livediag-frames");
-        try { Directory.Delete(frameDumpDir, recursive: true); } catch (IOException) { }
-        Console.WriteLine($"== zrzuty klatek przy whiffach OCR: {frameDumpDir} (czyszczone przy starcie) ==");
-
-        var started = DateTime.UtcNow;
-        using var session = new LiveTranslationSession(
-            orchestrator, new WindowsOcrProvider(), hwnd,
-            new LiveSessionOptions { DebugFrameDumpDir = frameDumpDir },
-            update =>
+        try
+        {
+            var ocr = new WindowsOcrProvider();
+            var orchestrator = new TranslationOrchestrator(
+                settings, new SqliteTranslationCache(paths.DatabasePath), new GlossaryService(),
+                GlossaryCatalog.CreateDefault(paths), ProfileCatalog.CreateDefault(paths), new UserGlossaryStore(paths),
+                new MockTranslationProvider(), new DeepLTranslationProvider(http, static () => null),
+                ocr, report.Usage, loggerFactory);
+            orchestrator.Initialize();
+            if (cli.ProfileId is not null && orchestrator.ActiveProfile is null)
             {
-                var t = (DateTime.UtcNow - started).TotalSeconds;
-                var blocks = update.Blocks is null ? "-" : update.Blocks.Count.ToString();
-                Console.WriteLine($"[{t,6:0.00}s] {update.StatusLine}  [blocks={blocks} hide={update.HideOverlay} clear={update.ClearOverlay}]");
-                if (update.Blocks is { Count: > 0 })
+                reason = "unknown_profile";
+                Console.Error.WriteLine("Nie znaleziono profilu. Dostępne ID: " +
+                    string.Join(", ", orchestrator.Profiles.Select(static p => p.Id)) + "; none.");
+            }
+            else if (orchestrator.ContentWarnings.Count > 0)
+            {
+                reason = "profile_content_unavailable";
+                Console.Error.WriteLine("Nie można załadować słownika wybranego profilu.");
+            }
+            else if (!ocr.IsLanguageAvailable(settings.SourceLanguage))
+            {
+                exitCode = 4;
+                reason = "ocr_language_unavailable";
+                Console.Error.WriteLine($"Brak OCR Windows dla języka {settings.SourceLanguage}.");
+            }
+            else
+            {
+                var profile = orchestrator.ActiveProfile;
+                var options = new LiveSessionOptions
                 {
-                    foreach (var block in update.Blocks.Take(12))
+                    Fps = profile?.ChangeDetection?.Fps ?? 6,
+                    ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.0,
+                    OcrUpscale = profile?.Ocr?.Upscale ?? settings.OcrUpscale,
+                    DebugFrameDumpDir = cli.DumpFrames ? Path.Combine(diagnosticRoot, "frames") : null,
+                    EnableDiagnostics = true,
+                };
+                report.Header(new
+                {
+                    runId, mode = cli.AttachTitle is null ? "synthetic" : "attached-window",
+                    requestedSeconds = cli.Seconds, provider = settings.Provider,
+                    settings.PrivateMode, cache = "fresh-in-memory", profile = profile?.Id ?? "none",
+                    settings.SourceLanguage, settings.TargetLanguage,
+                    options.Fps, options.ChangeThreshold, options.OcrUpscale,
+                    stabilityDelayMs = options.StabilityDelay.TotalMilliseconds,
+                    forcedProcessIntervalMs = options.ForcedProcessInterval.TotalMilliseconds,
+                    options.MotionThreshold, maxMotionPauseMs = options.MaxMotionPause.TotalMilliseconds,
+                    options.SceneCutThreshold, options.BlockMissGrace, options.MaxWhiffRetries,
+                    staticRescanIntervalMs = options.StaticRescanInterval.TotalMilliseconds,
+                    frameDumpsEnabled = cli.DumpFrames, textInConsole = cli.IncludeText,
+                    frameDumpDirectory = options.DebugFrameDumpDir,
+                    applicationVersion = typeof(LiveTranslationSession).Assembly.GetName().Version?.ToString(),
+                    stopwatchFrequency = Stopwatch.Frequency,
+                });
+                IntPtr hwnd;
+                if (cli.AttachTitle is { } title)
+                {
+                    var matches = WindowEnumerator.GetOpenWindows()
+                        .Where(w => w.Title.Contains(title, StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (matches.Count != 1)
                     {
-                        var text = block.TranslatedText.Length > 60 ? block.TranslatedText[..60] + "…" : block.TranslatedText;
-                        Console.WriteLine($"         → ({block.ScreenBox.X},{block.ScreenBox.Y} {block.ScreenBox.Width}×{block.ScreenBox.Height} lh={block.LineHeight}) c={block.ColorRgb:X6} b={block.BackgroundRgb:X6} o={block.OutlineRgb:X6} \"{text.Replace('\n', '|')}\"");
+                        exitCode = 2;
+                        reason = matches.Count == 0 ? "window_not_found" : "ambiguous_window";
+                        Console.Error.WriteLine(matches.Count == 0
+                            ? "Nie znaleziono okna. Użyj --list-windows."
+                            : "Fragment tytułu pasuje do kilku okien. Użyj dokładniejszego tytułu i --list-windows.");
+                        return report.Finish(exitCode, reason);
                     }
+                    hwnd = matches[0].Handle;
                 }
-            },
-            loggerFactory.CreateLogger("LiveDiag"));
+                else
+                {
+                    var ready = new TaskCompletionSource<(Window Window, IntPtr Handle)>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    testThread = new Thread(() =>
+                    {
+                        try
+                        {
+                            var window = BuildTestWindow();
+                            window.Show();
+                            ready.TrySetResult((window, new System.Windows.Interop.WindowInteropHelper(window).Handle));
+                            Dispatcher.Run();
+                        }
+                        catch (Exception ex) { ready.TrySetException(ex); }
+                    }) { IsBackground = true };
+                    testThread.SetApartmentState(ApartmentState.STA);
+                    testThread.Start();
+                    var result = ready.Task.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+                    testWindow = result.Window;
+                    hwnd = result.Handle;
+                    Console.WriteLine("Scena testowa: 0–8s tekst, 8–24s zmiany, 24–30s ruch, potem spokój.");
+                }
 
-        Console.WriteLine($"== LiveDiag start: hwnd={hwnd}, czas {seconds}s ==");
-        Console.WriteLine("== plan: 0–8s statyczny tekst • 8–24s zmiana nagłówka co 5s • 24–30s ruchomy prostokąt („bieg”) • potem spokój ==");
-        session.Start();
-        Thread.Sleep(TimeSpan.FromSeconds(seconds));
-        session.Stop();
-        Thread.Sleep(500);
-        Console.WriteLine("== LiveDiag koniec ==");
+                Console.WriteLine($"LiveDiag: {cli.Seconds}s, Mock, profil {profile?.Id ?? "none"}, " +
+                    $"FPS {options.Fps}, próg {options.ChangeThreshold}, upscale {options.OcrUpscale}.");
+                if (options.DebugFrameDumpDir is { } dumpDirectory)
+                    Console.WriteLine("Jawnie włączone zrzuty diagnostyczne: " + dumpDirectory);
+                session = new LiveTranslationSession(orchestrator, ocr, hwnd, options,
+                    update => report.Record(update, cli.IncludeText), loggerFactory.CreateLogger("LiveDiag"));
+                session.Start();
+                shutdownComplete = false;
+                Task.WhenAny(session.Completion, Task.Delay(TimeSpan.FromSeconds(cli.Seconds), stopping.Token))
+                    .GetAwaiter().GetResult();
+                exitCode = stopping.IsCancellationRequested ? 130 : report.SessionStopped ? 4 : 0;
+                reason = stopping.IsCancellationRequested ? "cancelled" : report.SessionStopped ? "session_stopped" : "duration_elapsed";
+            }
+        }
+        catch (Exception ex)
+        {
+            exitCode = 3;
+            reason = "runtime_error";
+            Console.Error.WriteLine($"Diagnostyka nie mogła zakończyć pomiaru ({ex.GetType().Name}).");
+        }
+        finally
+        {
+            if (session is not null)
+            {
+                session.Stop();
+                try
+                {
+                    session.Completion.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+                    shutdownComplete = true;
+                }
+                catch (TimeoutException) { exitCode = 6; reason = "shutdown_timeout"; }
+                catch (OperationCanceledException) { shutdownComplete = true; }
+                catch (Exception) { shutdownComplete = true; exitCode = 4; reason = "session_failed"; }
+                // Never dispose the session's cancellation source while its loop is still running.
+                if (shutdownComplete) session.Dispose();
+                if (exitCode == 0 && report.SessionStopped) { exitCode = 4; reason = "session_stopped"; }
+                if (exitCode == 0 && report.FrameCount == 0) { exitCode = 4; reason = "no_completed_ocr"; }
+            }
+            if (testWindow is not null)
+            {
+                try
+                {
+                    testWindow.Dispatcher.InvokeAsync(testWindow.Close).Task.WaitAsync(TimeSpan.FromSeconds(3))
+                        .GetAwaiter().GetResult();
+                    if (testThread is not null && !testThread.Join(TimeSpan.FromSeconds(3)))
+                    { exitCode = 6; reason = "test_window_shutdown_timeout"; }
+                }
+                catch (Exception) { exitCode = 6; reason = "test_window_shutdown_failed"; }
+            }
+            Console.CancelKeyPress -= cancelHandler;
+            // Explicitly requested frame dumps are retained in the unique run directory.
+        }
+        return report.Finish(exitCode, reason);
+    }
 
-        // Pula połączeń SQLite trzyma uchwyt do cache.db po Dispose — bez wyczyszczenia
-        // puli Directory.Delete cicho zawodzi i baza z OCR-owanym tekstem zostaje na dysku.
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(tempRoot, recursive: true); } catch (IOException) { }
-        return 0;
+    private sealed class NoNetworkHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("HTTP jest wyłączone w LiveDiag.");
     }
 
     private static Window BuildTestWindow()
@@ -212,12 +326,12 @@ internal static class Program
             "Quest complete: Clearfell Encampment",
         };
         var phraseIndex = 0;
-        var start = DateTime.UtcNow;
+        var sceneClock = Stopwatch.StartNew();
         var lastHeadlineChange = 0.0;
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(125) };
         timer.Tick += (_, _) =>
         {
-            var t = (DateTime.UtcNow - start).TotalSeconds;
+            var t = sceneClock.Elapsed.TotalSeconds;
 
             // Subtelny „ambient” jak mgła w grze — ledwo widoczne pulsowanie jasności.
             ambient.Opacity = 0.015 + 0.015 * Math.Sin(t * 2.3);
@@ -247,6 +361,7 @@ internal static class Program
             }
         };
         window.Loaded += (_, _) => timer.Start();
+        window.Closed += (_, _) => { timer.Stop(); window.Dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); };
         return window;
     }
 }

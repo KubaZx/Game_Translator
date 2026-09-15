@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -22,4 +22,7 @@
     <ProjectReference Include="..\..\src\GameTranslatorOverlay.Core\GameTranslatorOverlay.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\tools\GameTranslatorOverlay.LiveDiag\LiveDiagOptions.cs" Link="Diagnostics\LiveDiagOptions.cs" />
+  </ItemGroup>
 </Project>

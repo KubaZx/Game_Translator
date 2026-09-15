@@ -136,7 +136,8 @@ public sealed class TranslationOrchestrator(
                 CacheOnlyMode = settings.CacheOnlyMode,
                 GameProfile = ActiveProfile?.Id ?? string.Empty,
             },
-            loggerFactory.CreateLogger<TranslationPipeline>());
+            loggerFactory.CreateLogger<TranslationPipeline>(),
+            cacheWriteCancellationToken: _pipelineEpoch.Token);
         Volatile.Write(ref _pipelineState, new PipelineState(pipeline, _pipelineEpoch.Token));
 
         ContentWarnings = warnings;
@@ -328,9 +329,13 @@ public sealed class TranslationOrchestrator(
                 continue;
             }
 
-            return await state.Pipeline
+            var outcomes = await state.Pipeline
                 .TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, linked.Token)
                 .ConfigureAwait(false);
+            // A provider may finish despite cancellation. Never publish a result
+            // belonging to settings that have already been replaced.
+            linked.Token.ThrowIfCancellationRequested();
+            return outcomes;
         }
     }
 

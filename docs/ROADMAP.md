@@ -1,4 +1,4 @@
-﻿# Roadmap — GameTranslatorOverlay
+# Roadmap — GameTranslatorOverlay
 
 Etapy realizowane sekwencyjnie; każdy etap ma jednoznaczne kryterium ukończenia. Wersjonowanie SemVer, start 0.1.0. Pierwsze MVP = ukończony Etap 6.
 
@@ -54,11 +54,11 @@ Okno WPF z `WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWIN
 
 **Kryterium ukończenia:** wynik tłumaczenia wyświetla się nad grą; kliknięcia przechodzą przez nakładkę do gry; nakładka nigdy nie przejmuje fokusu; pozycjonowanie poprawne przy różnych DPI i na wielu monitorach.
 
-### Etap 8 — Tryb live ✅ (wykrywanie zmian + stabilizacja + latest-frame-wins; WGC pozostaje możliwym ulepszeniem)
+### Etap 8 — Tryb live ✅ (wykrywanie zmian + stabilizacja; jakość w ruchu w trakcie poprawy)
 
-Windows Graphics Capture dla ciągłego przechwytywania. Analiza 3–6 fps, OCR tylko przy wykrytej zmianie obrazu, latest-frame-wins (nieaktualne zadania anulowane przez CancellationToken), debounce niestabilnego tekstu.
+Obecnie GDI/PrintWindow z zapasowym przechwyceniem ekranu. Jedna pętla obsługuje capture, OCR i stan sceny, z wykrywaniem zmian, stabilizacją i okresowym OCR. Po wykrytej zmianie widoku nowe tłumaczenie może ruszyć obok starego; sesja utrzymuje najwyżej dwa zadania, bez kolejki nieaktualnych klatek. Podczas dłuższego oczekiwania dodatkowe przechwycenia sprawdzają scenę. Wyniki wykrytej poprzedniej sceny są odrzucane; wysłane tłumaczenie może dokończyć zapis do cache. WGC pozostaje możliwym ulepszeniem.
 
-**Kryterium ukończenia:** obserwowany obszar tłumaczy się automatycznie po zmianie treści; niezmieniony obraz nie generuje OCR ani wywołań API; UI nie jest nigdy blokowane.
+**Kryterium:** automatyczne tłumaczenie zmian bez blokowania UI; cache ogranicza powtórne wywołania API. Statyczna scena może uruchamiać OCR w ramach ponownego skanu lub powtórki po podejrzeniu pustego odczytu. Sprawność prezentacji w dynamicznej rozgrywce wymaga dalszych testów.
 
 ### Etap 9 — Strategie Tooltip / Subtitle / Universal 🔨 (Manual/Universal-live/Subtitle działają; automatyczna detekcja tooltipów — planowana)
 
@@ -162,3 +162,135 @@ Przy każdym konflikcie decyzyjnym rozstrzyga niższy numer:
 - Windows Graphics Capture jako alternatywna ścieżka capture — wg pomiarów na PoE2 (audyt #3
   i diagnoza live) GDI/PrintWindow działa dobrze (25–48 ms, zero fallbacku), więc WGC to
   ulepszenie „nice to have", nie naprawa.
+
+## Weryfikacja przejęcia projektu — 2026-09-12
+
+Priorytetem jest jakość live w różnych grach. Escape Academy jest pierwszym
+przypadkiem pomiarowym; Path of Exile 2 pozostaje jednym z kolejnych przypadków.
+
+- Punkt wyjścia v0.2.2: build całego rozwiązania bez ostrzeżeń, 174/174 testy,
+  smoke test z Windows OCR i Mockiem zakończony kodem 0.
+- Opisy „latest-frame-wins” w Etapie 8 i starszych dokumentach są zbyt szerokie.
+  W chwili audytu pętla live sekwencyjnie czekała na OCR i tłumaczenie, zanim pobrała nowy
+  obraz. Zmiana obrazu nie unieważniała wyniku będącego w locie (poprawione w rundzie sceny poniżej). Anulowanie przy
+  zatrzymaniu sesji i zmianie ustawień to odrębne mechanizmy.
+- Capture live używa PrintWindow/GDI. Windows Graphics Capture w opisie Etapu 8
+  jest planem, nie obecną implementacją. Niezmieniony obraz ma też pełny przebieg
+  bezpieczeństwa co 4 s, więc nie oznacza dosłownie zera OCR.
+- Przygotowano jawny dobór profilu i pomiary w LiveDiag
+  (instrukcja: ../tools/GameTranslatorOverlay.LiveDiag/README.md). Raport sondy
+  opisuje przetwarzanie i aktualizacje sesji; sam nie dowodzi opóźnienia widocznej
+  nakładki, jakości nowych tłumaczeń DeepL ani zachowania innych gier.
+- Następny krok: porównywalne próby menu i dynamicznej sceny; dopiero po danych
+  jedna hipoteza i jedna poprawka z pomiarem przed/po. Wyniki historyczne z gier
+  nie zostały ponownie potwierdzone samym buildem, testami ani smoke testem.
+
+### Runda 2026-09-13 — maksymalne oczekiwanie podczas ruchu
+
+Naprawiono zerowanie terminu OCR przez krótką spokojną próbkę między ruchami kamery. Logika wspólna dla wszystkich gier; nie zmieniono progu ruchu 0,12 ani limitu 2500 ms. Test sekwencji ruch/ruch/spokój odtwarzał 10 s bez odczytu, po poprawce decyzje zapadają w 2505/5010/7515 ms przy próbkach co 167 ms. To dowód działania harmonogramu, nie pomiar opóźnienia nakładki. Testy: 204 (167 Core + 37 Infrastructure). Dalsze problemy: stare wyniki po zmianie sceny, częste ukrywanie podczas ruchu, wygląd i pełne skany wypierane przez częściowy OCR.
+
+### Runda 2026-09-13 — aktualność napisów po zmianie widoku
+
+Wczesne czyszczenie wykrytej zmiany sceny przed OCR i dopasowaniem bloków. Pule
+przywracania poprzednich napisów są czyszczone razem z widokiem. Podczas dłuższego
+OCR/tłumaczenia wykonywane są dodatkowe próbki obrazu, a wynik starej generacji
+jest odrzucany. Nie uruchamiają one dodatkowego równoległego OCR ani tłumaczenia.
+Automatyczne czyszczenie zachowuje ręczne ukrycie i obejmuje pasek napisów.
+
+SceneReplay odtworzył dwie regresje: usunięcie poprzedniego napisu czekało 2,36 s
+na Mocka; zaszumiony nowy odczyt przywracał stary napis mimo cięcia i trzymał go
+przez całe okno 8 s. Test odpowiedzi w locie wykazał publikację starej sceny po
+przejściu do następnej. Raporty i próby końcowe pozostają poza repozytorium.
+Testy czystej logiki obejmują także ciągłą panoramę, powrót do wcześniejszego widoku
+oraz reset okna. Nowe tłumaczenie nadal może czekać na odpowiedź dostawcy; ulepszenie
+jego czasu oraz małe zmiany lokalne pozostają otwarte. Fizyczną prezentację w grze
+potwierdza użytkownik, oddzielnie od wyników callbacków sondy.
+### Runda 2026-09-13 — oczekiwanie na poprzednie tłumaczenie
+
+Po wykrytej zmianie sceny kończy się oczekiwanie tej klatki, a wysłane tłumaczenie
+pozostaje pod opieką sesji i może uzupełnić cache. Nowy widok dostaje drugie miejsce;
+przy dwóch zajętych miejscach pętla śledzi najnowszy obraz, bez kolejki opisów.
+Zatrzymanie anuluje i domyka także stare zadania. Rezerwacja znaków przed API
+chroni wspólny limit sesji przy równoległości, a ponowny lookup cache domyka wyścig
+deduplikacji. Osobny token ustawień blokuje zapis do nieaktualnego cache.
+
+Pomiar kontrolny z Mockiem opóźnionym o 2 s porównuje gotowość nowego opisu,
+liczbę wywołań i odrzucenie starej sceny. Nie wyznacza czasu odpowiedzi DeepL
+ani faktycznej prezentacji w grze. Małe zmiany lokalne, jakość OCR i wygląd
+nakładki pozostają oddzielnymi tematami kolejnych pomiarów.
+
+### Runda 2026-09-13 — stabilizacja kolejnych odczytów
+
+Pomiar odtworzył blokowanie podobnego krótszego opisu: Windows OCR trzy razy czytał
+„The door is open”, ale sesja przez 12 s pokazywała „The door is locked”. Czysty
+nowy tekst może teraz zastąpić podobny stary niezależnie od długości, po dwóch
+kolejnych wiarygodnych obserwacjach. Celowo zachowano ochronę oczywistych fragmentów
+całych słów z początku/końca odczytu oraz odczytów wyraźnie gorszej jakości.
+
+Odtworzono też sumowanie niekolejnych pomyłek: B,A,B i B,pusty,B prowadziły do
+błędnego napisu mimo stałego obrazu A. Seria jest teraz resetowana przez powrót A,
+brak bloku w zeskanowanym obszarze i zmianę kandydata. Częściowy skan poza blokiem
+nie stanowi obserwacji tego bloku. Pierwszy wiarygodny nowy wariant zleca szybką
+powtórkę OCR obszaru; API dostaje dopiero przyjęty odczyt.
+
+To stabilizacja wyników, nie nowy silnik rozpoznawania. Dwa identyczne, wiarygodnie
+wyglądające błędne odczyty nadal mogą zostać przyjęte. Dopasowanie niewidocznych
+duchów, znikanie nad ruchomym tłem i fizyczna prezentacja wymagają kolejnych danych
+z gry. Kontrolne próby nie obiecują całkowitego braku migania w każdej scenie.
+
+### Runda 2026-09-13 — próbkowanie przy terminie stabilności
+
+Dla domyślnych 6 FPS termin 250 ms wypada między zwykłymi próbkami. Pętla może
+skrócić najbliższy sen do tego przyszłego terminu, po czym wykonuje świeży capture
+oraz zwykłe sprawdzenie zmian. Nie skraca 250 ms stabilności ani dwóch kolejnych
+potwierdzeń podobnej treści. Przeterminowany termin zachowuje zwykłe próbkowanie,
+żeby błędy capture nie powodowały zapętlenia. Przy pełnym interwale próbkowania
+co najmniej równym stabilizacji (domyślnie <=4 FPS) zachowuje ustawiony rytm.
+
+SceneReplay, Windows OCR, cztery fazy 0/50/100/150 ms: przy Mock 0 ms gotowość
+opisu spadła z 388–510 do 307–451 ms (zysk w parach 59–81 ms); przy Mock 2000 ms
+zysk wyniósł 33–66 ms. Przełączenie podczas wolnej odpowiedzi: 2512,6 → 2440,7 ms;
+podobny krótszy opis: 2712,8 → 2594 ms. To małe serie lokalnych callbacków, nie
+pomiar DeepL ani fizycznego wyświetlania w grze. Liczba zapytań/znaków Mock w
+porównywanych parach nie wzrosła; ochrona przed niekolejnymi pomyłkami i starymi
+odpowiedziami przeszła kontrolę. Koszt w innych scenach zależy od znalezionej treści.
+Dodano 19 przypadków testowych harmonogramu; całość 280 (243 Core + 37 Infrastructure).
+
+### Runda 2026-09-13 — koszt kontroli, lokalne przykrycie i pozycja
+
+Trzy zatwierdzone usprawnienia dotyczą wspólnego silnika wszystkich gier:
+
+- Pierwsza okresowa kontrola podczas OCR następuje po 1,5 interwału. Odczyt trwający
+  co najmniej jeden interwał nadal wymaga świeżej kontroli po zakończeniu. Przy 6 FPS
+  oznacza to do około 83 ms późniejszą pierwszą kontrolę trwającego odczytu. Kontrolne
+  OCR 175/225 ms potrzebowało medianowo 1 zamiast 2 dodatkowych przechwyceń. Zysk czasu
+  był mały i nie wystąpił dla każdej długości odczytu; czasy OCR i kontroli nakładają się.
+- Potwierdzona nowa treść albo całe stare pole o znanym kontraście zastąpione
+  jednolitym obrazem pozwala usunąć stary blok przed odpowiedzią dostawcy. Sprawdzane
+  są też oczekujące źródła; odrzucona klatka ponawia wszystkie swoje obszary. Menu
+  niezależne od znikającej etykiety oraz nowsze źródła paska napisów są zachowane.
+  Częściowe usunięcie paska nie przedłuża jego czasu. Tekstura i niepełny obszar nadal
+  nie stanowią dowodu braku tekstu.
+- Stabilizacja pozycji ma stałą tolerancję 2 fizycznych pikseli na oś, oddzielnie
+  od rozmiaru. Globalne czyszczenie przy silnym ruchu i maksymalna pauza OCR 2,5 s
+  pozostają bez zmian.
+
+Powtarzalne własne okno, rzeczywisty Windows OCR i Mock 2 s: lokalne przykrycie
+usuwało Inspect po 2864 ms, obecnie po 289 ms. Nowy opis był gotowy po około
+2311 ms; obie pozycje menu pozostały. Przy przykryciu przed pierwszą odpowiedzią
+nowy opis: 4113 → 2498 ms, stare callbacki Inspect: 3 → 0. Obie pary zachowały
+2 zapytania / 50 znaków Mock. Hover oraz warianty pomyłek OCR nie powodowały
+błędnego znikania lub zmiany treści w sprawdzonych scenariuszach.
+
+Syntetyczny odczyt geometrii z rzeczywistego capture, 12 kroków po 3 px: maksymalny
+błąd położenia 18 → 2 px, maksymalny skok około 22 → 6 px. Próba szumu +/-1 px:
+zero zmian pozycji, bez zniknięć. To pozycja callbacku po zatrzymaniu kroku,
+nie pomiar ciągłego śledzenia ani fizycznej prezentacji nakładki.
+
+Menu Escape Academy przed i po pierwszej poprawce: po 15 pełnych OCR i 8 bloków,
+bez whiff/clear/hide/fallback. Czasy zależały także od rozgrzania systemowego OCR.
+Dwie minutowe próby pokoju różniły się przebiegiem ruchu i proporcją wycinków;
+nie służą do wyliczania procentowej poprawy jakości lub kosztu. Ocena wyglądu
+nowej instalacji przez użytkownika pozostaje otwarta. Całość: 346 testów
+(309 Core + 37 Infrastructure), jawny build App i smoke test OCR przeszły.
+Szczegółowe raporty oraz zachowane binaria porównawcze pozostają poza repozytorium.

@@ -689,8 +689,10 @@ public partial class MainWindow : Window
 
         if (update.ClearOverlay)
         {
-            _overlay.ClearBlocks();
+            // Automatic scene cleanup must not undo the user's Ctrl+Shift+H choice.
+            _overlay.ClearBlocks(preserveUserHidden: true);
         }
+        if (update.ClearSubtitle) _overlay.ClearSubtitle();
         if (update.HideOverlay)
         {
             // Ruch sceny: bloki są chwilowo nieaktualne — chowamy, wrócą po najbliższym OCR.
@@ -713,7 +715,7 @@ public partial class MainWindow : Window
             {
                 if (update.SubtitleText is { Length: > 0 } subtitle)
                 {
-                    _overlay.ShowSubtitle(subtitle, update.WindowBounds, _settings);
+                    _overlay.ShowSubtitle(subtitle, update.WindowBounds, _settings, update.PreserveSubtitleLifetime);
                 }
                 else
                 {

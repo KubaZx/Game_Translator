@@ -130,6 +130,37 @@ public static class ScreenCapture
         }
     }
 
+    /// <summary>
+    /// Examines a complete former text box in an already captured bitmap. Only a
+    /// reusable row buffer is copied, never another full 4K frame. Missing/clipped
+    /// pixels or unknown old colors remain inconclusive and cannot remove text.
+    /// </summary>
+    public static bool IsTextAreaClearlyEmpty(Bitmap bitmap, RectPx box, int textRgb, int backgroundRgb, ref byte[]? rowBuffer)
+    {
+        if (!Core.Vision.TextPresenceProbe.CanCheckKnownText(textRgb, backgroundRgb)
+            || box.X < 0 || box.Y < 0 || box.Width <= 0 || box.Height <= 0
+            || (long)box.X + box.Width > bitmap.Width || (long)box.Y + box.Height > bitmap.Height
+            || (long)box.Width * box.Height < 4)
+            return false;
+        var rowBytes = checked(box.Width * 4);
+        if (rowBuffer is null || rowBuffer.Length < rowBytes) rowBuffer = new byte[rowBytes];
+        var probe = new Core.Vision.TextPresenceProbe();
+        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            for (var y = box.Y; y < box.Bottom; y++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(
+                    data.Scan0 + y * data.Stride + box.X * 4, rowBuffer, 0, rowBytes);
+                probe.ObserveBgra32(rowBuffer.AsSpan(0, rowBytes));
+                if (probe.HasContrast) return false;
+            }
+            return probe.IsUniform;
+        }
+        finally { bitmap.UnlockBits(data); }
+    }
+
     /// <summary>Zapis klatki OCR do PNG — wyłącznie diagnostyka narzędzi dev (LiveDiag).</summary>
     public static void SavePng(OcrBitmap frame, string path)
     {

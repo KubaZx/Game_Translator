@@ -2,6 +2,86 @@
 
 Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
+## [Niewydane]
+
+### Naprawione
+
+- Pierwsza okresowa kontrola obrazu podczas OCR czeka 1,5 zwykłego interwału;
+  kolejne wracają do normalnego rytmu. OCR trwający co najmniej jeden interwał
+  nadal wymaga świeżej kontroli po zakończeniu. Ogranicza to zbędne przechwycenie
+  tuż przed końcem krótkiego OCR; przy 6 FPS pierwsza okresowa kontrola trwającego
+  odczytu może nastąpić około 83 ms później. Harmonogram dostawcy pozostaje bez zmian.
+- Potwierdzona zamiana treści lub brak OCR w całym dawnym polu, które stało się
+  jednolite i wcześniej miało znany kontrast, usuwa lokalny stary napis przed
+  oczekiwaniem na tłumaczenie. Pozostałe bloki zostają. Zasłonięcie takiego pola
+  podczas oczekiwania odrzuca nieaktualną klatkę i ponawia wszystkie jej obszary,
+  także nadal widoczne. Tekstura, ucięty obszar i niepewne kolory zachowują okres łaski.
+  Pamięć odtwarzania jest czyszczona lokalnie; filtr własnych tłumaczeń chroni kolejny odczyt.
+- Pasek napisów usuwa tylko treść powiązaną ze znikającymi źródłami. Usunięcie
+  niezależnej starej etykiety nie czyści nowszego dialogu; częściowa aktualizacja
+  nie odnawia czasu wyświetlania i nie przywraca już wygasłego paska.
+- Stabilizacja pozycji jest oddzielona od stabilizacji rozmiaru: różnice do 2
+  fizycznych pikseli na każdej osi pozostają tłumione, większa zmiana pozycji
+  przechodzi niezależnie od zachowania szerokości i wysokości pola. Duży napis
+  nie zwiększa już tolerancji przesunięcia. Globalna detekcja ruchu pozostaje bez zmian.
+- Pętla live może obudzić się przy najbliższym terminie stabilności obrazu zamiast
+  czekać do kolejnej zwykłej próbki. Nadal przechwytuje świeżą klatkę i wymaga
+  250 ms stabilności oraz kolejnych potwierdzeń podobnego odczytu. Przy próbkowaniu
+  nie częstszym niż okres stabilizacji zachowuje ustawiony rytm, także w ruchu.
+  Zmiana skraca narzut aplikacji; nie przyspiesza odpowiedzi DeepL.
+
+- Podobna, poprawnie rozpoznana nowa treść może zastąpić stary napis także wtedy,
+  gdy jest równej długości lub krótsza (np. „locked” → „open”). Pozostaje ochrona
+  przed wyraźnie gorszym odczytem i oczywistym ucięciem początku/końca zdania.
+- Potwierdzenia OCR muszą być kolejne. Powrót poprawnego tekstu albo pusty odczyt
+  w badanym obszarze przerywa serię błędnego wariantu; pomyłki nie sumują się.
+- Wiarygodna zmiana dostaje szybką powtórkę OCR swojego obszaru, bez oczekiwania
+  na okresowy pełny skan i bez wysyłania niepotwierdzonego tekstu do tłumaczenia.
+  Bloki tylko podtrzymywane nie czekają na miejsce w kolejce tłumaczeń.
+
+- Nowy widok może rozpocząć tłumaczenie podczas kończenia odpowiedzi poprzedniego.
+  Sesja utrzymuje najwyżej dwa zadania tłumaczeń; przy zajętych miejscach pomija
+  nieaktualne klatki zamiast kolejkować opisy. OCR i stan nakładki nadal obsługuje
+  jedna pętla. Zatrzymanie obejmuje także zadania pozostawione przez stare sceny.
+- Limit sesji rezerwuje znaki przed wysłaniem zapytania, wspólnie dla trwających
+  tłumaczeń. Współdzielony odczyt nie rezerwuje ich ponownie. Powtórne sprawdzenie
+  cache zamyka wyścig mogący wysłać ponownie właśnie zakończony tekst.
+- Zmiana ustawień unieważnia zapis starej odpowiedzi do poprzedniego cache.
+  Samo przejście do innej sceny nadal pozwala zachować ukończone tłumaczenie.
+
+- Wykryta zmiana sceny usuwa stare napisy i pamięć ich odtwarzania przed OCR
+  i tłumaczeniem. Zaszumiony odczyt nowego opisu nie przywraca „Inspect” z poprzedniej
+  sceny. Dotyczy wspólnego silnika wszystkich gier, bez zmiany progów detekcji.
+- Podczas dłuższego oczekiwania na OCR lub dostawcę sesja sprawdza obraz. Wynik
+  nieaktualnej sceny nie wraca do nakładki; cache dostawcy może zachować odpowiedź.
+  Dodatkowe przechwycenia kosztują czas CPU, ale nie wykonują dodatkowego OCR/API.
+- Automatyczne czyszczenie obejmuje również pasek napisów i zachowuje ręczne
+  ukrycie Ctrl+Shift+H. Zmiany zaobserwowane podczas oczekiwania nie przepadają,
+  także po błędzie lub zmianie ustawień.
+- Lokalna sonda SceneReplay odtwarza zmianę widoku, odpowiedź starej sceny w locie
+  i błędne przywracanie poprzedniego tekstu. Używa wyłącznie Mocka i własnego okna;
+  pomiary callbacków nie są pomiarami fizycznej prezentacji nakładki.
+
+- Krótkie zatrzymanie ruchu kamery nie zeruje już maksymalnego oczekiwania na OCR.
+  Termin 2,5 s działa także przy naprzemiennym ruchu i spokoju; odnawia się dopiero
+  przy rozpoczęciu przetwarzania. Poprawka wspólna dla wszystkich gier i profili.
+  Nie jest to gwarancja czasu pojawienia się tłumaczenia: OCR, sieć i rysowanie
+  nakładki nadal mają własne opóźnienia.
+- Dwanaście przypadków regresji obejmuje przerywany/ciągły ruch, spokojne menu,
+  reset sesji i współpracę ze stabilizatorem zmian.
+
+### Narzędzia dev
+
+- Sonda live dla różnych gier: jawny wybór profilu, raport użytych ustawień i lokalne
+  metryki czasu OCR, tłumaczenia oraz wieku klatki w chwili przygotowania aktualizacji.
+  Wiek klatki nie jest pomiarem czasu od pojawienia się tekstu do widocznej nakładki.
+- Raport JSONL bez treści OCR i tłumaczeń; wypisywanie tekstów i diagnostyczne zrzuty
+  wymagają osobnego włączenia. Sonda korzysta z prywatnego cache w pamięci i Mocka,
+  bez dostępu do klucza DeepL ani danych aplikacji użytkownika.
+- Raport sondy zawiera liczbę zapytań i znaków do Mocka oraz trafień cache/słownika.
+  Służy do porównania kosztu przetwarzania; nie mierzy zużycia ani opłat DeepL.
+  Miganie, utrzymywanie starych napisów i wygląd w rozgrywce wymagają dalszych prób.
+
 ## [0.2.2] — 2026-09-04
 
 Runda jakości trybu live strojona na żywych grach (Path of Exile 2, Escape Academy).

@@ -578,6 +578,24 @@ public sealed class ChangeStabilizer(TimeSpan stabilityDelay, TimeSpan? maxDirty
 
     public bool IsDirty => _dirty;
 
+    /// <summary>
+    /// A dirty image may become ready between normal capture ticks (250 ms versus
+    /// 6 FPS). Wake at that future deadline, then capture and call Update as usual.
+    /// Intervals at least as long as the stability delay preserve the configured FPS.
+    /// An expired deadline keeps normal polling: failed captures must not spin.
+    /// This only schedules an observation; it never authorizes OCR by itself.
+    /// </summary>
+    public TimeSpan GetPollingDelay(TimeSpan elapsed, TimeSpan normalDelay, TimeSpan pollingInterval)
+    {
+        if (normalDelay <= TimeSpan.Zero) return TimeSpan.Zero;
+        // A low configured FPS is a deliberate capture limit. Compare the full
+        // interval, not the remaining delay after capture/processing consumed time.
+        if (!_dirty || pollingInterval >= _stabilityDelay) return normalDelay;
+        var untilStable = _lastChangeAt + _stabilityDelay - elapsed;
+        return untilStable > TimeSpan.Zero && untilStable < normalDelay
+            ? untilStable : normalDelay;
+    }
+
     /// <summary>Zwraca true, gdy warto uruchomić OCR (stabilizacja albo wymuszenie po ciągłych zmianach).</summary>
     public bool Update(bool frameChanged, TimeSpan elapsed)
     {

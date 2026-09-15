@@ -600,8 +600,11 @@ public partial class OverlayWindow : Window
     }
 
     /// <summary>Pasek napisów na dole okna gry (tryb Subtitle) — pokazuje najnowszy tekst.</summary>
-    public void ShowSubtitle(string text, RectPx gameWindowBounds, AppSettings settings)
+    public void ShowSubtitle(string text, RectPx gameWindowBounds, AppSettings settings, bool preserveLifetime = false)
     {
+        // Removing one source from an existing subtitle must neither restart its
+        // timer nor bring an already expired subtitle back onto the screen.
+        if (preserveLifetime && _subtitleElement is null) return;
         // Warstwy ręczna i bloków live nie mogą zalegać pod napisami.
         ClearManualBlocks();
         ClearLiveBlocks();
@@ -635,11 +638,14 @@ public partial class OverlayWindow : Window
         CoverMonitor(monitor);
         ShowIfAllowed();
 
-        _subtitleTimer.Stop();
-        if (settings.SubtitleSeconds > 0)
+        if (!preserveLifetime)
         {
-            _subtitleTimer.Interval = TimeSpan.FromSeconds(settings.SubtitleSeconds);
-            _subtitleTimer.Start();
+            _subtitleTimer.Stop();
+            if (settings.SubtitleSeconds > 0)
+            {
+                _subtitleTimer.Interval = TimeSpan.FromSeconds(settings.SubtitleSeconds);
+                _subtitleTimer.Start();
+            }
         }
     }
 
@@ -684,7 +690,7 @@ public partial class OverlayWindow : Window
         HideIfEmpty();
     }
 
-    private void ClearSubtitle()
+    public void ClearSubtitle()
     {
         _subtitleTimer.Stop();
         if (_subtitleElement is not null)
@@ -708,7 +714,7 @@ public partial class OverlayWindow : Window
         HideIfEmpty();
     }
 
-    public void ClearBlocks()
+    public void ClearBlocks(bool preserveUserHidden = false)
     {
         _manualClearTimer.Stop();
         _subtitleTimer.Stop();
@@ -719,7 +725,7 @@ public partial class OverlayWindow : Window
         _liveFit.Clear();
         _manualElements.Clear();
         _subtitleElement = null;
-        _hiddenByUser = false;
+        if (!preserveUserHidden) _hiddenByUser = false;
         Hide();
     }
 

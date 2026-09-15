@@ -44,7 +44,8 @@ public sealed class TranslationPipeline(
     ITranslationProvider provider,
     UsageTracker usage,
     TranslationPipelineOptions options,
-    ILogger<TranslationPipeline>? logger = null)
+    ILogger<TranslationPipeline>? logger = null,
+    CancellationToken cacheWriteCancellationToken = default)
 {
     private const string CacheOnlyMessage = "Tryb Cache-only — tego tekstu nie ma jeszcze w lokalnej bazie tłumaczeń.";
     private const string SessionLimitMessage = "Osiągnięto limit znaków dla tej sesji. Zwiększ limit w ustawieniach albo zrestartuj sesję.";
@@ -80,37 +81,11 @@ public sealed class TranslationPipeline(
                 continue;
             }
 
-            var cached = await cache.LookupAsync(normalized, sourceLanguage, targetLanguage, options.GameProfile, cancellationToken)
+            var local = await TryTranslateLocallyAsync(source, normalized, sourceLanguage, targetLanguage, cancellationToken)
                 .ConfigureAwait(false);
-
-            // Testowe wpisy Mocka („[PL] …”) nie mogą udawać prawdziwych tłumaczeń
-            // po przełączeniu na rzeczywistego dostawcę.
-            if (cached is { IsManual: false }
-                && cached.Provider.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase)
-                && !provider.Name.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase))
+            if (local is not null)
             {
-                cached = null;
-            }
-
-            // Ręczna korekta użytkownika ma absolutne pierwszeństwo — także przed słownikiem.
-            if (cached is { IsManual: true })
-            {
-                usage.RecordCacheHit();
-                outcomes[normalized] = new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache);
-                continue;
-            }
-
-            if (glossary.TryTranslateExact(normalized, out var glossaryTranslation))
-            {
-                usage.RecordGlossaryHit();
-                outcomes[normalized] = new TranslationOutcome(source, normalized, glossaryTranslation, TranslationOrigin.Glossary);
-                continue;
-            }
-
-            if (cached is not null)
-            {
-                usage.RecordCacheHit();
-                outcomes[normalized] = new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache);
+                outcomes[normalized] = local;
                 continue;
             }
 
@@ -126,13 +101,6 @@ public sealed class TranslationPipeline(
                     outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, CacheOnlyMessage);
                 }
             }
-            else if (usage.WouldExceedSessionLimit(pending.Sum(static p => p.Normalized.Length)))
-            {
-                foreach (var (source, normalized) in pending)
-                {
-                    outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, SessionLimitMessage);
-                }
-            }
             else
             {
                 await TranslatePendingAsync(pending, sourceLanguage, targetLanguage, outcomes, cancellationToken).ConfigureAwait(false);
@@ -144,6 +112,38 @@ public sealed class TranslationPipeline(
                 ? outcome with { SourceText = input.Source }
                 : new TranslationOutcome(input.Source, input.Normalized, null, TranslationOrigin.Unavailable, "Brak wyniku."))
             .ToList();
+    }
+
+    private async Task<TranslationOutcome?> TryTranslateLocallyAsync(
+        string source, string normalized, string sourceLanguage, string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var cached = await cache.LookupAsync(normalized, sourceLanguage, targetLanguage, options.GameProfile, cancellationToken)
+            .ConfigureAwait(false);
+        // Mock cache entries must never impersonate translations from a real provider.
+        if (cached is { IsManual: false }
+            && cached.Provider.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase)
+            && !provider.Name.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase))
+            cached = null;
+
+        // Manual corrections retain precedence over the glossary on both lookups.
+        if (cached is { IsManual: true })
+        {
+            usage.RecordCacheHit();
+            return new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache);
+        }
+        if (glossary.TryTranslateExact(normalized, out var translation))
+        {
+            usage.RecordGlossaryHit();
+            return new TranslationOutcome(source, normalized, translation, TranslationOrigin.Glossary);
+        }
+        if (cached is not null)
+        {
+            usage.RecordCacheHit();
+            return new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache);
+        }
+        return null;
     }
 
     private async Task TranslatePendingAsync(
@@ -176,7 +176,26 @@ public sealed class TranslationPipeline(
         {
             foreach (var chunk in mine.Chunk(Math.Max(1, options.MaxBatchSize)))
             {
-                await TranslateChunkAsync(chunk, sourceLanguage, targetLanguage, outcomes, cancellationToken).ConfigureAwait(false);
+                var toSend = new List<(string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)>();
+                foreach (var item in chunk)
+                {
+                    // A previous owner may have filled the cache after our first miss
+                    // and removed its in-flight entry before we registered ours.
+                    var local = await TryTranslateLocallyAsync(
+                        item.Source, item.Normalized, sourceLanguage, targetLanguage, cancellationToken).ConfigureAwait(false);
+                    if (local is not null)
+                    {
+                        outcomes[item.Normalized] = local;
+                        item.Tcs.TrySetResult(local.TranslatedText!);
+                    }
+                    else
+                    {
+                        toSend.Add(item);
+                    }
+                }
+                if (toSend.Count > 0)
+                    await TranslateChunkAsync(toSend.ToArray(), sourceLanguage, targetLanguage, outcomes, cancellationToken)
+                        .ConfigureAwait(false);
             }
         }
         finally
@@ -197,7 +216,11 @@ public sealed class TranslationPipeline(
             }
             catch (TranslationException ex)
             {
-                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, ex.UserFriendlyMessage);
+                // Local admission uses the existing quota failure kind, but must retain
+                // the session-limit explanation rather than a remote provider-quota message.
+                var message = ex.Kind == TranslationFailureKind.QuotaExceeded && ex.Message == SessionLimitMessage
+                    ? SessionLimitMessage : ex.UserFriendlyMessage;
+                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, message);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -214,7 +237,23 @@ public sealed class TranslationPipeline(
         Dictionary<string, TranslationOutcome> outcomes,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var textsToSend = chunk.Select(static c => c.Normalized).ToList();
+        // Only owned, non-deduplicated texts reserve budget. Waiters reuse the owner's
+        // admission and outcome; a different pipeline shares the same UsageTracker gate.
+        using var reservation = usage.TryReserveApiCharacters(textsToSend.Sum(static t => t.Length));
+        if (reservation is null)
+        {
+            var denied = new TranslationException(TranslationFailureKind.QuotaExceeded, SessionLimitMessage);
+            foreach (var (source, normalized, _, tcs) in chunk)
+            {
+                tcs.TrySetException(denied);
+                outcomes[normalized] = new TranslationOutcome(
+                    source, normalized, null, TranslationOrigin.Unavailable, SessionLimitMessage);
+            }
+            // A local admission denial is not a failed request to the provider.
+            return;
+        }
 
         IReadOnlyList<string> translations;
         try
@@ -247,7 +286,7 @@ public sealed class TranslationPipeline(
             return;
         }
 
-        usage.RecordApiRequest(textsToSend.Sum(static t => t.Length));
+        reservation.Complete();
 
         for (var i = 0; i < chunk.Length; i++)
         {
@@ -261,12 +300,12 @@ public sealed class TranslationPipeline(
                 // Automatyczne wyniki z API lądują w cache GLOBALNYM — ten sam tekst w innej grze
                 // (albo bez profilu) nie może być drugi raz bilingowany. Klucz profilu jest
                 // zarezerwowany dla ręcznych korekt i wpisów dostarczanych z profilem.
-                // Zapis idzie BEZ tokena operacji: znaki są już zbilingowane, a anulowanie
-                // (latest-wins, przebudowa pipeline'u) tuż po odpowiedzi API gubiłoby
-                // opłacone tłumaczenie i wymuszało ponowny biling tego samego tekstu.
+                // Scene/session cancellation does not discard an already paid response.
+                // A separate settings/privacy epoch may forbid writes to this captured cache.
+                cacheWriteCancellationToken.ThrowIfCancellationRequested();
                 await cache.StoreAsync(
                     new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage, translated, provider.Name, GameProfile: string.Empty),
-                    CancellationToken.None).ConfigureAwait(false);
+                    cacheWriteCancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

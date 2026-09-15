@@ -459,3 +459,125 @@ Dotyczy od: Etap 8.
 **Oczekiwany wynik:** przy minimalizacji nakładka znika, status mówi o czekaniu; po
 przywróceniu tłumaczenia wracają bez restartu trybu; po zamknięciu gry tryb live
 zatrzymuje się z komunikatem, przyciski wracają do stanu wyjściowego.
+
+## Regresja M20/M22 — przerywany ruch kamery (2026-09-13)
+
+W dowolnej grze z tekstem poruszaj kamerą przez 10 s, robiąc bardzo krótkie
+zatrzymania (krótsze niż 250 ms), następnie zatrzymaj ją całkowicie i otwórz opis.
+Odczyt nie powinien czekać na nowy, pełny okres 2,5 s po każdym zatrzymaniu.
+Limit dotyczy dopuszczenia OCR przy pierwszej próbce po terminie; opóźnienie
+sieci i prezentacja nakładki są mierzone osobno. Zapisz oddzielnie znikanie,
+przestarzałe napisy oraz czas pojawienia się nowego opisu — ta poprawka dotyczy
+odraczania OCR i nie oznacza zaliczenia wszystkich kryteriów M20.
+
+Powtórz próbę po minimalizacji na 5 s i przywróceniu gry (M22): stary termin
+oczekiwania nie może wymuszać dodatkowego odczytu po wznowieniu. Test czystej
+logiki resetu jest automatyczny; zachowanie okna i nakładki sprawdza użytkownik.
+## Regresja M17/M20 — „Zbadaj” po otwarciu opisu (2026-09-13)
+
+1. Uruchom live w dowolnej grze; w Escape Academy ustaw widok z Inspect/Zbadaj.
+2. Otwórz opis tak, aby poprzednia etykieta zniknęła z obrazu gry.
+3. Stare tłumaczenie ma zniknąć po wykryciu zmiany widoku, przed nową odpowiedzią.
+   Nie może wrócić po nadejściu spóźnionego tłumaczenia poprzedniej sceny.
+4. Powtórz dla pasa napisów oraz po ręcznym ukryciu Ctrl+Shift+H: automatyczne
+   czyszczenie nie może cofnąć wyboru użytkownika i samo pokazać nakładki.
+5. Powtórz z minimalizacją/przywróceniem okna podczas oczekiwania (M22).
+
+Próg cięcia i potwierdzanie ruchu pozostają wspólne dla gier. Niewykryte, małe
+zmiany lokalne są osobnym przypadkiem; ta poprawka nie gwarantuje natychmiastowej
+odpowiedzi dostawcy. Zapisz osobno czas zniknięcia starego i gotowości nowego tekstu.
+Sonda SceneReplay powtarza te dwa pomiary na własnym oknie z Mockiem 2 s. Kontrolne
+próby nie zastępują obserwacji nakładki i skrótów w prawdziwej grze.
+## Regresja M17 — zmiana widoku podczas wolnej odpowiedzi (2026-09-13)
+
+1. Otwórz opis, a zanim nadejdzie tłumaczenie, przejdź do następnego.
+2. Nowy tekst może być tłumaczony, gdy poprzednia odpowiedź nadal trwa. Stara
+   odpowiedź nie może powrócić na nakładkę. Zapisz czas gotowości nowego opisu.
+3. Wróć do poprzedniego opisu i powtórz szybkie przełączanie kilku widoków.
+   Po zatrzymaniu ma pojawić się bieżący tekst, bez odtwarzania kolejki starych.
+4. Zatrzymaj live podczas oczekiwania, następnie uruchom ponownie. Sprawdź brak
+   późnych aktualizacji zatrzymanej sesji. Powtórz zmianę ustawień podczas oczekiwania.
+
+SceneReplay sprawdza wolną odpowiedź lokalnie przez Mock; testy Core obejmują
+limit dwóch zadań, deduplikację i rezerwację znaków. Liczniki lokalne nie zastępują
+rozliczenia dostawcy, zwłaszcza po timeoutach. Próbę prawdziwej nakładki i sieci
+wykonuje użytkownik; raport sondy nie mierzy fizycznego renderowania.
+
+## Regresja M17 — podobny opis i sporadyczne błędy OCR (2026-09-13)
+
+1. Przełącz dwa podobne opisy w tym samym miejscu; nowy może być krótszy. Sprawdź,
+   czy świeże tłumaczenie zastępuje stare bez konieczności zmiany całej sceny.
+2. Pozostaw napis nad animowanym tłem. Pojedyncza pomyłka rozdzielona poprawnym
+   odczytem lub pustym wynikiem nie powinna wystarczać do podmiany tłumaczenia.
+3. Sprawdź liczbę/statystykę zmieniającą się w tym samym miejscu; potwierdzona
+   nowa wartość powinna wejść, podczas gdy pojedyncze pomyłki nie powinny.
+4. Wróć do statycznego menu: brak dodatkowego migania, zmiany rozmiaru i usuwania
+   poprawnych napisów. Zatrzymaj i ponownie uruchom live; stare potwierdzenia
+   nie powinny przechodzić do nowej sesji.
+
+Lokalna sonda SceneReplay: local-reading (Windows OCR) oraz reading-jitter i
+reading-whiff (jawnie syntetyczne odczyty przy niezmienionym obrazie). Podsumowania
+mierzą callbacki i liczniki Mocka, a nie fizyczne renderowanie nakładki. Dwa kolejne
+identyczne błędy rozpoznawania pozostają ograniczeniem tej reguły.
+
+## Regresja M17/M20 — wcześniejsza próbka przy terminie stabilności (2026-09-13)
+
+1. Przełącz nowy opis, a następnie podobny opis w tym samym miejscu. Porównaj
+   gotowość tekstu osobno od usunięcia poprzedniego tłumaczenia.
+2. Powtórz po krótkim ruchu kamery i w nieruchomym menu. Wcześniejsza próbka nadal
+   musi sprawdzić świeży obraz; nowa zmiana odsuwa termin stabilności odczytu.
+3. Sprawdź błędny odczyt rozdzielony prawidłowym albo pustym wynikiem. Przyspieszenie
+   nie znosi wymogu dwóch kolejnych potwierdzeń podobnej nowej treści.
+4. Przy profilu z niskim FPS pętla zachowuje zwykły rytm przechwytywania. Testy Core
+   sprawdzają również przeterminowany termin po nieudanym capture oraz reset.
+
+SceneReplay umożliwia parę przed/po dla displayed i faz 0/50/100/150 ms, z prawdziwym
+Windows OCR oraz Mock 0 lub 2000 ms. Inflight przy domyślnym Mock 2000 ms sprawdza
+zmianę podczas oczekiwania. Wynik około 2,5 s w tej próbie obejmuje sztuczne 2 s;
+nie jest pomiarem DeepL. W grze ocenę szybkości i fizycznej stabilności wykonuje
+użytkownik. Progi stabilności 250 ms, wymuszenia 600 ms i ruchu 2500 ms są bez zmian.
+
+## Regresja M17/M20 — kontrola OCR, lokalne znikanie i pozycja (2026-09-13)
+
+**Status: do oceny wizualnej w aplikacji.** Poniższa lista nie oznacza zaliczenia
+scenariuszy. Testy czystej logiki i sondy callbacków nie zastępują obserwacji
+fizycznej nakładki. Wybierz dowolną grę lub własne okno z tekstem; zapisz tryb
+nakładki, profil, DPI i rozdzielczość. Do lokalnych prób wystarcza Mock.
+
+1. **Kontrola OCR:** obserwuj nieruchome menu, potem kilka razy szybko zmień opis.
+   Zapisz osobno gotowość nowego tekstu i czas usunięcia poprzedniego. Wolna odpowiedź
+   nie może przywracać starej sceny. Pierwsza okresowa kontrola podczas OCR czeka
+   1,5 interwału (przy 6 FPS około 250 ms zamiast 167 ms); kolejne mają zwykły rytm.
+   To świadomy dodatkowy czas do pierwszej kontroli, około 83 ms przy 6 FPS.
+   OCR trwający co najmniej jeden interwał nadal dostaje świeżą kontrolę końcową.
+   Szczegóły harmonogramu weryfikuje się sondą; obserwacja gry służy ocenie skutków.
+2. **Mała zmiana na jednolitym tle:** zostaw kilka etykiet, a jedną, np. „Inspect”,
+   zasłoń lokalnym panelem bez zmiany reszty sceny. Powtórz dla potwierdzonej zamiany
+   krótkiego opisu w tym samym miejscu. Stare tłumaczenie ma zniknąć przed czekaniem
+   na nowe; niezależne etykiety mają pozostać. Stary napis nie powinien wrócić
+   po późnej odpowiedzi ani po następnym odczycie.
+3. **Zmiana podczas oczekiwania:** zasłoń jedną etykietę, zanim przyjdą tłumaczenia
+   kilku nowych bloków. Po odrzuceniu nieaktualnej klatki nadal widoczne bloki
+   powinny dostać ponowny odczyt i pojawić się, choć same nie zmieniły obrazu.
+   Powtórz z wycinkiem OCR, powiększeniem i tekstem przy brzegu obszaru. Na teksturze,
+   przy niepewnych kolorach lub niepełnym polu brak natychmiastowego usunięcia
+   pozostaje ograniczeniem: obowiązuje wcześniejszy okres łaski. Widoczny cienki
+   znak nie powinien zostać uznany za jednolite, puste pole.
+4. **Pasek napisów:** najpierw pokaż A („Inspect”), następnie niezależny dialog B.
+   Usunięcie A nie powinno skasować paska B. Gdy pasek zawiera A i B jednocześnie,
+   usuń A: B ma pozostać; usunięcie ostatniego źródła ma wyczyścić pasek. Przy
+   włączonym wygasaniu częściowa aktualizacja nie powinna wydłużyć czasu B.
+   Po wygaśnięciu paska ponów częściowe usunięcie: pasek nie może się odtworzyć.
+5. **Pozycja i rozmiar:** w trybie bloków obserwuj drobne drżenie nieruchomego napisu,
+   potem przesuń tekst lub kamerę o kilka pikseli, także przy szerokim opisie.
+   Po nowym odczycie pozycja ma podążać za źródłem, zachowując spokojny rozmiar.
+   Tłumione są różnice do 2 fizycznych pikseli osobno na każdej osi; zmiana rozmiaru
+   nie powinna wymuszać skoku pozycji. Powtórz dla większego DPI i zmiany rozmiaru
+   etykiety po najechaniu. Ta poprawka nie zmienia globalnego ukrywania przy ruchu.
+6. Powtórz lokalne usunięcie po ręcznym ukryciu `Ctrl+Shift+H` oraz po zatrzymaniu
+   i ponownym uruchomieniu Live. Automatyczna aktualizacja nie może cofać ręcznego
+   ukrycia ani przenosić starego paska lub oczekującej klatki do nowej sesji.
+
+Przy zgłoszeniu rozdziel: opóźnienie, pozostawanie starej treści, błędne zniknięcie
+aktualnego napisu i przesunięcie względem oryginału. Czasy kontroli sceny i OCR
+nakładają się; nie dodawaj ani nie odejmuj ich jako niezależnych etapów.

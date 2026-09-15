@@ -24,7 +24,7 @@ bez instalacji — rozpakuj i uruchom).
 | 5 | Cache SQLite (priorytet ręcznych korekt, eksport/import) | ✅ |
 | 6 | **MVP: Ctrl+Shift+T → region → polski wynik w panelu** | ✅ |
 | 7 | Nakładka click-through + wykluczenie z przechwytywania | ✅ |
-| 8 | Tryb live: wykrywanie zmian, stabilizacja, latest-frame-wins | ✅ |
+| 8 | Tryb live: wykrywanie zmian, stabilizacja, odrzucanie wyników poprzedniej sceny | ✅ |
 | 9 | Strategie live: przy oryginale (z wtapianiem w tło gry) / napisy na dole | ✅ |
 | 10 | Edytor słownika, import/eksport JSON, konflikty | ✅ |
 | 11 | Profile gier + autodetekcja po procesie (PoE2 w zestawie) | ✅ |
@@ -32,9 +32,20 @@ bez instalacji — rozpakuj i uruchom).
 
 Tryb live jest strojony na prawdziwych grach (Path of Exile 2, Escape Academy) i mierzony
 narzędziami diagnostycznymi, nie „na oko": detektor zmian odporny na szum tła (migotanie
-mgły nie liczy się jako zmiana), reakcja na nowy tekst ~0,1–0,4 s, okres łaski i stabilizacja
-odczytów maskują czknięcia OCR nad ruchomą grafiką, a w trybie „Na oryginale (zakrywa)" łatka
+mgły nie liczy się jako zmiana), sprawdzanie aktualności podczas oczekiwania i możliwość
+rozpoczęcia nowego tłumaczenia przed końcem odpowiedzi starej sceny. Podobna nowa treść
+wymaga kolejnych potwierdzeń OCR, a pojedyncze błędne warianty nie sumują się. Pętla może
+obudzić się przy terminie stabilności, ograniczając czekanie na następną próbkę obrazu. Czas gotowości
+tekstu zależy także od OCR i dostawcy; okres łaski i stabilizacja odczytów maskują
+czknięcia OCR nad ruchomą grafiką, a w trybie „Na oryginale (zakrywa)" łatka
 jest rozmytą kopią tła spod napisu, tekst dostaje kontur w kolorze z gry i rozmiar oryginału.
+Lokalne poprawki po 0.2.2 ograniczają nadmiarowe sprawdzanie obrazu podczas OCR,
+usuwają potwierdzony stary tekst przed oczekiwaniem na nowy wynik i oddzielają
+stabilizację pozycji od rozmiaru napisu. Wcześniejsze usuwanie obejmuje także
+przykrycie całego pola tekstu jednolitym panelem; na teksturowanym tle pozostaje
+ostrożny okres łaski. Drobne przesunięcia nie zależą już od długości napisu,
+a szum pozycji do 2 fizycznych pikseli nadal jest tłumiony. Zmiany są wspólne
+dla gier i profili; silny ruch kamery nadal może czasowo usuwać nakładkę.
 Automatyczna detekcja tooltipów — w planach ([docs/ROADMAP.md](docs/ROADMAP.md), tam też
 zmiany: [CHANGELOG.md](CHANGELOG.md)).
 
@@ -88,7 +99,7 @@ dotnet run --project src/GameTranslatorOverlay.App
 
 Smoke test renderuje syntetyczny tooltip RPG, puszcza go przez prawdziwe OCR Windows,
 grupowanie bloków i pełny pipeline tłumaczenia z cache SQLite (dostawca Mock) — kod wyjścia 0
-oznacza działający pion. Testy jednostkowe/integracyjne (174) nie wymagają klucza API ani GUI.
+oznacza działający pion. Testy jednostkowe/integracyjne nie wymagają klucza API ani GUI.
 
 Diagnostyka trybu live (wszystko z manifestem PerMonitorV2 — bez niego proces dostaje
 zwirtualizowany, ucięty kadr przy skalowaniu ekranu):
