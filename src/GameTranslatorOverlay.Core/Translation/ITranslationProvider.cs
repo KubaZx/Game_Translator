@@ -28,6 +28,9 @@ public enum TranslationFailureKind
     TextTooLong,
     ServiceUnavailable,
     InvalidRequest,
+    ModelNotFound,
+    ContentRefused,
+    InvalidConfiguration,
     Unknown,
 }
 
@@ -47,6 +50,9 @@ public sealed class TranslationException(TranslationFailureKind kind, string mes
         TranslationFailureKind.TextTooLong => "Tekst jest zbyt długi dla dostawcy tłumaczeń.",
         TranslationFailureKind.ServiceUnavailable => "Usługa tłumaczeń jest chwilowo niedostępna. Spróbuj ponownie później.",
         TranslationFailureKind.InvalidRequest => "Dostawca tłumaczeń odrzucił żądanie. Szczegóły znajdziesz w logu diagnostycznym.",
+        TranslationFailureKind.ModelNotFound => "Wybrany model nie istnieje albo nie jest dostępny dla tego klucza. Sprawdź nazwę modelu w ustawieniach dostawcy.",
+        TranslationFailureKind.ContentRefused => "Model językowy odmówił przetłumaczenia tego fragmentu (filtr bezpieczeństwa dostawcy).",
+        TranslationFailureKind.InvalidConfiguration => "Ustawienia dostawcy tłumaczeń są niepełne albo błędne. Uzupełnij je w oknie aplikacji.",
         _ => "Nieoczekiwany błąd tłumaczenia. Szczegóły znajdziesz w logu diagnostycznym.",
     };
 }
