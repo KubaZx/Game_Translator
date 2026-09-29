@@ -33,7 +33,7 @@ nie wymaga Pythona, CUDA ani lokalnego modelu AI.
 | Kontrola użycia | lokalne wyniki, deduplikacja i rezerwacje znaków przed API |
 | Prywatność | lokalny OCR, Cache-only i prywatny cache w pamięci |
 
-Ostatnie wydanie to 0.3.0 ([historia zmian](../CHANGELOG.md)). Dodaje wybór dostawcy
+Ostatnie wydanie to 0.3.1 ([historia zmian](../CHANGELOG.md)); linia 0.3 dodaje wybór dostawcy
 tłumaczeń i kontekst dialogu, a z poprawek live m.in. odrzucanie starych odpowiedzi,
 lokalne usuwanie przykrytych napisów, potwierdzanie kolejnych odczytów i dokładniejsze
 pozycjonowanie. Nie oznaczają zakończenia prac nad jakością w ruchu.

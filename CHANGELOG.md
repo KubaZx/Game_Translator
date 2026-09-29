@@ -4,6 +4,10 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
+Brak zmian po wydaniu 0.3.1.
+
+## [0.3.1] — 2026-09-29
+
 ### Jakość tłumaczeń
 
 - **Zawinięte zdania tłumaczone w całości:** dialog lub opis rozbity w grze na kilka wierszy
