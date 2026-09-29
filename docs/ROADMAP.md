@@ -2,8 +2,8 @@
 
 ## Obecny stan — 29 września 2026
 
-Ostatnie opublikowane wydanie to **0.2.2**. Na `main` są już późniejsze poprawki
-live: aktualność sceny i lokalnych opisów, nadzorowane tłumaczenia w toku,
+Ostatnie opublikowane wydanie to **0.3.0** (29 września 2026). Obejmuje poprawki
+live wprowadzone po 0.2.2: aktualność sceny i lokalnych opisów, nadzorowane tłumaczenia w toku,
 stabilizacja kolejnych odczytów oraz położenia. Kolejna lokalna poprawka zachowuje
 napisy o identycznym obrazie źródła podczas ruchu tła. Runda 29 września dodaje
 kolejnych dostawców tłumaczeń (Azure, Google, modele językowe z kontekstem gry i słownika)
@@ -103,7 +103,7 @@ Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po naz
 
 **Kryterium ukończenia:** aplikacja wykrywa uruchomione PoE2 i proponuje profil; profil ustawia parametry i słownik; usunięcie profilu nie zmienia działania aplikacji dla innych gier.
 
-### Etap 12 — Dystrybucja portable (wydanie 0.2.2 opublikowane; pełna ocena ręczna według checklisty nadal osobna)
+### Etap 12 — Dystrybucja portable (wydanie 0.3.0 opublikowane; pełna ocena ręczna według checklisty nadal osobna)
 
 Release: `dotnet publish` win-x64, aplikacja portable. Instrukcje użytkownika, `MANUAL_TESTING.md` (testy wymagające pulpitu Windows: OCR na żywo, nakładka, skróty — wyłącznie ręczne), licencje zależności, polityka prywatności, disclaimer. Artefakt Release z CI na tag lub manualnie.
 

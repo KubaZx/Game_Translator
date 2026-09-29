@@ -18,10 +18,9 @@ obrazu i czytelności tekstu.
 
 ## Stan projektu
 
-**Ostatnie opublikowane wydanie: 0.2.2.** Gałąź `main` zawiera również późniejsze
-poprawki jakości live opisane w sekcji **Niewydane** w [CHANGELOG.md](CHANGELOG.md).
-Paczka wydania 0.2.2 nie zawiera tych późniejszych zmian; aktualny kod można
-zbudować instrukcją poniżej. Numer wersji aplikacji pozostaje 0.2.2 do kolejnego wydania.
+**Ostatnie wydanie: 0.3.0** (29 września 2026) — wybór dostawcy tłumaczeń, kontekst
+dialogu i słownika, szybszy cache oraz poprawki stabilności live. Lista zmian:
+[CHANGELOG.md](CHANGELOG.md).
 
 Stan weryfikacji na 29 września 2026: **509 testów** — 363 Core i 146 Infrastructure —
 oraz kompilacja całego rozwiązania bez ostrzeżeń. Nowi dostawcy tłumaczeń nie byli jeszcze

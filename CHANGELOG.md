@@ -4,8 +4,15 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
-Zmiany w kodzie projektu po wydaniu 0.2.2. Nie są jeszcze częścią
-osobnego wydania ani archiwum 0.2.2.
+Brak zmian po wydaniu 0.3.0.
+
+## [0.3.0] — 2026-09-29
+
+Wybór dostawcy tłumaczeń (DeepL, Azure, Google, Claude, serwer zgodny z OpenAI — także
+lokalny), słownik i poprzednie kwestie jako kontekst tłumaczenia, szybszy cache i połączenia,
+zamknięty backlog audytu #3 oraz poprawki stabilności live wprowadzone po 0.2.2.
+Scenariusze ręczne M23–M26 (nowe pola okna, lokalny model, Claude, skrót przy zaznaczaniu)
+nie były jeszcze wykonane na Windows przed tym wydaniem.
 
 ### Szybciej i lepiej — cache, połączenia, kontekst dialogu (2026-09-29)
 
