@@ -113,7 +113,7 @@ public partial class App : Application
         services.AddSingleton<UserGlossaryStore>();
         services.AddSingleton<UsageTracker>();
         services.AddSingleton<MockTranslationProvider>();
-        services.AddSingleton(static _ => new HttpClient());
+        services.AddSingleton(static _ => ProviderHttpClientFactory.Create());
         services.AddSingleton(static sp => new DeepLTranslationProvider(
             sp.GetRequiredService<HttpClient>(),
             ApiKey(sp, TranslationProviderCatalog.DeepL),
@@ -137,7 +137,7 @@ public partial class App : Application
         // Osobny HttpClient: SDK Anthropic konfiguruje klienta po swojemu — nie dzielimy
         // go z pozostałymi dostawcami.
         services.AddSingleton(static sp => new ClaudeTranslationProvider(
-            new HttpClient(),
+            ProviderHttpClientFactory.Create(),
             ApiKey(sp, TranslationProviderCatalog.Claude),
             () => sp.GetRequiredService<AppSettings>().ClaudeModel,
             logger: sp.GetRequiredService<ILogger<ClaudeTranslationProvider>>()));
@@ -169,6 +169,15 @@ public partial class App : Application
     {
         try
         {
+            try
+            {
+                // Liczniki użycia cache są zapisywane zbiorczo — domykamy ostatnią partię.
+                _host?.Services.GetService<SqliteTranslationCache>()?.FlushUsageStatistics();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Nie udało się zapisać liczników użycia cache przy zamknięciu");
+            }
             _host?.StopAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
             _host?.Dispose();
         }

@@ -273,7 +273,7 @@ Dostawcy HTTP dzielą pętlę `ProviderHttp`; dostawcy modeli językowych implem
 żadnego modelu AI, Pythona ani CUDA — domyślna konfiguracja działa jak dotąd. Odrzucony
 w ADR-007 „lokalny model tłumaczący” oznaczał model dostarczany i wymagany przez aplikację;
 tutaj użytkownik może jedynie wskazać własny, osobno uruchomiony serwer. Decyzja rozszerza
-zakres produktu i powinna zostać potwierdzona przez zespół przed kolejnym wydaniem.
+zakres produktu; **zatwierdzona przez właściciela projektu 2026-09-29**.
 
 **Odrzucone alternatywy.**
 - **Model dołączony do paczki** — łamie DoD pkt 1 i zwiększa paczkę o gigabajty.

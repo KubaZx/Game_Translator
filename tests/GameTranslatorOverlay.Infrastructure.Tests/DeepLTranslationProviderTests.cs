@@ -253,4 +253,30 @@ public class DeepLTranslationProviderTests
         Assert.False(status.IsOk);
         Assert.Contains("klucz", status.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task Pojedyncza_kwestia_dostaje_poprzednie_linie_jako_kontekst()
+    {
+        var handler = new FakeHandler(static (request, _) => Task.FromResult(EchoResponse(request)));
+        var provider = CreateProvider(handler);
+        var context = new TranslationContext(null, []) { RecentTexts = ["Are you coming with me?"] };
+
+        await provider.TranslateWithContextAsync(["I'm ready."], "en", "pl", context);
+
+        using var body = JsonDocument.Parse(handler.Requests[0].Body);
+        Assert.Equal("Are you coming with me?\nI'm ready.", body.RootElement.GetProperty("context").GetString());
+        Assert.Equal(["I'm ready."], body.RootElement.GetProperty("text").EnumerateArray().Select(static t => t.GetString()));
+    }
+
+    [Fact]
+    public async Task Pojedyncza_kwestia_bez_historii_nie_ma_kontekstu()
+    {
+        var handler = new FakeHandler(static (request, _) => Task.FromResult(EchoResponse(request)));
+        var provider = CreateProvider(handler);
+
+        await provider.TranslateBatchAsync(["I'm ready."], "en", "pl");
+
+        using var body = JsonDocument.Parse(handler.Requests[0].Body);
+        Assert.False(body.RootElement.TryGetProperty("context", out _));
+    }
 }

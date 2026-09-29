@@ -156,6 +156,63 @@ public sealed class SqliteTranslationCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task Reczna_korekta_uniewaznia_zapamietane_trafienie()
+    {
+        await _cache.StoreAsync(Entry("Hello", "Automatyczne"));
+        await _cache.LookupAsync("Hello", "en", "pl", "poe2");
+        await _cache.LookupAsync("Hello", "en", "pl", "");
+
+        await _cache.SaveManualCorrectionAsync(Entry("Hello", "Ręczna"));
+
+        Assert.Equal("Ręczna", (await _cache.LookupAsync("Hello", "en", "pl", ""))!.TranslatedText);
+        Assert.Equal("Ręczna", (await _cache.LookupAsync("Hello", "en", "pl", "poe2"))!.TranslatedText);
+    }
+
+    [Fact]
+    public async Task Czyszczenie_i_import_uniewazniaja_zapamietane_trafienia()
+    {
+        await _cache.StoreAsync(Entry("A", "1"));
+        Assert.NotNull(await _cache.LookupAsync("A", "en", "pl", ""));
+
+        await _cache.ClearAsync(keepManualCorrections: false);
+        Assert.Null(await _cache.LookupAsync("A", "en", "pl", ""));
+
+        await _cache.StoreAsync(Entry("B", "stare"));
+        await _cache.LookupAsync("B", "en", "pl", "");
+        var backup = new InMemoryTranslationCache();
+        await backup.SaveManualCorrectionAsync(Entry("B", "z importu"));
+        await _cache.ImportJsonAsync(await backup.ExportJsonAsync());
+
+        Assert.Equal("z importu", (await _cache.LookupAsync("B", "en", "pl", ""))!.TranslatedText);
+    }
+
+    [Fact]
+    public async Task Liczniki_uzycia_trafiaja_do_bazy_zbiorczo()
+    {
+        await _cache.StoreAsync(Entry("Hello", "Cześć"));
+        for (var i = 0; i < 3; i++) await _cache.LookupAsync("Hello", "en", "pl", "");
+
+        _cache.FlushUsageStatistics();
+        var reopened = new SqliteTranslationCache(_databasePath);
+        var hit = await reopened.LookupAsync("Hello", "en", "pl", "");
+
+        Assert.Equal(5, hit!.UseCount);
+    }
+
+    [Fact]
+    public async Task Rownolegle_odczyty_z_pamieci_licza_kazde_uzycie()
+    {
+        await _cache.StoreAsync(Entry("Hello", "Cześć"));
+        await _cache.LookupAsync("Hello", "en", "pl", "");
+
+        await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => _cache.LookupAsync("Hello", "en", "pl", "")));
+        await _cache.GetStatsAsync(); // zapisuje zebrane liczniki
+
+        var reopened = new SqliteTranslationCache(_databasePath);
+        Assert.Equal(1 + 1 + 100 + 1, (await reopened.LookupAsync("Hello", "en", "pl", ""))!.UseCount);
+    }
+
+    [Fact]
     public async Task Eksport_i_import_wykonuja_roundtrip_bez_duplikatow()
     {
         await _cache.StoreAsync(Entry("Hello", "Cześć"));

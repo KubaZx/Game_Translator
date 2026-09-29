@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using GameTranslatorOverlay.Core.Caching;
@@ -11,13 +12,38 @@ public sealed class CacheStorageException(string message, Exception? inner = nul
 /// <summary>
 /// Trwały cache tłumaczeń w SQLite. Migracje przez PRAGMA user_version.
 /// Priorytet odczytu: ręczna korekta → wpis profilu gry → wpis globalny.
+/// Trafienia są pamiętane w RAM (tryb live pyta o te same teksty w każdej klatce),
+/// a liczniki użycia trafiają do bazy zbiorczo zamiast zapisu przy każdym odczycie.
+/// Pamięć jest unieważniana przy każdym zapisie przez tę instancję — aplikacja
+/// używa jednej instancji na plik bazy.
 /// </summary>
 public sealed class SqliteTranslationCache : ITranslationCache
 {
+    private const int MaxMemoryEntries = 5000;
+    private const int UsageFlushThreshold = 64;
+    private static readonly TimeSpan UsageFlushInterval = TimeSpan.FromSeconds(30);
+
     private readonly string _databasePath;
     private readonly string _connectionString;
     private readonly Lock _initGate = new();
     private volatile bool _initialized;
+
+    private sealed class MemoEntry(CachedTranslation value)
+    {
+        public CachedTranslation Value { get; } = value;
+        public long Uses = value.UseCount;
+    }
+
+    private readonly record struct PendingUsage(long Uses, DateTimeOffset LastUsed);
+
+    private readonly ConcurrentDictionary<string, MemoEntry> _memory = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<long, PendingUsage> _pendingUsage = new();
+    private readonly Lock _flushGate = new();
+    // Wersja pamięci: odczyt z bazy trwający w czasie zapisu nie może wstawić starej wartości.
+    private readonly Lock _memoryGate = new();
+    private long _memoryVersion;
+    private long _lastFlushTicks = Environment.TickCount64;
+    private int _backgroundFlush;
 
     public SqliteTranslationCache(string databasePath)
     {
@@ -33,7 +59,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
             if (_initialized) return;
             try
             {
-                using var connection = OpenConnection();
+                using var connection = OpenConnection(initializing: true);
                 Migrate(connection);
                 _initialized = true;
             }
@@ -47,7 +73,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
         }
     }
 
-    private SqliteConnection OpenConnection()
+    private SqliteConnection OpenConnection(bool initializing = false)
     {
         var connection = new SqliteConnection(_connectionString);
         try
@@ -55,7 +81,12 @@ public sealed class SqliteTranslationCache : ITranslationCache
             connection.Open();
             using var pragma = connection.CreateCommand();
             // Przy uszkodzonym pliku dopiero ta instrukcja padnie (SQLite otwiera plik leniwie).
-            pragma.CommandText = "PRAGMA journal_mode=WAL;";
+            // Tryb WAL jest zapisany w pliku bazy, więc wystarczy ustawić go przy inicjalizacji.
+            // synchronous=NORMAL w WAL nie grozi uszkodzeniem bazy; zanik zasilania może
+            // najwyżej cofnąć ostatnie zapisy — cache i tak da się odbudować.
+            pragma.CommandText = initializing
+                ? "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;"
+                : "PRAGMA synchronous=NORMAL;";
             pragma.ExecuteNonQuery();
             return connection;
         }
@@ -108,14 +139,29 @@ public sealed class SqliteTranslationCache : ITranslationCache
         }
     }
 
+    private static string MemoryPrefix(string hash, string sourceLanguage, string targetLanguage) =>
+        $"{hash}\u001f{sourceLanguage}\u001f{targetLanguage}\u001f";
+
     public Task<CachedTranslation?> LookupAsync(
         string normalizedText, string sourceLanguage, string targetLanguage,
         string gameProfile, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        var hash = TextHasher.Sha256Hex(normalizedText);
+        var memoryKey = MemoryPrefix(hash, sourceLanguage, targetLanguage) + gameProfile;
+
+        // Trafienie w pamięci: bez wątku tła, połączenia i zapisu na dysk.
+        if (_memory.TryGetValue(memoryKey, out var remembered))
+        {
+            var hit = RecordUse(remembered);
+            FlushUsageInBackgroundIfDue();
+            return Task.FromResult<CachedTranslation?>(hit);
+        }
+
         return Task.Run<CachedTranslation?>(() =>
         {
             Initialize();
-            var hash = TextHasher.Sha256Hex(normalizedText);
+            var version = Interlocked.Read(ref _memoryVersion);
 
             using var connection = OpenConnection();
             using var command = connection.CreateCommand();
@@ -151,14 +197,148 @@ public sealed class SqliteTranslationCache : ITranslationCache
                 UseCount: reader.GetInt64(10));
             reader.Close();
 
-            using var touch = connection.CreateCommand();
-            touch.CommandText = "UPDATE translations SET use_count = use_count + 1, last_used_at = $now WHERE id = $id;";
-            touch.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
-            touch.Parameters.AddWithValue("$id", result.Id);
-            touch.ExecuteNonQuery();
-
-            return result with { UseCount = result.UseCount + 1 };
+            // Liczniki niezapisane jeszcze w bazie wliczamy do zwracanej wartości.
+            var pendingUses = _pendingUsage.TryGetValue(result.Id, out var pending) ? pending.Uses : 0;
+            var entry = new MemoEntry(result with { UseCount = result.UseCount + pendingUses });
+            lock (_memoryGate)
+            {
+                if (Interlocked.Read(ref _memoryVersion) == version)
+                {
+                    if (_memory.Count >= MaxMemoryEntries) _memory.Clear();
+                    entry = _memory.GetOrAdd(memoryKey, entry);
+                }
+            }
+            var hit = RecordUse(entry);
+            FlushUsageIfDue(connection);
+            return hit;
         }, cancellationToken);
+    }
+
+    private CachedTranslation RecordUse(MemoEntry entry)
+    {
+        var uses = Interlocked.Increment(ref entry.Uses);
+        var now = DateTimeOffset.UtcNow;
+        _pendingUsage.AddOrUpdate(entry.Value.Id,
+            static (_, time) => new PendingUsage(1, time),
+            static (_, current, time) => new PendingUsage(current.Uses + 1, time),
+            now);
+        return entry.Value with { UseCount = uses, LastUsedAt = now };
+    }
+
+    private bool IsUsageFlushDue() =>
+        _pendingUsage.Count >= UsageFlushThreshold
+        || (!_pendingUsage.IsEmpty && Environment.TickCount64 - Interlocked.Read(ref _lastFlushTicks) >= UsageFlushInterval.TotalMilliseconds);
+
+    private void FlushUsageIfDue(SqliteConnection connection)
+    {
+        if (IsUsageFlushDue()) FlushUsage(connection);
+    }
+
+    private void FlushUsageInBackgroundIfDue()
+    {
+        if (!IsUsageFlushDue() || Interlocked.Exchange(ref _backgroundFlush, 1) == 1) return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                FlushUsageStatistics();
+            }
+            catch (Exception ex) when (ex is SqliteException or IOException or CacheStorageException)
+            {
+                // Liczniki użycia to tylko statystyka — chwilowo zablokowana baza nie może
+                // przerywać tłumaczenia. Kolejna próba nastąpi przy następnym zapisie.
+            }
+            finally
+            {
+                Volatile.Write(ref _backgroundFlush, 0);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Zapisuje zebrane liczniki użycia (use_count, last_used_at) w jednej transakcji.
+    /// Wołane automatycznie; aplikacja wywołuje je także przy zamknięciu.
+    /// </summary>
+    public void FlushUsageStatistics()
+    {
+        if (_pendingUsage.IsEmpty) return;
+        Initialize();
+        using var connection = OpenConnection();
+        FlushUsage(connection);
+    }
+
+    private void FlushUsage(SqliteConnection connection)
+    {
+        lock (_flushGate)
+        {
+            Interlocked.Exchange(ref _lastFlushTicks, Environment.TickCount64);
+            if (_pendingUsage.IsEmpty) return;
+
+            var taken = new List<(long Id, PendingUsage Usage)>();
+            foreach (var id in _pendingUsage.Keys)
+            {
+                if (_pendingUsage.TryRemove(id, out var usage)) taken.Add((id, usage));
+            }
+            if (taken.Count == 0) return;
+
+            try
+            {
+                using var transaction = connection.BeginTransaction();
+                using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = """
+                    UPDATE translations
+                    SET use_count = use_count + $uses,
+                        last_used_at = MAX(last_used_at, $now)
+                    WHERE id = $id;
+                    """;
+                var uses = command.Parameters.Add("$uses", SqliteType.Integer);
+                var now = command.Parameters.Add("$now", SqliteType.Text);
+                var id = command.Parameters.Add("$id", SqliteType.Integer);
+                foreach (var (entryId, usage) in taken)
+                {
+                    uses.Value = usage.Uses;
+                    now.Value = FormatTimestamp(usage.LastUsed);
+                    id.Value = entryId;
+                    command.ExecuteNonQuery();
+                }
+                transaction.Commit();
+            }
+            catch
+            {
+                // Nieudany zapis nie gubi liczników — wracają do kolejki.
+                foreach (var (entryId, usage) in taken)
+                {
+                    _pendingUsage.AddOrUpdate(entryId, usage,
+                        (_, current) => new PendingUsage(current.Uses + usage.Uses,
+                            current.LastUsed > usage.LastUsed ? current.LastUsed : usage.LastUsed));
+                }
+                throw;
+            }
+        }
+    }
+
+    /// <summary>Zapis zmienia wynik odczytu dla tego tekstu we wszystkich profilach.</summary>
+    private void ForgetMemory(NewCacheEntry entry)
+    {
+        var prefix = MemoryPrefix(TextHasher.Sha256Hex(entry.NormalizedText), entry.SourceLanguage, entry.TargetLanguage);
+        lock (_memoryGate)
+        {
+            Interlocked.Increment(ref _memoryVersion);
+            foreach (var key in _memory.Keys)
+            {
+                if (key.StartsWith(prefix, StringComparison.Ordinal)) _memory.TryRemove(key, out _);
+            }
+        }
+    }
+
+    private void ForgetAllMemory()
+    {
+        lock (_memoryGate)
+        {
+            Interlocked.Increment(ref _memoryVersion);
+            _memory.Clear();
+        }
     }
 
     public Task StoreAsync(NewCacheEntry entry, CancellationToken cancellationToken = default)
@@ -167,7 +347,9 @@ public sealed class SqliteTranslationCache : ITranslationCache
         {
             Initialize();
             using var connection = OpenConnection();
+            FlushUsage(connection);
             UpsertEntry(connection, entry, manualOverwrite: false);
+            ForgetMemory(entry);
         }, cancellationToken);
     }
 
@@ -177,10 +359,12 @@ public sealed class SqliteTranslationCache : ITranslationCache
         {
             Initialize();
             using var connection = OpenConnection();
+            FlushUsage(connection);
             UpsertEntry(
                 connection,
                 entry with { IsManual = true, IsApproved = true, Provider = "manual" },
                 manualOverwrite: true);
+            ForgetMemory(entry);
         }, cancellationToken);
     }
 
@@ -225,6 +409,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
         {
             Initialize();
             using var connection = OpenConnection();
+            FlushUsage(connection);
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*), COALESCE(SUM(is_manual), 0) FROM translations;";
             using var reader = command.ExecuteReader();
@@ -242,11 +427,14 @@ public sealed class SqliteTranslationCache : ITranslationCache
         {
             Initialize();
             using var connection = OpenConnection();
+            FlushUsage(connection);
             using var command = connection.CreateCommand();
             command.CommandText = keepManualCorrections
                 ? "DELETE FROM translations WHERE is_manual = 0;"
                 : "DELETE FROM translations;";
-            return command.ExecuteNonQuery();
+            var removed = command.ExecuteNonQuery();
+            ForgetAllMemory();
+            return removed;
         }, cancellationToken);
     }
 
@@ -256,12 +444,16 @@ public sealed class SqliteTranslationCache : ITranslationCache
         {
             Initialize();
             using var connection = OpenConnection();
+            // Najpierw zapisujemy użycia — inaczej usunęlibyśmy wpisy czytane przed chwilą.
+            FlushUsage(connection);
             using var command = connection.CreateCommand();
             command.CommandText = keepManualCorrections
                 ? "DELETE FROM translations WHERE last_used_at < $cutoff AND is_manual = 0;"
                 : "DELETE FROM translations WHERE last_used_at < $cutoff;";
             command.Parameters.AddWithValue("$cutoff", FormatTimestamp(cutoff));
-            return command.ExecuteNonQuery();
+            var removed = command.ExecuteNonQuery();
+            ForgetAllMemory();
+            return removed;
         }, cancellationToken);
     }
 
@@ -272,6 +464,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
             Initialize();
             var entries = new List<CacheExportEntry>();
             using var connection = OpenConnection();
+            FlushUsage(connection);
             using var command = connection.CreateCommand();
             command.CommandText = """
                 SELECT source_text, normalized_text, source_lang, target_lang, translated_text,
@@ -336,6 +529,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
                 imported += command.ExecuteNonQuery();
             }
             transaction.Commit();
+            ForgetAllMemory();
             return imported;
         }, cancellationToken);
     }

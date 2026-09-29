@@ -19,7 +19,8 @@ public sealed class ClaudeTranslationProvider(
     Func<string?> modelAccessor,
     LlmProviderOptions? options = null,
     ILogger<ClaudeTranslationProvider>? logger = null)
-    : LlmTranslationProviderBase(options, logger ?? NullLogger<ClaudeTranslationProvider>.Instance)
+    : LlmTranslationProviderBase(options, logger ?? NullLogger<ClaudeTranslationProvider>.Instance),
+      IWarmableTranslationProvider
 {
     public const string ProviderName = "Claude";
     public const string DefaultModel = "claude-opus-5-5";
@@ -75,6 +76,11 @@ public sealed class ClaudeTranslationProvider(
     }
 
     protected override void EnsureConfigured() => _ = ResolveApiKey();
+
+    public Task WarmUpAsync(CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(apiKeyAccessor())
+            ? Task.CompletedTask
+            : ProviderHttp.WarmUpAsync(httpClient, new Uri(ApiBaseUrl + "/"), cancellationToken);
 
     private sealed record ClientForKey(string ApiKey, AnthropicClient Client);
 

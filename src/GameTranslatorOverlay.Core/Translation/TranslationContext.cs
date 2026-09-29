@@ -3,15 +3,32 @@ using GameTranslatorOverlay.Core.Glossary;
 namespace GameTranslatorOverlay.Core.Translation;
 
 /// <summary>
-/// Wskazówki dla dostawców, którzy potrafią je wykorzystać (modele językowe): nazwa gry
-/// z aktywnego profilu i terminy słownika występujące w tłumaczonych tekstach.
-/// Nie zawiera obrazów ani tekstów spoza tłumaczonej partii.
+/// Wskazówki dla dostawców, którzy potrafią je wykorzystać: nazwa gry z aktywnego profilu,
+/// terminy słownika występujące w tłumaczonych tekstach oraz ostatnie linie wysłane
+/// wcześniej do tego samego dostawcy. Nie zawiera obrazów ani tekstu, który nie opuścił
+/// już wcześniej komputera.
 /// </summary>
 public sealed record TranslationContext(string? GameName, IReadOnlyList<GlossaryTerm> Terms)
 {
     public static TranslationContext Empty { get; } = new(null, []);
 
-    public bool IsEmpty => string.IsNullOrWhiteSpace(GameName) && Terms.Count == 0;
+    /// <summary>
+    /// Wcześniejsze teksty (od najstarszego), już przetłumaczone przez tego dostawcę w tej
+    /// sesji — np. poprzednie kwestie dialogu. Tylko kontekst: nie są tłumaczone ponownie.
+    /// </summary>
+    public IReadOnlyList<string> RecentTexts { get; init; } = [];
+
+    public bool IsEmpty => string.IsNullOrWhiteSpace(GameName) && Terms.Count == 0 && RecentTexts.Count == 0;
+}
+
+/// <summary>
+/// Dostawca, który potrafi zawczasu nawiązać połączenie (DNS, TCP, TLS), zanim pojawi się
+/// tekst do tłumaczenia. Rozgrzewka nie wysyła klucza ani treści i nigdy nie rzuca wyjątku
+/// poza anulowaniem.
+/// </summary>
+public interface IWarmableTranslationProvider
+{
+    Task WarmUpAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

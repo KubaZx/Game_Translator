@@ -1,7 +1,7 @@
 # Testy i pomiary — GameTranslatorOverlay
 
-Stan sprawdzony 29 września 2026: **493 testy xUnit** — **361 Core** i
-**132 Infrastructure** — oraz kompilacja całego rozwiązania (z aplikacją WPF) bez ostrzeżeń.
+Stan sprawdzony 29 września 2026: **509 testów xUnit** — **363 Core** i
+**146 Infrastructure** — oraz kompilacja całego rozwiązania (z aplikacją WPF) bez ostrzeżeń.
 Ta runda była weryfikowana na Linuksie (.NET 10 SDK, `-p:EnableWindowsTargeting=true`):
 testy DPAPI i smoke test Windows OCR wymagają Windows i nie były w niej uruchamiane.
 Poprzedni pełny przebieg na Windows (15 września 2026): 371 testów i smoke test z Mockiem.
@@ -19,7 +19,7 @@ fizycznej nakładki przez użytkownika. Wynik jednej grupy nie zastępuje pozost
 | Sondy sesji | `tools/GameTranslatorOverlay.LiveDiag`, `tools/GameTranslatorOverlay.SceneReplay` | lokalny pulpit Windows, własne okno lub wskazana gra, Mock |
 | Ocena wizualna | [MANUAL_TESTING.md](MANUAL_TESTING.md) | użytkownik, konkretna gra, DPI, monitory, układ i skróty |
 
-CI uruchamia projekty xUnit na `windows-latest`. Smoke test i sondy pulpitu
+CI uruchamia projekty xUnit na `windows-latest` oraz szybki przebieg na `ubuntu-latest` (kompilacja z `-p:EnableWindowsTargeting=true`). Smoke test i sondy pulpitu
 wykonuje się osobno; nie są częścią standardowego `dotnet test`.
 
 ## Co obejmuje Core.Tests

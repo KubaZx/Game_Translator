@@ -21,7 +21,7 @@ public sealed class GoogleTranslateProvider(
     HttpClient httpClient,
     Func<string?> apiKeyAccessor,
     GoogleTranslateOptions? options = null,
-    ILogger<GoogleTranslateProvider>? logger = null) : ITranslationProvider
+    ILogger<GoogleTranslateProvider>? logger = null) : ITranslationProvider, IWarmableTranslationProvider
 {
     public const string ProviderName = "Google";
     private const string Endpoint = "https://translation.googleapis.com/language/translate/v2";
@@ -79,6 +79,11 @@ public sealed class GoogleTranslateProvider(
         }
         return results;
     }
+
+    public Task WarmUpAsync(CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(apiKeyAccessor())
+            ? Task.CompletedTask
+            : ProviderHttp.WarmUpAsync(httpClient, new Uri("https://translation.googleapis.com/"), cancellationToken);
 
     private static bool IsDailyQuota(ProviderHttpFailure failure) =>
         failure.BodyContains("dailyLimitExceeded") || failure.BodyContains("Daily Limit") || failure.BodyContains("quotaExceeded");

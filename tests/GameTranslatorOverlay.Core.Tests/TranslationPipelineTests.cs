@@ -308,6 +308,40 @@ public class TranslationPipelineTests
     }
 
     [Fact]
+    public async Task Ostatnie_wyslane_linie_trafiaja_jako_kontekst_kolejnej_partii()
+    {
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry("From cache", "From cache", "en", "pl", "Z cache", "Contextual"));
+        var provider = new ContextualProvider();
+        var pipeline = new TranslationPipeline(
+            new GlossaryService(), cache, provider, new UsageTracker(), new TranslationPipelineOptions());
+
+        await pipeline.TranslateAsync(["Where were you?"], "en", "pl");
+        await pipeline.TranslateAsync(["From cache", "I'm ready."], "en", "pl");
+        await pipeline.TranslateAsync(["I'm ready.", "Let's go."], "en", "pl");
+
+        Assert.Empty(provider.Contexts[0].RecentTexts);
+        // Tekst z cache nie był wysłany — nie trafia do kontekstu.
+        Assert.Equal(["Where were you?"], provider.Contexts[1].RecentTexts);
+        // „I'm ready.” pochodzi już z cache — do dostawcy idzie tylko „Let's go.”,
+        // a poprzednia kwestia jest dla niej kontekstem.
+        Assert.Equal(["Where were you?", "I'm ready."], provider.Contexts[2].RecentTexts);
+    }
+
+    [Fact]
+    public async Task Kontekst_ostatnich_linii_ma_limit()
+    {
+        var provider = new ContextualProvider();
+        var pipeline = new TranslationPipeline(
+            new GlossaryService(), new InMemoryTranslationCache(), provider, new UsageTracker(),
+            new TranslationPipelineOptions { MaxRecentContextTexts = 3 });
+
+        for (var i = 1; i <= 5; i++) await pipeline.TranslateAsync([$"Line {i}"], "en", "pl");
+
+        Assert.Equal(["Line 2", "Line 3", "Line 4"], provider.Contexts[^1].RecentTexts);
+    }
+
+    [Fact]
     public async Task Dostawca_kontekstowy_bez_profilu_i_terminow_dostaje_pusty_kontekst()
     {
         var provider = new ContextualProvider();
