@@ -9,6 +9,18 @@ public sealed class AppSettings
     public string SourceLanguage { get; set; } = "en";
     public string TargetLanguage { get; set; } = "pl";
     public string Provider { get; set; } = "DeepL";
+
+    /// <summary>Region zasobu Azure Translator (np. westeurope); puste = zasób globalny.</summary>
+    public string? AzureRegion { get; set; }
+
+    /// <summary>Adres bazowy serwera zgodnego z API OpenAI (np. http://localhost:11434/v1).</summary>
+    public string LlmEndpoint { get; set; } = Providers.LlmEndpoint.OpenAiDefault;
+
+    /// <summary>Nazwa modelu na serwerze LLM (np. nazwa modelu z Ollamy).</summary>
+    public string? LlmModel { get; set; }
+
+    /// <summary>Model Claude (Anthropic).</summary>
+    public string ClaudeModel { get; set; } = Providers.ClaudeTranslationProvider.DefaultModel;
     public string TranslateHotkey { get; set; } = "Ctrl+Shift+T";
     public string ToggleOverlayHotkey { get; set; } = "Ctrl+Shift+H";
     public bool CacheOnlyMode { get; set; }

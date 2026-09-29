@@ -46,9 +46,13 @@ public sealed class TranslationOrchestrator(
     DeepLTranslationProvider deepLProvider,
     IOcrProvider ocrProvider,
     UsageTracker usage,
-    ILoggerFactory loggerFactory)
+    ILoggerFactory loggerFactory,
+    IEnumerable<ITranslationProvider>? additionalProviders = null)
 {
     private readonly ILogger _logger = loggerFactory.CreateLogger<TranslationOrchestrator>();
+
+    /// <summary>Mock i DeepL zawsze; pozostali dostawcy (Azure, Google, LLM, Claude) z DI.</summary>
+    private readonly IReadOnlyList<ITranslationProvider> _providers = [mockProvider, deepLProvider, .. additionalProviders ?? []];
 
     /// <summary>
     /// Niemutowalna para pipeline + token jego epoki, publikowana JEDNYM zapisem —
@@ -68,10 +72,10 @@ public sealed class TranslationOrchestrator(
     public IReadOnlyList<string> ContentWarnings { get; private set; } = [];
     public GameProfile? ActiveProfile { get; private set; }
 
+    /// <summary>Dostawca wybrany w ustawieniach; nieznana nazwa oznacza DeepL (domyślny).</summary>
     public ITranslationProvider ActiveProvider =>
-        settings.Provider.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase)
-            ? mockProvider
-            : deepLProvider;
+        _providers.FirstOrDefault(p => p.Name.Equals(settings.Provider?.Trim(), StringComparison.OrdinalIgnoreCase))
+        ?? deepLProvider;
 
     public ITranslationCache CurrentCache => _privateCache is { } inMemory ? inMemory : persistentCache;
 
@@ -135,6 +139,7 @@ public sealed class TranslationOrchestrator(
             {
                 CacheOnlyMode = settings.CacheOnlyMode,
                 GameProfile = ActiveProfile?.Id ?? string.Empty,
+                GameName = ActiveProfile?.Name,
             },
             loggerFactory.CreateLogger<TranslationPipeline>(),
             cacheWriteCancellationToken: _pipelineEpoch.Token);

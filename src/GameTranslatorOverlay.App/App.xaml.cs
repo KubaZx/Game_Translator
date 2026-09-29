@@ -22,11 +22,6 @@ using Serilog;
 
 namespace GameTranslatorOverlay.App;
 
-internal static class SecretNames
-{
-    public const string DeepLApiKey = "deepl-api-key";
-}
-
 public partial class App : Application
 {
     private IHost? _host;
@@ -121,13 +116,43 @@ public partial class App : Application
         services.AddSingleton(static _ => new HttpClient());
         services.AddSingleton(static sp => new DeepLTranslationProvider(
             sp.GetRequiredService<HttpClient>(),
-            () => sp.GetRequiredService<ISecretsStore>().Load(SecretNames.DeepLApiKey),
+            ApiKey(sp, TranslationProviderCatalog.DeepL),
             logger: sp.GetRequiredService<ILogger<DeepLTranslationProvider>>()));
+        services.AddSingleton(static sp => new AzureTranslatorProvider(
+            sp.GetRequiredService<HttpClient>(),
+            ApiKey(sp, TranslationProviderCatalog.Azure),
+            () => sp.GetRequiredService<AppSettings>().AzureRegion,
+            logger: sp.GetRequiredService<ILogger<AzureTranslatorProvider>>()));
+        services.AddSingleton(static sp => new GoogleTranslateProvider(
+            sp.GetRequiredService<HttpClient>(),
+            ApiKey(sp, TranslationProviderCatalog.Google),
+            logger: sp.GetRequiredService<ILogger<GoogleTranslateProvider>>()));
+        services.AddSingleton(static sp => new OpenAiCompatibleTranslationProvider(
+            sp.GetRequiredService<HttpClient>(),
+            ApiKey(sp, TranslationProviderCatalog.Llm),
+            () => sp.GetRequiredService<AppSettings>().LlmEndpoint,
+            () => sp.GetRequiredService<AppSettings>().LlmModel,
+            logger: sp.GetRequiredService<ILogger<OpenAiCompatibleTranslationProvider>>()));
+        // Osobny HttpClient: SDK Anthropic konfiguruje klienta po swojemu — nie dzielimy
+        // go z pozostałymi dostawcami.
+        services.AddSingleton(static sp => new ClaudeTranslationProvider(
+            new HttpClient(),
+            ApiKey(sp, TranslationProviderCatalog.Claude),
+            () => sp.GetRequiredService<AppSettings>().ClaudeModel,
+            logger: sp.GetRequiredService<ILogger<ClaudeTranslationProvider>>()));
+        services.AddSingleton<ITranslationProvider>(static sp => sp.GetRequiredService<AzureTranslatorProvider>());
+        services.AddSingleton<ITranslationProvider>(static sp => sp.GetRequiredService<GoogleTranslateProvider>());
+        services.AddSingleton<ITranslationProvider>(static sp => sp.GetRequiredService<OpenAiCompatibleTranslationProvider>());
+        services.AddSingleton<ITranslationProvider>(static sp => sp.GetRequiredService<ClaudeTranslationProvider>());
         services.AddSingleton<IOcrProvider, WindowsOcrProvider>();
         services.AddSingleton<TranslationOrchestrator>();
         services.AddSingleton<HotkeyManager>();
         services.AddSingleton<MainWindow>();
     }
+
+    /// <summary>Klucz czytany z DPAPI przy każdym zapytaniu — zmiana klucza w UI działa od razu.</summary>
+    private static Func<string?> ApiKey(IServiceProvider sp, TranslationProviderInfo provider) =>
+        () => sp.GetRequiredService<ISecretsStore>().Load(provider.SecretName!);
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
