@@ -70,7 +70,7 @@ public sealed class InMemoryTranslationCache : ITranslationCache
                 new CachedTranslation(
                     Interlocked.Increment(ref _nextId), entry.SourceText, entry.NormalizedText,
                     entry.TranslatedText, entry.Provider, entry.GameProfile,
-                    entry.IsManual, entry.IsApproved, now, now, 1),
+                    entry.IsManual, entry.IsApproved, now, now, 1) { Context = entry.Context },
                 entry.SourceLanguage, entry.TargetLanguage),
             (_, existing) =>
             {
@@ -84,6 +84,7 @@ public sealed class InMemoryTranslationCache : ITranslationCache
                         IsManual = entry.IsManual,
                         IsApproved = entry.IsApproved,
                         LastUsedAt = now,
+                        Context = entry.Context,
                     },
                 };
             });

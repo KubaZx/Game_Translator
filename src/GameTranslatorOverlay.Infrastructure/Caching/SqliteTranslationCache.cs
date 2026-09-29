@@ -167,7 +167,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
             using var command = connection.CreateCommand();
             command.CommandText = """
                 SELECT id, source_text, normalized_text, translated_text, provider, game_profile,
-                       is_manual, is_approved, created_at, last_used_at, use_count
+                       is_manual, is_approved, created_at, last_used_at, use_count, context
                 FROM translations
                 WHERE text_hash = $hash AND source_lang = $src AND target_lang = $tgt
                   AND game_profile IN ($profile, '')
@@ -194,7 +194,10 @@ public sealed class SqliteTranslationCache : ITranslationCache
                 IsApproved: reader.GetInt64(7) != 0,
                 CreatedAt: ParseTimestamp(reader.GetString(8)),
                 LastUsedAt: ParseTimestamp(reader.GetString(9)),
-                UseCount: reader.GetInt64(10));
+                UseCount: reader.GetInt64(10))
+            {
+                Context = reader.IsDBNull(11) ? null : reader.GetString(11),
+            };
             reader.Close();
 
             // Liczniki niezapisane jeszcze w bazie wliczamy do zwracanej wartości.
@@ -383,6 +386,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
             ON CONFLICT (text_hash, source_lang, target_lang, game_profile) DO UPDATE SET
                 translated_text = excluded.translated_text,
                 provider = excluded.provider,
+                context = excluded.context,
                 is_manual = excluded.is_manual,
                 is_approved = excluded.is_approved,
                 last_used_at = excluded.last_used_at

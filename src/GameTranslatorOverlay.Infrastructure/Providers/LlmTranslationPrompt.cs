@@ -53,6 +53,8 @@ public static partial class LlmTranslationPrompt
         builder.AppendLine($"- Return exactly one {target} translation per input string, in the same order.");
         builder.AppendLine("- Keep numbers, symbols (+, %, /, :), placeholders and line breaks as they are.");
         builder.AppendLine($"- Write natural, concise {target}, as in a professional game localization. Keep short labels short.");
+        builder.AppendLine("- Address the player informally, as game localizations do, unless the text is clearly formal.");
+        builder.AppendLine("- Keep the gender of speakers and addressees consistent with the previous lines.");
         builder.AppendLine("- Leave names, codes and strings that need no translation unchanged.");
         builder.AppendLine("- Add no notes, explanations or quotes.");
 

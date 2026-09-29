@@ -213,6 +213,19 @@ public sealed class SqliteTranslationCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task Znacznik_formatu_wpisu_jest_zapisywany_i_nadpisywany()
+    {
+        await _cache.StoreAsync(Entry("Hello", "stare"));
+        Assert.Null((await _cache.LookupAsync("Hello", "en", "pl", ""))!.Context);
+
+        await _cache.StoreAsync(Entry("Hello", "nowe") with { Context = "reflow-1" });
+
+        var hit = await new SqliteTranslationCache(_databasePath).LookupAsync("Hello", "en", "pl", "");
+        Assert.Equal("reflow-1", hit!.Context);
+        Assert.Equal("nowe", hit.TranslatedText);
+    }
+
+    [Fact]
     public async Task Eksport_i_import_wykonuja_roundtrip_bez_duplikatow()
     {
         await _cache.StoreAsync(Entry("Hello", "Cześć"));

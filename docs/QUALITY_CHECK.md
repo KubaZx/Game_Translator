@@ -61,6 +61,10 @@ Przetłumacz każdy ręcznie (Ctrl+Shift+T) u 2–3 dostawców. Oceń 1–5 (5 =
 Kontekst dialogu: przy kilku kolejnych kwestiach tej samej postaci sprawdź, czy rodzaj
 gramatyczny jest spójny (DeepL i modele dostają poprzednie linie jako kontekst).
 
+Zawinięte zdania: przy dialogu lub opisie na 2–3 wiersze sprawdź, czy tłumaczenie jest jednym
+poprawnym zdaniem rozłożonym na wiersze (a nie osobno przetłumaczonymi kawałkami) i czy
+nakładka nadal pasuje do pola oryginału. Zwracanie się do gracza powinno być w formie „ty”.
+
 ## 5. Co odesłać
 
 - Tabele z wynikami (można zdjęciem ekranu albo wklejone jako tekst).

@@ -11,7 +11,11 @@ public sealed record CachedTranslation(
     bool IsApproved,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastUsedAt,
-    long UseCount);
+    long UseCount)
+{
+    /// <summary>Znacznik formatu/kontekstu wpisu (np. <c>reflow-1</c>); null we wpisach sprzed jego wprowadzenia.</summary>
+    public string? Context { get; init; }
+}
 
 public sealed record NewCacheEntry(
     string SourceText,
