@@ -25,6 +25,26 @@ i pokazuje polską wersję w przezroczystej nakładce nad grą. Klikanie przez n
 
 Kolejność wyboru tłumaczenia: **ręczna poprawka → słownik → cache → dostawca**.
 
+## Jak szybko reaguje
+
+| Sytuacja | Czas |
+|---|---:|
+| Przechwycenie klatki gry (PrintWindow, PoE2) | 25–48 ms |
+| Sprawdzanie zmian na ekranie w live | 6× na sekundę (co ~167 ms) |
+| Znany tekst (cache / słownik): od pojawienia się do gotowego napisu | ~0,3–0,45 s |
+| Odczyt 20 napisów z cache | ~0,25 ms na klatkę (było 10–13 ms) |
+| Nowy tekst (pierwszy raz) | ~0,3–0,5 s + czas odpowiedzi dostawcy |
+| Nowy tekst przy dostawcy odpowiadającym 2 s | ~2,3–2,5 s (było do 4,1 s) |
+| Zniknięcie napisu, gdy tekst w grze się zmienił | 16–95 ms (najwyżej ~156 ms) |
+| Zniknięcie napisu przykrytego w grze panelem | 0,29 s (było 2,86 s) |
+| Najdłuższa pauza OCR przy ciągłym ruchu kamery | 2,5 s |
+| Pełne ponowne sprawdzenie nieruchomego ekranu | co 4 s |
+
+Pomiary z lokalnych sond (własne okno testowe, prawdziwy Windows OCR, Mock zamiast
+prawdziwego dostawcy). Mierzą moment gotowości napisu w aplikacji, nie rysowanie na ekranie.
+Czas odpowiedzi DeepL i innych dostawców nie był mierzony. Zależy od sieci i długości tekstu.
+Szczegóły: [ROADMAP.md](docs/ROADMAP.md).
+
 ## Szybki start
 
 1. Pobierz zip z [Releases](https://github.com/KubaZx/Game_Translator/releases), rozpakuj,
