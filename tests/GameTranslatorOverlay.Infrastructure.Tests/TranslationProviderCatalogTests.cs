@@ -57,6 +57,7 @@ public sealed class TranslationProviderCatalogTests : IDisposable
             AzureRegion = "westeurope",
             LlmEndpoint = "http://localhost:11434/v1",
             LlmModel = "qwen2.5:7b",
+            LlmKeyHost = "localhost:11434",
             ClaudeModel = "claude-sonnet-5-5",
         });
 
@@ -66,6 +67,7 @@ public sealed class TranslationProviderCatalogTests : IDisposable
         Assert.Equal("westeurope", loaded.AzureRegion);
         Assert.Equal("http://localhost:11434/v1", loaded.LlmEndpoint);
         Assert.Equal("qwen2.5:7b", loaded.LlmModel);
+        Assert.Equal("localhost:11434", loaded.LlmKeyHost);
         Assert.Equal("claude-sonnet-5-5", loaded.ClaudeModel);
     }
 

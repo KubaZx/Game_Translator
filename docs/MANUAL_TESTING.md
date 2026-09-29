@@ -609,12 +609,17 @@ bez uruchomienia okna — wygląd i zachowanie pól wymagają tej próby.
 3. Dla Modelu językowego kliknij kolejno OpenAI / Ollama / LM Studio; wpisz `http://example.com/v1`.
 4. Zapisz klucz dla Azure, przełącz na DeepL i z powrotem.
 5. Przejdź tabulatorem przez pola bez zmieniania wartości przy działającym live.
+6. Dla Modelu językowego zapisz klucz przy adresie OpenAI, potem kliknij Ollama.
+7. W polu modelu Claude wpisz ręcznie `claude-opus-4-8` (bez wychodzenia z pola), potem kliknij gdzie indziej.
 
 **Oczekiwany wynik:** nagłówek sekcji pokazuje wybranego dostawcę; widoczne są tylko jego
 pola (region / adres i model / model Claude); dla Mock pole klucza jest wyłączone. Zły region
 wraca do poprzedniej wartości z ostrzeżeniem w statusie; adres `http://` zdalnego serwera daje
 ostrzeżenie o HTTPS. Klucze są osobne: klucz Azure nie zastępuje klucza DeepL. Samo przejście
-przez pola nie zapisuje ustawień i nie przerywa tłumaczeń live. Ciemny motyw pozostaje czytelny.
+przez pola nie zapisuje ustawień i nie przerywa tłumaczeń live. Po zmianie adresu na Ollamę
+status mówi, że klucz należy do api.openai.com i nie jest wysyłany. Model Claude zapisuje się
+dopiero po wyjściu z pola (status „Ustawienia zapisane” pojawia się raz, z pełną nazwą).
+Ciemny motyw pozostaje czytelny.
 
 ## M24 — Lokalny model językowy (Ollama / LM Studio)
 

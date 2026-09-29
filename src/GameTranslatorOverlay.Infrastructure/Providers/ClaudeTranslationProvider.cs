@@ -23,6 +23,7 @@ public sealed class ClaudeTranslationProvider(
 {
     public const string ProviderName = "Claude";
     public const string DefaultModel = "claude-opus-5-5";
+    public const string ApiBaseUrl = "https://api.anthropic.com";
 
     private const string DefaultFallbacksBeta = "server-side-fallback-2026-07-01";
 
@@ -88,8 +89,15 @@ public sealed class ClaudeTranslationProvider(
         var created = new ClientForKey(apiKey, new AnthropicClient
         {
             HttpClient = httpClient,
+            // Adres i dane logowania ustawiamy jawnie: SDK czytałby inaczej ANTHROPIC_BASE_URL
+            // i ANTHROPIC_AUTH_TOKEN ze środowiska — klucz i tekst z ekranu mogłyby trafić
+            // pod obcy adres (także przez zwykłe http) razem z niezwiązanym tokenem.
+            BaseUrl = ApiBaseUrl,
             ApiKey = apiKey,
-            MaxRetries = Options.MaxRetries,
+            AuthToken = null,
+            // SDK ponawia także timeouty; przy 60 s na próbę więcej niż jedna powtórka
+            // blokowałaby miejsce tłumaczenia w trybie live na minuty.
+            MaxRetries = Math.Min(Options.MaxRetries, 1),
             Timeout = Options.RequestTimeout,
         });
         Volatile.Write(ref _client, created);
@@ -127,32 +135,33 @@ public sealed class ClaudeTranslationProvider(
                 OutputConfig = outputConfig,
             };
 
-        BetaMessage response;
         try
         {
-            response = await client.Beta.Messages.Create(parameters, cancellationToken).ConfigureAwait(false);
+            var response = await client.Beta.Messages.Create(parameters, cancellationToken).ConfigureAwait(false);
+
+            // SDK sprawdza pola odpowiedzi leniwie — odczyt też może rzucić (np. portal Wi-Fi
+            // zwrócił HTML z kodem 200), więc zostaje w tym samym bloku mapowania wyjątków.
+            if (response.StopReason == "refusal")
+            {
+                throw new TranslationException(TranslationFailureKind.ContentRefused,
+                    "Claude odmówił przetłumaczenia tekstu (filtr bezpieczeństwa).");
+            }
+
+            // Po fallbacku odpowiedź modelu zastępczego jest ostatnim blokiem tekstu.
+            string? text = null;
+            foreach (var block in response.Content)
+            {
+                if (block.TryPickText(out var textBlock))
+                {
+                    text = textBlock.Text;
+                }
+            }
+            return text;
         }
         catch (Exception ex) when (MapException(ex, cancellationToken) is { } mapped)
         {
             throw mapped;
         }
-
-        if (response.StopReason == "refusal")
-        {
-            throw new TranslationException(TranslationFailureKind.ContentRefused,
-                "Claude odmówił przetłumaczenia tekstu (filtr bezpieczeństwa).");
-        }
-
-        // Po fallbacku odpowiedź modelu zastępczego jest ostatnim blokiem tekstu.
-        string? text = null;
-        foreach (var block in response.Content)
-        {
-            if (block.TryPickText(out var textBlock))
-            {
-                text = textBlock.Text;
-            }
-        }
-        return text;
     }
 
     /// <summary>
@@ -187,7 +196,7 @@ public sealed class ClaudeTranslationProvider(
                 new(TranslationFailureKind.Timeout, "Claude nie odpowiedział w wyznaczonym czasie."),
             AnthropicIOException or HttpRequestException =>
                 new(TranslationFailureKind.NetworkError, "Nie udało się połączyć z Anthropic. Sprawdź połączenie z internetem.", ex),
-            AnthropicInvalidDataException => new(TranslationFailureKind.NetworkError,
+            AnthropicInvalidDataException or JsonException => new(TranslationFailureKind.NetworkError,
                 "Anthropic zwrócił odpowiedź w nieoczekiwanym formacie (przechwycenie przez portal/proxy sieci?)."),
             FormatException => new(TranslationFailureKind.InvalidConfiguration,
                 "Klucz API Anthropic zawiera niedozwolone znaki."),

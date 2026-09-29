@@ -19,6 +19,12 @@ public sealed class AppSettings
     /// <summary>Nazwa modelu na serwerze LLM (np. nazwa modelu z Ollamy).</summary>
     public string? LlmModel { get; set; }
 
+    /// <summary>
+    /// Serwer (host[:port]), dla którego zapisano klucz LLM. Klucz nie jest wysyłany
+    /// pod inny adres — zmiana serwera wymaga ponownego zapisania klucza.
+    /// </summary>
+    public string? LlmKeyHost { get; set; }
+
     /// <summary>Model Claude (Anthropic).</summary>
     public string ClaudeModel { get; set; } = Providers.ClaudeTranslationProvider.DefaultModel;
     public string TranslateHotkey { get; set; } = "Ctrl+Shift+T";

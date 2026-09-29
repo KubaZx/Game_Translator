@@ -67,6 +67,31 @@ public class LlmTranslationPromptTests
     }
 
     [Fact]
+    public void ParseTranslations_nie_bierze_echa_wejscia_za_tlumaczenia()
+    {
+        Assert.Equal(["Cześć", "Świat"], LlmTranslationPrompt.ParseTranslations(
+            """{"texts": ["Hello", "World"], "translations": ["Cześć", "Świat"]}""", 2));
+        Assert.Null(LlmTranslationPrompt.ParseTranslations("""{"texts": ["Hello", "World"]}""", 2));
+    }
+
+    [Theory]
+    [InlineData("""{"translations": [{"text": "Cześć"}, {"text": "Świat"}]}""")]
+    [InlineData("""{"translations": ["Cześć", null]}""")]
+    [InlineData("""{"translations": ["Cześć", "  "]}""")]
+    [InlineData("""["Cześć", ["Świat"]]""")]
+    public void ParseTranslations_odrzuca_elementy_niebedace_tekstem_lub_puste(string content)
+    {
+        Assert.Null(LlmTranslationPrompt.ParseTranslations(content, 2));
+    }
+
+    [Fact]
+    public void ParseTranslations_nawias_w_zwyklym_zdaniu_nie_jest_odpowiedzia_JSON()
+    {
+        Assert.Equal(["Wymagany poziom: [12]"], LlmTranslationPrompt.ParseTranslations("Wymagany poziom: [12]", 1));
+        Assert.Equal(["Zdobądź {0} złota"], LlmTranslationPrompt.ParseTranslations("Zdobądź {0} złota", 1));
+    }
+
+    [Fact]
     public void ParseTranslations_nie_przyjmuje_uszkodzonego_JSON_jako_tlumaczenia()
     {
         Assert.Null(LlmTranslationPrompt.ParseTranslations("""{"translations": ["Cze""", 1));

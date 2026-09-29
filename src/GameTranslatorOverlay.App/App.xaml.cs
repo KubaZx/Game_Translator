@@ -130,6 +130,7 @@ public partial class App : Application
         services.AddSingleton(static sp => new OpenAiCompatibleTranslationProvider(
             sp.GetRequiredService<HttpClient>(),
             ApiKey(sp, TranslationProviderCatalog.Llm),
+            () => sp.GetRequiredService<AppSettings>().LlmKeyHost,
             () => sp.GetRequiredService<AppSettings>().LlmEndpoint,
             () => sp.GetRequiredService<AppSettings>().LlmModel,
             logger: sp.GetRequiredService<ILogger<OpenAiCompatibleTranslationProvider>>()));

@@ -174,7 +174,13 @@ lokalne Ollama (`http://localhost:11434/v1`) i LM Studio (`http://localhost:1234
 - Adres bazowy jest normalizowany (wklejony `…/chat/completions` lub `…/models` jest obcinany).
 - **HTTPS jest wymagany**; zwykłe `http://` tylko dla serwera na tym komputerze (loopback).
   Adres z loginem, parametrami lub fragmentem jest odrzucany — klucz należy do pola klucza.
-- Klucz opcjonalny (`Authorization: Bearer`), bo serwery lokalne go nie wymagają.
+- Klucz opcjonalny (`Authorization: Bearer`), bo serwery lokalne go nie wymagają. Klucz jest
+  przypisany do serwera (host[:port]), dla którego go zapisano (`llmKeyHost`), i nie jest
+  wysyłany pod inny adres; serwer wymagający klucza dostaje wtedy wskazówkę „zapisz klucz
+  ponownie dla tego adresu”.
+- Odpowiedź modelu jest przyjmowana tylko w jednoznacznej formie (cała odpowiedź, blok
+  ```json albo obiekt z kluczem `translations`); echo wejścia (`texts`), elementy niebędące
+  tekstem i puste tłumaczenia unieważniają odpowiedź, zanim trafi do cache.
 - Aplikacja nie wysyła `temperature`, `max_tokens` ani `response_format` — część modeli
   i serwerów odrzuca te parametry; format wymusza prompt i tolerancyjny parser.
 - 401/403 → klucz; 402 i 429 `insufficient_quota` → brak środków (bez ponawiania);
@@ -202,6 +208,11 @@ Claude przez **oficjalne SDK Anthropic dla C#** (pakiet `Anthropic`), beta Messa
 - Wyjątki SDK: 401/403 → klucz, 404 → `ModelNotFound`, 429 → rate limit, 5xx/529 →
   niedostępność, 400 „credit balance” / 402 → brak środków, 413 → tekst zbyt długi.
 - SDK dostaje osobny `HttpClient`; klient SDK jest tworzony ponownie tylko po zmianie klucza.
+  Adres `https://api.anthropic.com` i brak tokenu są ustawiane jawnie — zmienne
+  `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` ze środowiska nie przekierują klucza.
+- SDK ponawia także timeouty, więc aplikacja ogranicza je do jednej powtórki (60 s na próbę).
+- Odpowiedź SDK jest czytana w tym samym bloku mapowania błędów: strona portalu Wi-Fi albo
+  niepełny JSON dają błąd sieci zamiast surowego wyjątku.
 
 ## MockTranslationProvider
 

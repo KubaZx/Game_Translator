@@ -21,6 +21,9 @@ osobnego wydania ani archiwum 0.2.2.
 - Claude: odpowiedź wymuszona schematem JSON, niski `effort` dla krótkich tekstów oraz
   serwerowy fallback przy odmowie filtra bezpieczeństwa (dla Opus 5.5/5, Sonnet 5.5, Fable 5.1).
 - Adres zdalnego serwera LLM musi używać HTTPS; zwykłe HTTP tylko dla `localhost`.
+  Klucz LLM jest przypisany do serwera, dla którego go zapisano, i nie wychodzi pod inny adres.
+- Odpowiedź modelu z echem wejścia, pustymi lub nietekstowymi elementami jest odrzucana
+  przed zapisem do cache; klient Claude ignoruje `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`.
 - Nowe czytelne błędy: nieznany model, odmowa modelu, niepełna konfiguracja dostawcy.
 
 ### Naprawione — backlog audytu #3 (2026-09-29)
@@ -39,7 +42,7 @@ osobnego wydania ani archiwum 0.2.2.
 
 - Wspólna pętla HTTP dostawców (`ProviderHttp`): timeout, ograniczony retry, mapowanie
   błędów, obsługa odpowiedzi portalu/proxy; DeepL przeniesiony bez zmiany zachowania.
-- Testy: 482 (361 Core + 121 Infrastructure), m.in. dostawcy na fałszywym HTTP bez sieci.
+- Testy: 493 (361 Core + 132 Infrastructure), m.in. dostawcy na fałszywym HTTP bez sieci.
 - Nowa zależność: `Anthropic` (MIT) — w THIRD-PARTY-NOTICES.
 
 ### Dla gracza

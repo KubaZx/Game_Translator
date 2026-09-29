@@ -141,9 +141,11 @@ internal static class ProviderHttp
         }
         catch (TranslationException ex)
         {
-            // Dla timeoutu i braku sieci techniczny komunikat jest konkretniejszy
-            // (nazwa dostawcy, limit czasu); pozostałe rodzaje mają gotowy tekst dla gracza.
+            // Dla tych rodzajów komunikat jest konkretniejszy (nazwa dostawcy, limit czasu,
+            // brakujące pole, nazwa modelu) i z założenia nie zawiera sekretów; pozostałe
+            // rodzaje mają gotowy tekst dla gracza.
             var message = ex.Kind is TranslationFailureKind.Timeout or TranslationFailureKind.NetworkError
+                    or TranslationFailureKind.InvalidConfiguration or TranslationFailureKind.ModelNotFound
                 ? ex.Message
                 : ex.UserFriendlyMessage;
             return new ProviderStatus(false, message);

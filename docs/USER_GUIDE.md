@@ -54,7 +54,9 @@ tylko dla tekstów, które w całości są terminem.
 3. Klucz zostaw pusty i kliknij **Testuj** — zobaczysz próbne tłumaczenie.
 
 Adres `http://localhost…` oznacza, że tekst nie opuszcza komputera; aplikacja pokazuje to
-pod polem klucza. Adres zdalnego serwera musi zaczynać się od `https://`. Mały model
+pod polem klucza. Adres zdalnego serwera musi zaczynać się od `https://`. Klucz zapisany
+dla jednego serwera (np. OpenAI) nie jest wysyłany do innego — po zmianie adresu zapisz
+klucz ponownie. Mały model
 lokalny tłumaczy wolniej i słabiej niż usługi w chmurze — sprawdza się najlepiej
 w trybie ręcznym i przy dialogach.
 

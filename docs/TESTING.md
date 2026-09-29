@@ -1,7 +1,7 @@
 # Testy i pomiary — GameTranslatorOverlay
 
-Stan sprawdzony 29 września 2026: **482 testy xUnit** — **361 Core** i
-**121 Infrastructure** — oraz kompilacja całego rozwiązania (z aplikacją WPF) bez ostrzeżeń.
+Stan sprawdzony 29 września 2026: **493 testy xUnit** — **361 Core** i
+**132 Infrastructure** — oraz kompilacja całego rozwiązania (z aplikacją WPF) bez ostrzeżeń.
 Ta runda była weryfikowana na Linuksie (.NET 10 SDK, `-p:EnableWindowsTargeting=true`):
 testy DPAPI i smoke test Windows OCR wymagają Windows i nie były w niej uruchamiane.
 Poprzedni pełny przebieg na Windows (15 września 2026): 371 testów i smoke test z Mockiem.

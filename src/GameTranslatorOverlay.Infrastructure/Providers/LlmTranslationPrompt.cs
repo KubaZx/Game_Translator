@@ -87,16 +87,23 @@ public static partial class LlmTranslationPrompt
     {
         if (string.IsNullOrWhiteSpace(content) || expectedCount <= 0) return null;
 
+        // Źle odczytane tłumaczenie trafiłoby na stałe do cache, więc przyjmujemy tylko
+        // jednoznaczne formy: cała odpowiedź jako JSON, blok ```json albo obiekt z kluczem
+        // „translations” wycięty z tekstu. Nawias […] w zwykłym zdaniu nie jest odpowiedzią.
         var cleaned = StripReasoning(content).Trim();
-        var parsed = TryParseJson(cleaned) ?? TryParseJson(ExtractJsonSpan(cleaned));
-        if (parsed is { } list && list.Count == expectedCount)
+        var fenced = CodeFenceRegex().Match(cleaned) is { Success: true } fence ? fence.Groups[1].Value : null;
+        var parsed = TryParseJson(cleaned, allowBareArray: true)
+            ?? TryParseJson(fenced, allowBareArray: true)
+            ?? TryParseJson(ExtractObjectSpan(cleaned), allowBareArray: false);
+
+        if (parsed is { Count: var count } list && count == expectedCount)
         {
             return list;
         }
 
         // Pojedynczy tekst: małe modele lokalne często ignorują format i odpowiadają
         // samym tłumaczeniem. Przyjmujemy je, o ile nie wygląda na (uszkodzony) JSON.
-        if (expectedCount == 1 && parsed is null)
+        if (expectedCount == 1 && parsed is null && fenced is null)
         {
             var plain = cleaned.Trim().Trim('"', '„', '”', '“').Trim();
             if (plain.Length > 0 && plain[0] is not ('{' or '['))
@@ -108,30 +115,39 @@ public static partial class LlmTranslationPrompt
         return null;
     }
 
-    private static List<string>? TryParseJson(string? candidate)
+    /// <summary>
+    /// Lista tłumaczeń z JSON-a albo null. Element niebędący tekstem (obiekt, null, tablica)
+    /// lub pusty tekst unieważnia całą odpowiedź — lepiej przetłumaczyć ponownie niż
+    /// zapisać do cache puste lub przesunięte tłumaczenia.
+    /// </summary>
+    private static List<string>? TryParseJson(string? candidate, bool allowBareArray)
     {
         if (string.IsNullOrWhiteSpace(candidate)) return null;
         try
         {
             using var document = JsonDocument.Parse(candidate);
             var root = document.RootElement;
-            var array = root.ValueKind switch
+            JsonElement array;
+            if (root.ValueKind == JsonValueKind.Array && allowBareArray)
             {
-                JsonValueKind.Array => root,
-                JsonValueKind.Object when TryGetTranslationsArray(root, out var found) => found,
-                _ => default,
-            };
-            if (array.ValueKind != JsonValueKind.Array) return null;
+                array = root;
+            }
+            else if (root.ValueKind != JsonValueKind.Object || !TryGetTranslationsArray(root, out array))
+            {
+                return null;
+            }
 
             var result = new List<string>();
             foreach (var item in array.EnumerateArray())
             {
-                result.Add(item.ValueKind switch
+                var text = item.ValueKind switch
                 {
-                    JsonValueKind.String => item.GetString() ?? string.Empty,
-                    JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => item.GetRawText(),
-                    _ => string.Empty,
-                });
+                    JsonValueKind.String => item.GetString(),
+                    JsonValueKind.Number => item.GetRawText(),
+                    _ => null,
+                };
+                if (string.IsNullOrWhiteSpace(text)) return null;
+                result.Add(text);
             }
             return result;
         }
@@ -141,14 +157,16 @@ public static partial class LlmTranslationPrompt
         }
     }
 
+    // Tylko klucze oznaczające wynik — echo wejścia („texts”) nigdy nie jest tłumaczeniem.
+    private static readonly string[] TranslationKeys = ["translations", "Translations", "translation", "result"];
+
     private static bool TryGetTranslationsArray(JsonElement root, out JsonElement array)
     {
-        foreach (var property in root.EnumerateObject())
+        foreach (var key in TranslationKeys)
         {
-            if (property.Value.ValueKind == JsonValueKind.Array
-                && property.Name is "translations" or "Translations" or "texts" or "result")
+            if (root.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.Array)
             {
-                array = property.Value;
+                array = value;
                 return true;
             }
         }
@@ -156,18 +174,11 @@ public static partial class LlmTranslationPrompt
         return false;
     }
 
-    private static string? ExtractJsonSpan(string text)
+    private static string? ExtractObjectSpan(string text)
     {
-        var fence = CodeFenceRegex().Match(text);
-        if (fence.Success) return fence.Groups[1].Value;
-
-        var objectStart = text.IndexOf('{');
-        var arrayStart = text.IndexOf('[');
-        var start = objectStart < 0 ? arrayStart : arrayStart < 0 ? objectStart : Math.Min(objectStart, arrayStart);
-        if (start < 0) return null;
-
-        var end = text.LastIndexOf(text[start] == '{' ? '}' : ']');
-        return end > start ? text[start..(end + 1)] : null;
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        return start >= 0 && end > start ? text[start..(end + 1)] : null;
     }
 
     private static string StripReasoning(string text) => ThinkBlockRegex().Replace(text, string.Empty);

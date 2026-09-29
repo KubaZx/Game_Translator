@@ -130,6 +130,47 @@ public class ClaudeTranslationProviderTests
     }
 
     [Fact]
+    public async Task Zmienne_srodowiskowe_SDK_nie_przekierowuja_klucza_pod_inny_adres()
+    {
+        var previousUrl = Environment.GetEnvironmentVariable("ANTHROPIC_BASE_URL");
+        var previousToken = Environment.GetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN");
+        try
+        {
+            Environment.SetEnvironmentVariable("ANTHROPIC_BASE_URL", "http://evil.example.com");
+            Environment.SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "obcy-token");
+            var handler = new FakeHttpHandler(static (request, _) => Task.FromResult(Echo(request)));
+            var provider = CreateProvider(handler);
+
+            await provider.TranslateBatchAsync(["Hello"], "en", "pl");
+
+            var request = Assert.Single(handler.Requests);
+            Assert.StartsWith("https://api.anthropic.com/", request.Url);
+            Assert.Null(request.Header("Authorization"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ANTHROPIC_BASE_URL", previousUrl);
+            Environment.SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", previousToken);
+        }
+    }
+
+    [Theory]
+    [InlineData("<html><body>Zaloguj się do sieci Wi-Fi</body></html>")]
+    [InlineData("""{"id":"msg_x","type":"message"}""")]
+    public async Task Odpowiedz_portalu_lub_niepelna_to_czytelny_blad_a_nie_surowy_wyjatek(string body)
+    {
+        var handler = new FakeHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+        }));
+        var provider = CreateProvider(handler);
+
+        var ex = await Assert.ThrowsAsync<TranslationException>(() => provider.TranslateBatchAsync(["Hello"], "en", "pl"));
+
+        Assert.Equal(TranslationFailureKind.NetworkError, ex.Kind);
+    }
+
+    [Fact]
     public async Task Brak_klucza_rzuca_MissingApiKey_bez_zapytania()
     {
         var handler = new FakeHttpHandler(static (request, _) => Task.FromResult(Echo(request)));

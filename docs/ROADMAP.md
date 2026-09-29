@@ -7,7 +7,7 @@ live: aktualność sceny i lokalnych opisów, nadzorowane tłumaczenia w toku,
 stabilizacja kolejnych odczytów oraz położenia. Kolejna lokalna poprawka zachowuje
 napisy o identycznym obrazie źródła podczas ruchu tła. Runda 29 września dodaje
 kolejnych dostawców tłumaczeń (Azure, Google, modele językowe z kontekstem gry i słownika)
-i zamyka pozycje backlogu audytu #3. Przeszło **482 testy** i kompilacja całego
+i zamyka pozycje backlogu audytu #3. Przeszło **493 testy** i kompilacja całego
 rozwiązania; próby wizualne nowych pól okna czekają na Windows (M23–M26).
 
 Produkt jest rozwijany dla różnych gier. Escape Academy służy do pomiarów;
@@ -378,7 +378,7 @@ Runda wspólna dla wszystkich gier; nie zmienia progów ani logiki sesji live.
 - **Okno aplikacji:** przejście między polami bez zmiany wartości nie zapisuje ustawień
   i nie przebudowuje pipeline'u, więc nie anuluje tłumaczeń live w locie.
 
-Weryfikacja: 482 testy (361 Core + 121 Infrastructure) i kompilacja całego rozwiązania
+Weryfikacja: 493 testy (361 Core + 132 Infrastructure) i kompilacja całego rozwiązania
 z aplikacją WPF bez ostrzeżeń — na Linuksie z `-p:EnableWindowsTargeting=true`. Nie było
 w tej rundzie: uruchomienia okna, testów DPAPI, smoke testu Windows OCR, SceneReplay ani
 wywołań prawdziwych usług tłumaczeniowych. Jakość tłumaczeń poszczególnych dostawców

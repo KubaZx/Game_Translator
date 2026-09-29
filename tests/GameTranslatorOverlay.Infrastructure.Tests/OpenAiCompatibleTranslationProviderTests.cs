@@ -11,9 +11,14 @@ public class OpenAiCompatibleTranslationProviderTests
         FakeHttpHandler handler,
         string? apiKey = "sk-test",
         string? endpoint = "https://api.openai.com/v1",
-        string? model = "gpt-test") =>
-        new(new HttpClient(handler), () => apiKey, () => endpoint, () => model,
+        string? model = "gpt-test",
+        string? keyHost = null) =>
+        new(new HttpClient(handler), () => apiKey, () => keyHost ?? HostOf(endpoint), () => endpoint, () => model,
             new LlmProviderOptions { MaxRetries = 0 });
+
+    /// <summary>Domyślnie klucz jest zapisany dla serwera z testowanego adresu.</summary>
+    private static string? HostOf(string? endpoint) =>
+        LlmEndpoint.TryNormalize(endpoint, out var uri, out _) ? uri!.Authority : null;
 
     private static string ChatContent(string content) => JsonSerializer.Serialize(new
     {
@@ -58,6 +63,29 @@ public class OpenAiCompatibleTranslationProviderTests
         var request = Assert.Single(handler.Requests);
         Assert.Equal("http://localhost:11434/v1/chat/completions", request.Url);
         Assert.Null(request.Header("Authorization"));
+    }
+
+    [Fact]
+    public async Task Klucz_zapisany_dla_innego_serwera_nie_jest_wysylany()
+    {
+        var handler = new FakeHttpHandler(static (request, _) => Task.FromResult(EchoTranslations(request)));
+        var provider = CreateProvider(handler, endpoint: "https://openrouter.ai/api/v1", keyHost: "api.openai.com");
+
+        await provider.TranslateBatchAsync(["Hello"], "en", "pl");
+
+        Assert.Null(Assert.Single(handler.Requests).Header("Authorization"));
+    }
+
+    [Fact]
+    public async Task Serwer_wymagajacy_klucza_innego_hosta_daje_wskazowke_zamiast_bledu_klucza()
+    {
+        var handler = new FakeHttpHandler(static (_, _) => Task.FromResult(FakeHttpHandler.Status(401)));
+        var provider = CreateProvider(handler, endpoint: "https://openrouter.ai/api/v1", keyHost: "api.openai.com");
+
+        var ex = await Assert.ThrowsAsync<TranslationException>(() => provider.TranslateBatchAsync(["Hello"], "en", "pl"));
+
+        Assert.Equal(TranslationFailureKind.InvalidConfiguration, ex.Kind);
+        Assert.Contains("api.openai.com", ex.UserFriendlyMessage);
     }
 
     [Fact]
@@ -107,7 +135,7 @@ public class OpenAiCompatibleTranslationProviderTests
         var handler = new FakeHttpHandler(static (_, _) => Task.FromResult(
             FakeHttpHandler.Status(429, """{"error":{"type":"insufficient_quota","code":"insufficient_quota"}}""")));
         var provider = new OpenAiCompatibleTranslationProvider(
-            new HttpClient(handler), () => "sk", () => "https://api.openai.com/v1", () => "gpt-test",
+            new HttpClient(handler), () => "sk", () => "api.openai.com", () => "https://api.openai.com/v1", () => "gpt-test",
             new LlmProviderOptions { MaxRetries = 2 });
 
         var ex = await Assert.ThrowsAsync<TranslationException>(() => provider.TranslateBatchAsync(["Hello"], "en", "pl"));

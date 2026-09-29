@@ -191,8 +191,8 @@
 
               <StackPanel x:Name="PnlClaudeSettings" Orientation="Horizontal" Margin="0,0,0,6" Visibility="Collapsed">
                 <TextBlock Text="Model:" VerticalAlignment="Center" Width="105" />
-                <ComboBox x:Name="CmbClaudeModel" Width="260" IsEditable="True"
-                          LostFocus="OnSettingChanged" SelectionChanged="OnSettingChanged" />
+                <ComboBox x:Name="CmbClaudeModel" Width="260" IsEditable="True" IsTextSearchEnabled="False"
+                          LostFocus="OnSettingChanged" DropDownClosed="OnClaudeModelDropDownClosed" />
               </StackPanel>
 
               <StackPanel Orientation="Horizontal">

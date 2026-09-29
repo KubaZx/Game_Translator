@@ -182,7 +182,17 @@ public partial class MainWindow : Window
             _settings.DisclaimerAcknowledged = true;
             _settingsStore.Save(_settings);
         }
+        _appliedSettingsJson = SettingsSnapshot();
     }
+
+    /// <summary>
+    /// Migawka ustawień ostatnio zapisanych i zastosowanych w pipeline. Porównanie z nią
+    /// (a nie ze stanem w pamięci) sprawia, że nieudany zapis zostanie ponowiony przy
+    /// kolejnej zmianie, zamiast zostać uznany za „bez zmian”.
+    /// </summary>
+    private string? _appliedSettingsJson;
+
+    private string SettingsSnapshot() => System.Text.Json.JsonSerializer.Serialize(_settings);
 
     private const string DisclaimerText =
         "Zastrzeżenie: GameTranslatorOverlay jest zewnętrzną nakładką tłumaczącą tekst widoczny " +
@@ -515,11 +525,41 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Klucz serwera LLM jest przypisany do adresu, dla którego go zapisano — po zmianie
+        // adresu nie wyjdzie pod nowy serwer bez ponownego zapisania.
+        Uri? llmEndpoint = null;
+        if (provider.ExtraSettings.Contains(ProviderSetting.LlmEndpoint)
+            && !LlmEndpoint.TryNormalize(_settings.LlmEndpoint, out llmEndpoint, out var endpointError))
+        {
+            SetStatus("⚠ Najpierw podaj poprawny adres serwera LLM: " + endpointError);
+            return;
+        }
+
         _secrets.Save(secretName, key.Trim());
         PwdApiKey.Clear();
+        if (llmEndpoint is not null)
+        {
+            _settings.LlmKeyHost = llmEndpoint.Authority;
+            SaveSettingsWithoutRebuild();
+        }
         UpdateKeyStatus();
-        SetStatus($"Klucz {provider.DisplayName} zapisany bezpiecznie (Windows DPAPI).");
+        SetStatus(llmEndpoint is not null
+            ? $"Klucz zapisany bezpiecznie (Windows DPAPI) dla serwera {llmEndpoint.Authority}."
+            : $"Klucz {provider.DisplayName} zapisany bezpiecznie (Windows DPAPI).");
     }
+
+    /// <summary>Zapis zmian, które dostawcy czytają na bieżąco (np. serwer klucza LLM).</summary>
+    private void SaveSettingsWithoutRebuild()
+    {
+        _settingsStore.Save(_settings);
+        _appliedSettingsJson = SettingsSnapshot();
+    }
+
+    /// <summary>
+    /// Model Claude zapisuje się po wyborze z listy albo po wyjściu z pola — nie w trakcie
+    /// pisania, bo każda zmiana przebudowuje pipeline i anuluje tłumaczenia w locie.
+    /// </summary>
+    private void OnClaudeModelDropDownClosed(object? sender, EventArgs e) => OnSettingChanged(CmbClaudeModel, new RoutedEventArgs());
 
     private void OnLlmPresetClick(object sender, RoutedEventArgs e)
     {
@@ -550,6 +590,11 @@ public partial class MainWindow : Window
         if (provider.SecretName is not { } secretName) return;
 
         _secrets.Delete(secretName);
+        if (provider.ExtraSettings.Contains(ProviderSetting.LlmEndpoint) && _settings.LlmKeyHost is not null)
+        {
+            _settings.LlmKeyHost = null;
+            SaveSettingsWithoutRebuild();
+        }
         UpdateKeyStatus();
         SetStatus($"Klucz {provider.DisplayName} usunięty.");
     }
@@ -593,11 +638,21 @@ public partial class MainWindow : Window
         // Dla serwera LLM mówimy wprost, dokąd trafia tekst z ekranu.
         if (provider.ExtraSettings.Contains(ProviderSetting.LlmEndpoint))
         {
-            status += LlmEndpoint.TryNormalize(_settings.LlmEndpoint, out var endpoint, out var error)
-                ? LlmEndpoint.IsLoopback(endpoint!)
+            if (LlmEndpoint.TryNormalize(_settings.LlmEndpoint, out var endpoint, out var error))
+            {
+                status += LlmEndpoint.IsLoopback(endpoint!)
                     ? " Tekst zostaje na tym komputerze."
-                    : $" Tekst z ekranu trafia do: {endpoint!.Host}."
-                : " ⚠ " + error;
+                    : $" Tekst z ekranu trafia do: {endpoint!.Host}.";
+                if (hasKey && !OpenAiCompatibleTranslationProvider.KeyBelongsTo(_settings.LlmKeyHost, endpoint!))
+                {
+                    status += $" Klucz zapisano dla innego serwera ({_settings.LlmKeyHost ?? "nieznany"}) — " +
+                              $"nie jest wysyłany do {endpoint!.Authority}.";
+                }
+            }
+            else
+            {
+                status += " ⚠ " + error;
+            }
         }
         TxtKeyStatus.Text = status;
     }
@@ -617,7 +672,6 @@ public partial class MainWindow : Window
 
         // Pola tekstowe zapisują się przy utracie fokusu — samo przejście między nimi
         // nie może przebudowywać pipeline'u (to anuluje tłumaczenia będące w locie).
-        var before = System.Text.Json.JsonSerializer.Serialize(_settings);
         string? warning = null;
 
         _settings.SourceLanguage = CmbSourceLang.SelectedItem as string ?? "en";
@@ -642,7 +696,7 @@ public partial class MainWindow : Window
             warning = endpointError;
         }
         _settings.LlmModel = TxtLlmModel.Text.Trim() is { Length: > 0 } llmModel ? llmModel : null;
-        _settings.ClaudeModel = (CmbClaudeModel.SelectedItem as string ?? CmbClaudeModel.Text).Trim() is { Length: > 0 } claudeModel
+        _settings.ClaudeModel = CmbClaudeModel.Text.Trim() is { Length: > 0 } claudeModel
             ? claudeModel
             : ClaudeTranslationProvider.DefaultModel;
         _settings.ResultDisplayMode = CmbDisplayMode.SelectedIndex == 1 ? "overlay" : "panel";
@@ -674,7 +728,8 @@ public partial class MainWindow : Window
         _settings.OverlayFontFamily = CmbFont.SelectedItem as string ?? "Segoe UI";
 
         UpdateProviderPanel();
-        if (System.Text.Json.JsonSerializer.Serialize(_settings) == before)
+        var snapshot = SettingsSnapshot();
+        if (snapshot == _appliedSettingsJson)
         {
             if (warning is not null) SetStatus("⚠ " + warning);
             return;
@@ -682,6 +737,7 @@ public partial class MainWindow : Window
 
         _settingsStore.Save(_settings);
         _orchestrator.RebuildPipeline();
+        _appliedSettingsJson = snapshot;
 
         var profileInfo = _orchestrator.ActiveProfile is { } profile ? $", profil: {profile.Name}" : string.Empty;
         SetStatus(warning is not null

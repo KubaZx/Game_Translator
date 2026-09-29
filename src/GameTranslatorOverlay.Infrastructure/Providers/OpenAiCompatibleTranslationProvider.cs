@@ -10,11 +10,13 @@ namespace GameTranslatorOverlay.Infrastructure.Providers;
 /// <summary>
 /// Model językowy przez API zgodne z OpenAI (/chat/completions): OpenAI, OpenRouter, Groq,
 /// a także lokalne serwery (Ollama, LM Studio) — wtedy tekst nie opuszcza komputera.
-/// Klucz jest opcjonalny (serwery lokalne go nie wymagają) i nigdy nie jest logowany.
+/// Klucz jest opcjonalny (serwery lokalne go nie wymagają), nigdy nie jest logowany
+/// i trafia wyłącznie do serwera, dla którego go zapisano (<paramref name="keyHostAccessor"/>).
 /// </summary>
 public sealed class OpenAiCompatibleTranslationProvider(
     HttpClient httpClient,
     Func<string?> apiKeyAccessor,
+    Func<string?> keyHostAccessor,
     Func<string?> endpointAccessor,
     Func<string?> modelAccessor,
     LlmProviderOptions? options = null,
@@ -22,6 +24,11 @@ public sealed class OpenAiCompatibleTranslationProvider(
     : LlmTranslationProviderBase(options, logger ?? NullLogger<OpenAiCompatibleTranslationProvider>.Instance)
 {
     public const string ProviderName = "LLM";
+
+    /// <summary>Czy klucz zapisany dla <paramref name="keyHost"/> może być wysłany na <paramref name="endpoint"/>.</summary>
+    public static bool KeyBelongsTo(string? keyHost, Uri endpoint) =>
+        !string.IsNullOrWhiteSpace(keyHost)
+        && keyHost.Trim().Equals(endpoint.Authority, StringComparison.OrdinalIgnoreCase);
 
     public override string Name => ProviderName;
     public override bool RequiresApiKey => false;
@@ -56,7 +63,11 @@ public sealed class OpenAiCompatibleTranslationProvider(
     {
         var baseUri = ResolveEndpoint();
         var model = ResolveModel();
-        var apiKey = apiKeyAccessor()?.Trim();
+        var storedKey = apiKeyAccessor()?.Trim();
+        // Klucz zapisany dla innego serwera nie wychodzi pod nowy adres (np. klucz OpenAI
+        // po zmianie adresu na inny serwis albo na lokalny proces nasłuchujący na porcie).
+        var keyWithheld = !string.IsNullOrEmpty(storedKey) && !KeyBelongsTo(keyHostAccessor(), baseUri);
+        var apiKey = keyWithheld ? null : storedKey;
         var request = new ChatRequest(model, [new ChatMessage("system", systemPrompt), new ChatMessage("user", userMessage)]);
 
         HttpResponseMessage response;
@@ -89,6 +100,13 @@ public sealed class OpenAiCompatibleTranslationProvider(
             throw new TranslationException(TranslationFailureKind.NetworkError,
                 $"Serwer LLM na tym komputerze ({baseUri.Authority}) nie odpowiada. Uruchom Ollamę albo LM Studio i spróbuj ponownie.",
                 ex.InnerException);
+        }
+        catch (TranslationException ex) when (ex.Kind == TranslationFailureKind.InvalidApiKey && keyWithheld)
+        {
+            var owner = keyHostAccessor()?.Trim() is { Length: > 0 } host ? $" ({host})" : string.Empty;
+            throw new TranslationException(TranslationFailureKind.InvalidConfiguration,
+                $"Serwer {baseUri.Authority} wymaga klucza, a zapisany klucz należy do innego serwera{owner}. " +
+                "Zapisz klucz ponownie dla tego adresu.");
         }
 
         using (response)

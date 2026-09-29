@@ -89,7 +89,9 @@ Klucze trafiają wyłącznie do nagłówków zapytań (`DeepL-Auth-Key`, `Ocp-Ap
 `X-goog-api-key`, `x-api-key`, `Authorization: Bearer`) — nigdy do adresu URL. Adres serwera
 zgodnego z OpenAI musi używać **HTTPS**; zwykłe HTTP jest dozwolone tylko dla serwera na tym
 komputerze (loopback), a adres z loginem lub parametrami jest odrzucany. Dzięki temu klucz
-i tekst z ekranu nie przechodzą przez sieć otwartym tekstem.
+i tekst z ekranu nie przechodzą przez sieć otwartym tekstem. Klucz serwera LLM jest przypisany
+do adresu, dla którego go zapisano, i nie jest wysyłany do innego serwera. Klient Claude ma
+jawnie ustawiony adres API, więc zmienne środowiskowe SDK nie przekierują klucza.
 
 Czego **NIGDY** nie robimy z kluczami API:
 
