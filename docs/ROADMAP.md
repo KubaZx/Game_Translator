@@ -7,7 +7,7 @@ live: aktualność sceny i lokalnych opisów, nadzorowane tłumaczenia w toku,
 stabilizacja kolejnych odczytów oraz położenia. Kolejna lokalna poprawka zachowuje
 napisy o identycznym obrazie źródła podczas ruchu tła. Runda 29 września dodaje
 kolejnych dostawców tłumaczeń (Azure, Google, modele językowe z kontekstem gry i słownika)
-i zamyka pozycje backlogu audytu #3. Przeszło **493 testy** i kompilacja całego
+i zamyka pozycje backlogu audytu #3. Przeszło **509 testów** i kompilacja całego
 rozwiązania; próby wizualne nowych pól okna czekają na Windows (M23–M26).
 
 Produkt jest rozwijany dla różnych gier. Escape Academy służy do pomiarów;
@@ -378,10 +378,25 @@ Runda wspólna dla wszystkich gier; nie zmienia progów ani logiki sesji live.
 - **Okno aplikacji:** przejście między polami bez zmiany wartości nie zapisuje ustawień
   i nie przebudowuje pipeline'u, więc nie anuluje tłumaczeń live w locie.
 
-Weryfikacja: 493 testy (361 Core + 132 Infrastructure) i kompilacja całego rozwiązania
+Weryfikacja: 509 testów (363 Core + 146 Infrastructure) i kompilacja całego rozwiązania
 z aplikacją WPF bez ostrzeżeń — na Linuksie z `-p:EnableWindowsTargeting=true`. Nie było
 w tej rundzie: uruchomienia okna, testów DPAPI, smoke testu Windows OCR, SceneReplay ani
 wywołań prawdziwych usług tłumaczeniowych. Jakość tłumaczeń poszczególnych dostawców
 i modeli nie została zmierzona. Do wykonania na Windows: M23–M26 z MANUAL_TESTING.md
 oraz powtórka smoke testu i scenariuszy SceneReplay (zmiana `RectPx.Scale` może przesunąć
 pozycję bloku o 1 px względem wcześniejszych pomiarów).
+
+### Runda 2026-09-29 (2) — szybkość cache, połączeń i kontekst dialogu
+
+- **Cache:** trafienia w RAM, zbiorcze liczniki użycia, `synchronous=NORMAL` w WAL. Pomiar
+  lokalny (Linux, Mock, 50 klatek × 20 bloków z cache): ~10–13 ms → ~0,25 ms na klatkę.
+  Czas na Windowsie z antywirusem i innym dyskiem nie był mierzony.
+- **Połączenia:** pula HTTP na 10 minut i rozgrzewka `HEAD` (bez klucza i treści) przy
+  rozpoczęciu zaznaczania regionu i starcie live; nigdy w Cache-only. Zysku nie zmierzono —
+  proxy środowiska blokowało połączenia z serwerami dostawców.
+- **Kontekst dialogu:** do 6 ostatnich linii wysłanych wcześniej do tego samego dostawcy
+  (DeepL `context`, `previous_lines` dla modeli). Wpływ na jakość tłumaczeń nie był
+  mierzony na prawdziwych dialogach — do sprawdzenia w grze (np. rodzaj gramatyczny kwestii).
+- **CI:** job testów na `ubuntu-latest` i cache NuGet.
+
+Weryfikacja: 509 testów (363 Core + 146 Infrastructure), kompilacja całego rozwiązania.

@@ -32,6 +32,13 @@ takiego dostawcę (patrz niżej).
   OpenAI) dostają razem z tekstem nazwę gry z aktywnego profilu i te terminy słownika
   (źródło → tłumaczenie), które występują w tłumaczonych zdaniach — również terminy dodane
   przez użytkownika. Klasyczni tłumacze (DeepL, Azure, Google) dostają tylko tekst.
+- Dostawcy z kontekstem (DeepL, Claude, model językowy) dostają też do 6 ostatnich linii,
+  które **wcześniej wysłano już do tego samego dostawcy** w bieżącej sesji — jako kontekst,
+  bez ponownego tłumaczenia. Zmiana dostawcy czyści tę historię; teksty z cache i słownika
+  do niej nie trafiają.
+- Gdy zaczynasz zaznaczać region albo uruchamiasz live, aplikacja może nawiązać połączenie
+  z serwerem wybranego dostawcy pustym zapytaniem `HEAD` (bez klucza i bez tekstu), żeby
+  pierwsze tłumaczenie było szybsze. W trybie Cache-only nie robi tego nigdy.
 - **Lokalny serwer LLM** (Ollama, LM Studio pod adresem `localhost`) przetwarza tekst na tym
   komputerze — nic nie wychodzi do internetu. Aplikacja pokazuje przy kluczu, dokąd trafia
   tekst dla wybranego adresu serwera. Adres zdalny musi używać HTTPS.

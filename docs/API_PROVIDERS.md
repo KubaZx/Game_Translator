@@ -35,13 +35,25 @@ Dostawcy HTTP (DeepL, Azure, Google, LLM) korzystają z jednej pętli zapytań:
 Claude korzysta z oficjalnego SDK Anthropic, które ma własne ponawianie; jego wyjątki są
 mapowane na te same rodzaje błędów.
 
+## Połączenia i rozgrzewka
+
+`ProviderHttpClientFactory.Create()` tworzy `HttpClient` z pulą bezczynnych połączeń na
+10 minut (domyślnie w .NET: 1 minuta) i odświeżaniem co 30 minut (DNS). Dostawcy sieciowi
+implementują `IWarmableTranslationProvider`: pusty `HEAD` do serwera dostawcy, bez klucza
+i treści, zestawia DNS + TCP + TLS zawczasu. `TranslationOrchestrator.WarmUpActiveProvider`
+wywołuje go przy rozpoczęciu zaznaczania regionu i starcie live — nie częściej niż co 30 s
+i nigdy w Cache-only. Serwer LLM na localhost jest pomijany.
+
 ## Dostawcy kontekstowi (`IContextualTranslationProvider`)
 
 Pipeline sprawdza, czy dostawca implementuje `IContextualTranslationProvider`. Jeśli tak,
 przekazuje mu `TranslationContext`: nazwę gry z aktywnego profilu i do 40 terminów słownika,
 które występują w tłumaczonej partii jako całe słowa lub frazy (`GlossaryService.FindTermsIn`,
-dłuższe frazy mają pierwszeństwo przed swoimi fragmentami). Kontekst nie wpływa na klucz cache.
-Obecnie korzystają z niego dostawcy oparci na modelach językowych.
+dłuższe frazy mają pierwszeństwo przed swoimi fragmentami), a także `RecentTexts`: do 6
+ostatnich tekstów wysłanych wcześniej do tego samego dostawcy (bez trafień z cache/słownika
+i bez tekstów bieżącej partii). Kontekst nie wpływa na klucz cache. Korzystają z niego DeepL
+(parametr `context`: poprzednie linie + bieżąca klatka, do 1500 znaków) oraz dostawcy modeli
+językowych (`previous_lines` w wiadomości).
 
 ## Architektura: ITranslationProvider
 

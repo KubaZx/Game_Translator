@@ -7,6 +7,21 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 Zmiany w kodzie projektu po wydaniu 0.2.2. Nie są jeszcze częścią
 osobnego wydania ani archiwum 0.2.2.
 
+### Szybciej i lepiej — cache, połączenia, kontekst dialogu (2026-09-29)
+
+- **Szybszy cache w trybie live:** trafienia są pamiętane w RAM, a liczniki użycia zapisywane
+  zbiorczo zamiast zapisu na dysk przy każdym odczycie. Lokalny pomiar (50 klatek × 20 bloków
+  z cache, Mock, Linux): ~10–13 ms → ~0,25 ms na klatkę. Na Windowsie z antywirusem zysk
+  zależy od dysku; nie był tam mierzony.
+- **Szybsze pierwsze tłumaczenie po przerwie:** połączenia z dostawcą żyją w puli do 10 minut
+  (domyślnie 1 min), a przy rozpoczęciu zaznaczania regionu lub starcie live aplikacja
+  zestawia połączenie pustym zapytaniem `HEAD` (bez klucza i tekstu; nie w Cache-only).
+- **Kontekst dialogu:** do 6 ostatnich linii wysłanych wcześniej do tego samego dostawcy
+  trafia jako kontekst — DeepL `context`, modele językowe `previous_lines`. Pomaga m.in.
+  w polskim rodzaju gramatycznym pojedynczych kwestii. Nic nowego nie opuszcza komputera.
+- **CI:** dodatkowy szybki job testów na Linuksie i cache pakietów NuGet.
+- Testy: 509 (363 Core + 146 Infrastructure).
+
 ### Dodane — wybór dostawcy tłumaczeń (2026-09-29)
 
 - **Azure AI Translator** (klucz + opcjonalny region; plan F0: 2 mln znaków miesięcznie),
@@ -42,7 +57,7 @@ osobnego wydania ani archiwum 0.2.2.
 
 - Wspólna pętla HTTP dostawców (`ProviderHttp`): timeout, ograniczony retry, mapowanie
   błędów, obsługa odpowiedzi portalu/proxy; DeepL przeniesiony bez zmiany zachowania.
-- Testy: 493 (361 Core + 132 Infrastructure), m.in. dostawcy na fałszywym HTTP bez sieci.
+- Testy po rundzie dostawców: 493 (361 Core + 132 Infrastructure), m.in. dostawcy na fałszywym HTTP bez sieci.
 - Nowa zależność: `Anthropic` (MIT) — w THIRD-PARTY-NOTICES.
 
 ### Dla gracza

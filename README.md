@@ -23,7 +23,7 @@ poprawki jakości live opisane w sekcji **Niewydane** w [CHANGELOG.md](CHANGELOG
 Paczka wydania 0.2.2 nie zawiera tych późniejszych zmian; aktualny kod można
 zbudować instrukcją poniżej. Numer wersji aplikacji pozostaje 0.2.2 do kolejnego wydania.
 
-Stan weryfikacji na 29 września 2026: **493 testy** — 361 Core i 132 Infrastructure —
+Stan weryfikacji na 29 września 2026: **509 testów** — 363 Core i 146 Infrastructure —
 oraz kompilacja całego rozwiązania bez ostrzeżeń. Nowi dostawcy tłumaczeń nie byli jeszcze
 sprawdzani w uruchomionym oknie na Windows (scenariusze M23–M26 w
 [MANUAL_TESTING.md](docs/MANUAL_TESTING.md)); ostatni smoke test Windows OCR: 15 września.
