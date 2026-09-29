@@ -10,8 +10,11 @@ public sealed record CatalogIssue(string FilePath, string Message);
 /// Wczytuje profile gier z folderów „profiles” (obok aplikacji oraz w danych użytkownika).
 /// Błędne pliki nie wysypują aplikacji — trafiają na listę problemów do diagnostyki.
 /// </summary>
-public sealed class ProfileCatalog(IReadOnlyList<string> rootDirectories)
+public sealed class ProfileCatalog(IReadOnlyList<string> rootDirectories, Version? appVersion = null)
 {
+    /// <summary>Wersja aplikacji do sprawdzania „minAppVersion” profili (domyślnie wersja tego wydania).</summary>
+    private readonly Version? _appVersion = appVersion ?? typeof(ProfileCatalog).Assembly.GetName().Version;
+
     public static ProfileCatalog CreateDefault(AppPaths paths) => new([
         Path.Combine(AppContext.BaseDirectory, "profiles"),
         Path.Combine(paths.RootDirectory, "profiles"),
@@ -31,7 +34,7 @@ public sealed class ProfileCatalog(IReadOnlyList<string> rootDirectories)
                 try
                 {
                     var profile = ProfileSerializer.FromJson(File.ReadAllText(file));
-                    var errors = ProfileValidator.Validate(profile);
+                    var errors = ProfileValidator.Validate(profile, _appVersion);
                     if (errors.Count > 0)
                     {
                         issues.AddRange(errors.Select(e => new CatalogIssue(file, e)));

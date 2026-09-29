@@ -12,7 +12,14 @@ public sealed class TranslationPipelineOptions
 {
     public bool CacheOnlyMode { get; set; }
     public string GameProfile { get; set; } = string.Empty;
+
+    /// <summary>Czytelna nazwa gry z profilu — wskazówka dla dostawców kontekstowych (LLM).</summary>
+    public string? GameName { get; set; }
+
     public int MaxBatchSize { get; set; } = 50;
+
+    /// <summary>Najwięcej terminów słownika przekazywanych dostawcy kontekstowemu w jednej partii.</summary>
+    public int MaxContextTerms { get; set; } = 40;
 }
 
 public enum TranslationOrigin
@@ -230,6 +237,13 @@ public sealed class TranslationPipeline(
         }
     }
 
+    private TranslationContext BuildContext(IReadOnlyList<string> texts)
+    {
+        var terms = glossary.FindTermsIn(texts, options.MaxContextTerms);
+        var gameName = string.IsNullOrWhiteSpace(options.GameName) ? null : options.GameName.Trim();
+        return gameName is null && terms.Count == 0 ? TranslationContext.Empty : new TranslationContext(gameName, terms);
+    }
+
     private async Task TranslateChunkAsync(
         (string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)[] chunk,
         string sourceLanguage,
@@ -258,8 +272,14 @@ public sealed class TranslationPipeline(
         IReadOnlyList<string> translations;
         try
         {
-            translations = await provider.TranslateBatchAsync(textsToSend, sourceLanguage, targetLanguage, cancellationToken)
-                .ConfigureAwait(false);
+            // Dostawcy kontekstowi (modele językowe) dostają nazwę gry i terminy słownika
+            // występujące w tej partii — spójne nazwy także wewnątrz dłuższych zdań.
+            translations = provider is IContextualTranslationProvider contextual
+                ? await contextual.TranslateWithContextAsync(
+                        textsToSend, sourceLanguage, targetLanguage, BuildContext(textsToSend), cancellationToken)
+                    .ConfigureAwait(false)
+                : await provider.TranslateBatchAsync(textsToSend, sourceLanguage, targetLanguage, cancellationToken)
+                    .ConfigureAwait(false);
         }
         catch (TranslationException ex)
         {

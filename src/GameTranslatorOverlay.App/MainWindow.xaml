@@ -88,7 +88,7 @@
                FontSize="11"
                Foreground="#FF607D8B"
                TextWrapping="Wrap"
-               Text="Zewnętrzna nakładka — nie modyfikuje gry ani jej procesu; sprawdź regulamin swojej gry (pełna treść: „ⓘ Zastrzeżenie”). Przy tłumaczeniu online rozpoznany tekst trafia do zewnętrznego API (np. DeepL)." />
+               Text="Zewnętrzna nakładka — nie modyfikuje gry ani jej procesu; sprawdź regulamin swojej gry (pełna treść: „ⓘ Zastrzeżenie”). Przy tłumaczeniu online rozpoznany tekst trafia do wybranego dostawcy (DeepL, Azure, Google, Claude, serwer LLM); lokalny serwer LLM zostawia go na tym komputerze." />
 
     <Grid>
       <Grid.ColumnDefinitions>
@@ -166,17 +166,43 @@
             <ComboBox Grid.Row="4" Grid.Column="1" x:Name="CmbFont" Margin="0,3" SelectionChanged="OnSettingChanged" />
           </Grid>
 
-          <GroupBox Header="Klucz API (DeepL)" Foreground="White" Margin="0,10,0,0" Padding="8">
+          <GroupBox x:Name="GrpProvider" Header="Dostawca tłumaczeń" Foreground="White" Margin="0,10,0,0" Padding="8">
             <StackPanel>
+              <StackPanel x:Name="PnlAzureSettings" Orientation="Horizontal" Margin="0,0,0,6" Visibility="Collapsed">
+                <TextBlock Text="Region zasobu:" VerticalAlignment="Center" Width="105" />
+                <TextBox x:Name="TxtAzureRegion" Width="160" LostFocus="OnSettingChanged" />
+                <TextBlock Text="np. westeurope; puste = zasób globalny" Foreground="#FF546E7A" FontSize="11"
+                           VerticalAlignment="Center" Margin="8,0,0,0" />
+              </StackPanel>
+
+              <StackPanel x:Name="PnlLlmSettings" Margin="0,0,0,6" Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="Adres serwera:" VerticalAlignment="Center" Width="105" />
+                  <TextBox x:Name="TxtLlmEndpoint" Width="260" LostFocus="OnSettingChanged" />
+                  <StackPanel x:Name="PnlLlmPresets" Orientation="Horizontal" Margin="4,0,0,0" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                  <TextBlock Text="Model:" VerticalAlignment="Center" Width="105" />
+                  <TextBox x:Name="TxtLlmModel" Width="260" LostFocus="OnSettingChanged" />
+                  <TextBlock Text="np. gpt-4.1-mini albo nazwa modelu z Ollamy" Foreground="#FF546E7A" FontSize="11"
+                             VerticalAlignment="Center" Margin="8,0,0,0" />
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel x:Name="PnlClaudeSettings" Orientation="Horizontal" Margin="0,0,0,6" Visibility="Collapsed">
+                <TextBlock Text="Model:" VerticalAlignment="Center" Width="105" />
+                <ComboBox x:Name="CmbClaudeModel" Width="260" IsEditable="True" IsTextSearchEnabled="False"
+                          LostFocus="OnSettingChanged" DropDownClosed="OnClaudeModelDropDownClosed" />
+              </StackPanel>
+
               <StackPanel Orientation="Horizontal">
                 <PasswordBox x:Name="PwdApiKey" Width="330" />
-                <Button Content="Zapisz klucz" Click="OnSaveKeyClick" Margin="8,0,0,0" />
+                <Button x:Name="BtnSaveKey" Content="Zapisz klucz" Click="OnSaveKeyClick" Margin="8,0,0,0" />
                 <Button Content="Testuj" Click="OnTestKeyClick" Margin="6,0,0,0" />
-                <Button Content="Usuń" Click="OnDeleteKeyClick" Margin="6,0,0,0" />
+                <Button x:Name="BtnDeleteKey" Content="Usuń" Click="OnDeleteKeyClick" Margin="6,0,0,0" />
               </StackPanel>
               <TextBlock x:Name="TxtKeyStatus" Foreground="#FF90A4AE" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" />
-              <TextBlock Foreground="#FF546E7A" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
-                         Text="Klucz jest szyfrowany przez Windows (DPAPI) i nie opuszcza tego komputera. Darmowy klucz DeepL kończy się na „:fx”. Bez klucza możesz używać dostawcy „Mock” do testów." />
+              <TextBlock x:Name="TxtProviderHint" Foreground="#FF546E7A" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
             </StackPanel>
           </GroupBox>
 

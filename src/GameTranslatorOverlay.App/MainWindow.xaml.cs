@@ -12,6 +12,7 @@ using GameTranslatorOverlay.App.Ui;
 using GameTranslatorOverlay.Core.Ocr;
 using GameTranslatorOverlay.Infrastructure.Caching;
 using GameTranslatorOverlay.Infrastructure.Content;
+using GameTranslatorOverlay.Infrastructure.Providers;
 using GameTranslatorOverlay.Infrastructure.Secrets;
 using GameTranslatorOverlay.Infrastructure.Settings;
 using GameTranslatorOverlay.Infrastructure.Storage;
@@ -102,9 +103,21 @@ public partial class MainWindow : Window
         CmbTargetLang.SelectedItem = _settings.TargetLanguage;
         if (CmbTargetLang.SelectedItem is null) CmbTargetLang.SelectedIndex = 0;
 
-        CmbProvider.ItemsSource = new[] { "DeepL", "Mock" };
-        CmbProvider.SelectedItem = _settings.Provider;
-        if (CmbProvider.SelectedItem is null) CmbProvider.SelectedIndex = 0;
+        CmbProvider.DisplayMemberPath = nameof(TranslationProviderInfo.DisplayName);
+        CmbProvider.ItemsSource = TranslationProviderCatalog.All;
+        CmbProvider.SelectedItem = TranslationProviderCatalog.Resolve(_settings.Provider);
+
+        TxtAzureRegion.Text = _settings.AzureRegion ?? string.Empty;
+        TxtLlmEndpoint.Text = _settings.LlmEndpoint;
+        TxtLlmModel.Text = _settings.LlmModel ?? string.Empty;
+        CmbClaudeModel.ItemsSource = TranslationProviderCatalog.SuggestedClaudeModels;
+        CmbClaudeModel.Text = _settings.ClaudeModel;
+        foreach (var (name, endpoint) in TranslationProviderCatalog.LlmPresets)
+        {
+            var preset = new Button { Content = name, Tag = endpoint, Margin = new Thickness(4, 0, 0, 0), Padding = new Thickness(8, 4, 8, 4) };
+            preset.Click += OnLlmPresetClick;
+            PnlLlmPresets.Children.Add(preset);
+        }
 
         var profileNames = new List<string> { NoProfileLabel };
         profileNames.AddRange(_orchestrator.Profiles.Select(static p => p.Name));
@@ -140,7 +153,7 @@ public partial class MainWindow : Window
         _loadingUi = false;
 
         UpdateOcrStatus();
-        UpdateKeyStatus();
+        UpdateProviderPanel();
         _ = RefreshWindowsAsync();
 
         _hotkeys.Attach(this);
@@ -169,7 +182,17 @@ public partial class MainWindow : Window
             _settings.DisclaimerAcknowledged = true;
             _settingsStore.Save(_settings);
         }
+        _appliedSettingsJson = SettingsSnapshot();
     }
+
+    /// <summary>
+    /// Migawka ustawień ostatnio zapisanych i zastosowanych w pipeline. Porównanie z nią
+    /// (a nie ze stanem w pamięci) sprawia, że nieudany zapis zostanie ponowiony przy
+    /// kolejnej zmianie, zamiast zostać uznany za „bez zmian”.
+    /// </summary>
+    private string? _appliedSettingsJson;
+
+    private string SettingsSnapshot() => System.Text.Json.JsonSerializer.Serialize(_settings);
 
     private const string DisclaimerText =
         "Zastrzeżenie: GameTranslatorOverlay jest zewnętrzną nakładką tłumaczącą tekst widoczny " +
@@ -388,6 +411,14 @@ public partial class MainWindow : Window
     {
         if (_selectingRegion)
         {
+            if (RegionSelectWindow.IsOpen)
+            {
+                // Ponowny skrót przy otwartym zaznaczaniu działa jak Esc — zamyka selektor
+                // (wcześniej był po cichu ignorowany). Kolejne naciśnięcie otwiera go od nowa.
+                RegionSelectWindow.CloseActive();
+                return;
+            }
+
             // Ponowny skrót w trakcie wiszącego tłumaczenia = prawdziwe latest-wins:
             // anulujemy starą operację zamiast po cichu ignorować użytkownika.
             _orchestrator.CancelActiveOperation();
@@ -476,8 +507,17 @@ public partial class MainWindow : Window
 
     private void OnToggleOverlayClick(object sender, RoutedEventArgs e) => _overlay.ToggleVisibility();
 
+    private TranslationProviderInfo CurrentProviderInfo => TranslationProviderCatalog.Resolve(_settings.Provider);
+
     private void OnSaveKeyClick(object sender, RoutedEventArgs e)
     {
+        var provider = CurrentProviderInfo;
+        if (provider.SecretName is not { } secretName)
+        {
+            SetStatus($"Dostawca „{provider.DisplayName}” nie używa klucza API.");
+            return;
+        }
+
         var key = PwdApiKey.Password;
         if (string.IsNullOrWhiteSpace(key))
         {
@@ -485,10 +525,47 @@ public partial class MainWindow : Window
             return;
         }
 
-        _secrets.Save(SecretNames.DeepLApiKey, key.Trim());
+        // Klucz serwera LLM jest przypisany do adresu, dla którego go zapisano — po zmianie
+        // adresu nie wyjdzie pod nowy serwer bez ponownego zapisania.
+        Uri? llmEndpoint = null;
+        if (provider.ExtraSettings.Contains(ProviderSetting.LlmEndpoint)
+            && !LlmEndpoint.TryNormalize(_settings.LlmEndpoint, out llmEndpoint, out var endpointError))
+        {
+            SetStatus("⚠ Najpierw podaj poprawny adres serwera LLM: " + endpointError);
+            return;
+        }
+
+        _secrets.Save(secretName, key.Trim());
         PwdApiKey.Clear();
+        if (llmEndpoint is not null)
+        {
+            _settings.LlmKeyHost = llmEndpoint.Authority;
+            SaveSettingsWithoutRebuild();
+        }
         UpdateKeyStatus();
-        SetStatus("Klucz API zapisany bezpiecznie (Windows DPAPI).");
+        SetStatus(llmEndpoint is not null
+            ? $"Klucz zapisany bezpiecznie (Windows DPAPI) dla serwera {llmEndpoint.Authority}."
+            : $"Klucz {provider.DisplayName} zapisany bezpiecznie (Windows DPAPI).");
+    }
+
+    /// <summary>Zapis zmian, które dostawcy czytają na bieżąco (np. serwer klucza LLM).</summary>
+    private void SaveSettingsWithoutRebuild()
+    {
+        _settingsStore.Save(_settings);
+        _appliedSettingsJson = SettingsSnapshot();
+    }
+
+    /// <summary>
+    /// Model Claude zapisuje się po wyborze z listy albo po wyjściu z pola — nie w trakcie
+    /// pisania, bo każda zmiana przebudowuje pipeline i anuluje tłumaczenia w locie.
+    /// </summary>
+    private void OnClaudeModelDropDownClosed(object? sender, EventArgs e) => OnSettingChanged(CmbClaudeModel, new RoutedEventArgs());
+
+    private void OnLlmPresetClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string endpoint }) return;
+        TxtLlmEndpoint.Text = endpoint;
+        OnSettingChanged(sender, e);
     }
 
     private async void OnTestKeyClick(object sender, RoutedEventArgs e)
@@ -509,17 +586,75 @@ public partial class MainWindow : Window
 
     private void OnDeleteKeyClick(object sender, RoutedEventArgs e)
     {
-        _secrets.Delete(SecretNames.DeepLApiKey);
+        var provider = CurrentProviderInfo;
+        if (provider.SecretName is not { } secretName) return;
+
+        _secrets.Delete(secretName);
+        if (provider.ExtraSettings.Contains(ProviderSetting.LlmEndpoint) && _settings.LlmKeyHost is not null)
+        {
+            _settings.LlmKeyHost = null;
+            SaveSettingsWithoutRebuild();
+        }
         UpdateKeyStatus();
-        SetStatus("Klucz API usunięty.");
+        SetStatus($"Klucz {provider.DisplayName} usunięty.");
     }
+
+    /// <summary>Pokazuje pola i podpowiedzi wybranego dostawcy (region Azure, serwer LLM, model Claude).</summary>
+    private void UpdateProviderPanel()
+    {
+        var provider = CurrentProviderInfo;
+        GrpProvider.Header = $"Dostawca: {provider.DisplayName}";
+        PnlAzureSettings.Visibility = VisibleFor(provider, ProviderSetting.AzureRegion);
+        PnlLlmSettings.Visibility = VisibleFor(provider, ProviderSetting.LlmEndpoint);
+        PnlClaudeSettings.Visibility = VisibleFor(provider, ProviderSetting.ClaudeModel);
+
+        PwdApiKey.IsEnabled = BtnSaveKey.IsEnabled = BtnDeleteKey.IsEnabled = provider.UsesApiKey;
+        TxtProviderHint.Text = provider.UsesApiKey
+            ? provider.KeyHint + " Klucz jest szyfrowany przez Windows (DPAPI) i nie opuszcza tego komputera."
+            : provider.KeyHint;
+        UpdateKeyStatus();
+    }
+
+    private static Visibility VisibleFor(TranslationProviderInfo provider, ProviderSetting setting) =>
+        provider.ExtraSettings.Contains(setting) ? Visibility.Visible : Visibility.Collapsed;
 
     private void UpdateKeyStatus()
     {
-        var hasKey = _secrets.Load(SecretNames.DeepLApiKey) is not null;
-        TxtKeyStatus.Text = hasKey
-            ? "Klucz DeepL: zapisany ✔"
-            : "Brak klucza DeepL — tłumaczenie online nie zadziała. Do testów bez klucza wybierz dostawcę „Mock”.";
+        var provider = CurrentProviderInfo;
+        if (provider.SecretName is not { } secretName)
+        {
+            TxtKeyStatus.Text = "Ten dostawca nie potrzebuje klucza ani internetu.";
+            return;
+        }
+
+        var hasKey = _secrets.Load(secretName) is not null;
+        var status = (hasKey, provider.KeyOptional) switch
+        {
+            (true, _) => $"Klucz {provider.DisplayName}: zapisany ✔",
+            (false, true) => "Bez klucza — wystarczy dla serwera na tym komputerze (Ollama, LM Studio). Usługi w chmurze wymagają klucza.",
+            _ => $"Brak klucza {provider.DisplayName} — tłumaczenie online nie zadziała. Do testów bez klucza wybierz dostawcę „Mock”.",
+        };
+
+        // Dla serwera LLM mówimy wprost, dokąd trafia tekst z ekranu.
+        if (provider.ExtraSettings.Contains(ProviderSetting.LlmEndpoint))
+        {
+            if (LlmEndpoint.TryNormalize(_settings.LlmEndpoint, out var endpoint, out var error))
+            {
+                status += LlmEndpoint.IsLoopback(endpoint!)
+                    ? " Tekst zostaje na tym komputerze."
+                    : $" Tekst z ekranu trafia do: {endpoint!.Host}.";
+                if (hasKey && !OpenAiCompatibleTranslationProvider.KeyBelongsTo(_settings.LlmKeyHost, endpoint!))
+                {
+                    status += $" Klucz zapisano dla innego serwera ({_settings.LlmKeyHost ?? "nieznany"}) — " +
+                              $"nie jest wysyłany do {endpoint!.Authority}.";
+                }
+            }
+            else
+            {
+                status += " ⚠ " + error;
+            }
+        }
+        TxtKeyStatus.Text = status;
     }
 
     private void UpdateOcrStatus()
@@ -535,9 +670,35 @@ public partial class MainWindow : Window
     {
         if (_loadingUi) return;
 
+        // Pola tekstowe zapisują się przy utracie fokusu — samo przejście między nimi
+        // nie może przebudowywać pipeline'u (to anuluje tłumaczenia będące w locie).
+        string? warning = null;
+
         _settings.SourceLanguage = CmbSourceLang.SelectedItem as string ?? "en";
         _settings.TargetLanguage = CmbTargetLang.SelectedItem as string ?? "pl";
-        _settings.Provider = CmbProvider.SelectedItem as string ?? "DeepL";
+        _settings.Provider = (CmbProvider.SelectedItem as TranslationProviderInfo)?.Id ?? TranslationProviderCatalog.DeepL.Id;
+
+        var region = TxtAzureRegion.Text.Trim();
+        if (AzureTranslatorProvider.IsValidRegion(region))
+        {
+            _settings.AzureRegion = region.Length == 0 ? null : region;
+        }
+        else
+        {
+            TxtAzureRegion.Text = _settings.AzureRegion ?? string.Empty;
+            warning = "Region Azure może zawierać tylko litery, cyfry i myślniki (np. westeurope).";
+        }
+
+        _settings.LlmEndpoint = TxtLlmEndpoint.Text.Trim();
+        if (_settings.Provider == TranslationProviderCatalog.Llm.Id
+            && !LlmEndpoint.TryNormalize(_settings.LlmEndpoint, out _, out var endpointError))
+        {
+            warning = endpointError;
+        }
+        _settings.LlmModel = TxtLlmModel.Text.Trim() is { Length: > 0 } llmModel ? llmModel : null;
+        _settings.ClaudeModel = CmbClaudeModel.Text.Trim() is { Length: > 0 } claudeModel
+            ? claudeModel
+            : ClaudeTranslationProvider.DefaultModel;
         _settings.ResultDisplayMode = CmbDisplayMode.SelectedIndex == 1 ? "overlay" : "panel";
         _settings.LiveDisplayMode = CmbLiveStyle.SelectedIndex == 1 ? "subtitle" : "at-source";
         _settings.OverlayPlacement = CmbPlacement.SelectedIndex == 1 ? "cover" : "below";
@@ -566,12 +727,22 @@ public partial class MainWindow : Window
 
         _settings.OverlayFontFamily = CmbFont.SelectedItem as string ?? "Segoe UI";
 
+        UpdateProviderPanel();
+        var snapshot = SettingsSnapshot();
+        if (snapshot == _appliedSettingsJson)
+        {
+            if (warning is not null) SetStatus("⚠ " + warning);
+            return;
+        }
+
         _settingsStore.Save(_settings);
         _orchestrator.RebuildPipeline();
-        UpdateKeyStatus();
+        _appliedSettingsJson = snapshot;
 
         var profileInfo = _orchestrator.ActiveProfile is { } profile ? $", profil: {profile.Name}" : string.Empty;
-        SetStatus($"Ustawienia zapisane (dostawca: {_settings.Provider}{profileInfo}).");
+        SetStatus(warning is not null
+            ? "⚠ " + warning
+            : $"Ustawienia zapisane (dostawca: {CurrentProviderInfo.DisplayName}{profileInfo}).");
     }
 
     private async void OnStatusTimerTick(object? sender, EventArgs e)
@@ -635,13 +806,15 @@ public partial class MainWindow : Window
         }
 
         var profile = _orchestrator.ActiveProfile;
+        var upscale = OcrScaling.ResolvePreference(profile?.Ocr?.Upscale, _settings.OcrUpscale);
         var options = new LiveSessionOptions
         {
             Fps = profile?.ChangeDetection?.Fps ?? 6,
             // Domyślnie 0: każda mocna zmiana komórki budzi przetwarzanie — krótkie
             // linijki dialogów w grach ze statycznym obrazem zmieniają ledwie kilka komórek.
             ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.0,
-            OcrUpscale = profile?.Ocr?.Upscale ?? _settings.OcrUpscale,
+            OcrUpscale = upscale.Preferred,
+            AllowAutoUpscale = upscale.AllowAuto,
         };
 
         // Wczesne utworzenie HWND nakładki, żeby wiedzieć, czy wykluczenie z capture działa.

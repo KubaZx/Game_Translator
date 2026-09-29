@@ -257,4 +257,66 @@ public class TranslationPipelineTests
         var status = await mock.TestConnectionAsync();
         Assert.True(status.IsOk);
     }
+
+    private sealed class ContextualProvider : IContextualTranslationProvider
+    {
+        public List<TranslationContext> Contexts { get; } = [];
+        public int PlainCalls { get; private set; }
+
+        public string Name => "Contextual";
+        public bool RequiresApiKey => false;
+
+        public Task<IReadOnlyList<string>> TranslateBatchAsync(
+            IReadOnlyList<string> texts, string sourceLanguage, string targetLanguage,
+            CancellationToken cancellationToken = default)
+        {
+            PlainCalls++;
+            return Task.FromResult<IReadOnlyList<string>>(texts.Select(static t => "PL:" + t).ToList());
+        }
+
+        public Task<IReadOnlyList<string>> TranslateWithContextAsync(
+            IReadOnlyList<string> texts, string sourceLanguage, string targetLanguage,
+            TranslationContext context, CancellationToken cancellationToken = default)
+        {
+            Contexts.Add(context);
+            return Task.FromResult<IReadOnlyList<string>>(texts.Select(static t => "CTX:" + t).ToList());
+        }
+
+        public Task<ProviderStatus> TestConnectionAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ProviderStatus(true, "ok"));
+    }
+
+    [Fact]
+    public async Task Dostawca_kontekstowy_dostaje_nazwe_gry_i_terminy_z_partii()
+    {
+        var glossary = new GlossaryService();
+        glossary.AddTerm(new GlossaryTerm("Energy Shield", "Tarcza energetyczna"));
+        glossary.AddTerm(new GlossaryTerm("Waystone", "Kamień drogi"));
+        var provider = new ContextualProvider();
+        var pipeline = new TranslationPipeline(
+            glossary, new InMemoryTranslationCache(), provider, new UsageTracker(),
+            new TranslationPipelineOptions { GameName = "Path of Exile 2" });
+
+        var outcomes = await pipeline.TranslateAsync(["+40 to maximum Energy Shield"], "en", "pl");
+
+        Assert.Equal("CTX:+40 to maximum Energy Shield", outcomes[0].TranslatedText);
+        Assert.Equal(0, provider.PlainCalls);
+        var context = Assert.Single(provider.Contexts);
+        Assert.Equal("Path of Exile 2", context.GameName);
+        var term = Assert.Single(context.Terms);
+        Assert.Equal("Tarcza energetyczna", term.Target);
+    }
+
+    [Fact]
+    public async Task Dostawca_kontekstowy_bez_profilu_i_terminow_dostaje_pusty_kontekst()
+    {
+        var provider = new ContextualProvider();
+        var pipeline = new TranslationPipeline(
+            new GlossaryService(), new InMemoryTranslationCache(), provider, new UsageTracker(),
+            new TranslationPipelineOptions());
+
+        await pipeline.TranslateAsync(["Hello there"], "en", "pl");
+
+        Assert.True(Assert.Single(provider.Contexts).IsEmpty);
+    }
 }

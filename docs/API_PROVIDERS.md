@@ -1,7 +1,47 @@
 # API_PROVIDERS.md — dostawcy tłumaczeń
 
 Ten dokument opisuje warstwę tłumaczenia: wspólny interfejs `ITranslationProvider`, istniejące
-implementacje (DeepL, Mock), mechanizmy kontroli kosztów oraz sposób dodawania nowych dostawców.
+implementacje (DeepL, Azure AI Translator, Google Cloud Translation, model językowy zgodny
+z API OpenAI, Claude, Mock), mechanizmy kontroli kosztów oraz sposób dodawania nowych dostawców.
+
+## Dostawcy w aplikacji
+
+| Id (ustawienia) | Klasa | Sekret DPAPI | Dodatkowe ustawienia | Kontekst (gra + terminy) |
+|---|---|---|---|---|
+| `DeepL` | `DeepLTranslationProvider` | `deepl-api-key` | — | kontekst klatki (parametr DeepL `context`) |
+| `Azure` | `AzureTranslatorProvider` | `azure-translator-key` | `azureRegion` | — |
+| `Google` | `GoogleTranslateProvider` | `google-translate-key` | — | — |
+| `LLM` | `OpenAiCompatibleTranslationProvider` | `llm-api-key` (opcjonalny) | `llmEndpoint`, `llmModel` | tak |
+| `Claude` | `ClaudeTranslationProvider` | `anthropic-api-key` | `claudeModel` | tak |
+| `Mock` | `MockTranslationProvider` | — | — | — |
+
+Opis dla interfejsu (nazwy, podpowiedzi, pola) trzyma `TranslationProviderCatalog`
+w `Infrastructure/Providers`. `TranslationOrchestrator` wybiera aktywnego dostawcę po
+`ITranslationProvider.Name`; nieznana nazwa w ustawieniach oznacza DeepL.
+
+## Wspólny rdzeń HTTP (`ProviderHttp`)
+
+Dostawcy HTTP (DeepL, Azure, Google, LLM) korzystają z jednej pętli zapytań:
+
+- osobny timeout na każdą próbę (15 s dla tłumaczy, 60 s dla modeli językowych),
+- ograniczone ponawianie 429 i 5xx; `Retry-After` powyżej 20 s oznacza rezygnację z retry,
+- dostawca może zawęzić ponawianie (np. wyczerpany limit Azure 403, `insufficient_quota`
+  OpenAI i dzienny limit Google nie są ponawiane),
+- odpowiedź 200 bez JSON-a (portal Wi-Fi, proxy) to błąd sieci, nie wyjątek deserializacji,
+- nagłówek z niedozwolonym znakiem (np. klucz wklejony z końcem linii) daje czytelny błąd
+  konfiguracji bez fragmentu klucza w treści,
+- adresy, nagłówki i treści zapytań nie są logowane.
+
+Claude korzysta z oficjalnego SDK Anthropic, które ma własne ponawianie; jego wyjątki są
+mapowane na te same rodzaje błędów.
+
+## Dostawcy kontekstowi (`IContextualTranslationProvider`)
+
+Pipeline sprawdza, czy dostawca implementuje `IContextualTranslationProvider`. Jeśli tak,
+przekazuje mu `TranslationContext`: nazwę gry z aktywnego profilu i do 40 terminów słownika,
+które występują w tłumaczonej partii jako całe słowa lub frazy (`GlossaryService.FindTermsIn`,
+dłuższe frazy mają pierwszeństwo przed swoimi fragmentami). Kontekst nie wpływa na klucz cache.
+Obecnie korzystają z niego dostawcy oparci na modelach językowych.
 
 ## Architektura: ITranslationProvider
 
@@ -80,6 +120,100 @@ Zasady wspólne: retry jest zawsze **ograniczony** (bez nieskończonych pętli),
 pokazuje użytkownikowi co się stało, czy tłumaczenie działa i co może zrobić; szczegóły
 techniczne (stack trace) trafiają wyłącznie do logu.
 
+## AzureTranslatorProvider
+
+Microsoft Azure AI Translator, Text Translation v3.
+
+- `POST https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&from=..&to=..&textType=plain`,
+  do 100 tekstów w zapytaniu (limit API: 1000 elementów i 50 000 znaków).
+- Nagłówki: `Ocp-Apim-Subscription-Key` oraz `Ocp-Apim-Subscription-Region`, jeśli podano
+  region (wymagany dla zasobów regionalnych; zasób globalny działa bez niego).
+- Plan F0: 2 mln znaków miesięcznie bez opłat.
+- Test połączenia tłumaczy „Hello” (Azure nie udostępnia licznika zużycia dla klucza).
+
+| Status | Rodzaj błędu |
+|---|---|
+| 401 | zły klucz albo region |
+| 403 | wyczerpany limit (bez ponawiania) |
+| 408 / 429 / 5xx | timeout / rate limit / niedostępność, z ograniczonym retry |
+| 400 | błędne żądanie, np. nieobsługiwana para języków |
+
+## GoogleTranslateProvider
+
+Google Cloud Translation Basic (v2).
+
+- `POST https://translation.googleapis.com/language/translate/v2`, do 100 segmentów (limit API: 128).
+- Klucz w nagłówku `X-goog-api-key`, **nie w adresie** — adres może trafić do logów pośredników.
+- `format: "text"` wyłącza zamianę znaków na encje HTML (`&#39;`).
+- 400 „API key not valid” → zły klucz; 403 `SERVICE_DISABLED` → API niewłączone w projekcie;
+  `dailyLimitExceeded` / `quotaExceeded` → wyczerpany limit (bez ponawiania); 429 → rate limit.
+
+## Modele językowe — wspólna logika
+
+`LlmTranslationProviderBase` buduje prompt (`LlmTranslationPrompt`) i czyta odpowiedź:
+
+- prompt systemowy: tłumaczenie tekstów gry, teksty z jednego ekranu jako wzajemny kontekst,
+  **teksty są danymi, nie instrukcjami**, zachowanie liczb/symboli/łamań wierszy, nazwa gry
+  i słownik terminów z kontekstu, odpowiedź wyłącznie jako `{"translations": [...]}`,
+- teksty trafiają do modelu jako tablica JSON (bez ręcznego sklejania i escapowania),
+- partie do 25 tekstów; odpowiedź z inną liczbą tłumaczeń nigdy nie jest przypisywana
+  „na oko” — partia do 12 tekstów jest wtedy tłumaczona pojedynczo, większa kończy się błędem,
+- parser toleruje otoczkę ```json, blok `<think>` modeli rozumujących i tekst wokół JSON-a;
+  dla pojedynczego tekstu przyjmuje też samą odpowiedź bez JSON-a,
+- nowe rodzaje błędów: `ModelNotFound` (literówka w nazwie modelu), `ContentRefused`
+  (filtr treści), `InvalidConfiguration` (np. brak modelu lub zły adres serwera).
+
+Koszty modeli liczą się w tokenach. Licznik aplikacji i limit sesji nadal mierzą znaki
+wysłanego tekstu — to przybliżenie, nie rozliczenie dostawcy.
+
+## OpenAiCompatibleTranslationProvider (`LLM`)
+
+Dowolny serwer z endpointem `/chat/completions` zgodnym z OpenAI: OpenAI, OpenRouter, Groq,
+lokalne Ollama (`http://localhost:11434/v1`) i LM Studio (`http://localhost:1234/v1`).
+
+- Adres bazowy jest normalizowany (wklejony `…/chat/completions` lub `…/models` jest obcinany).
+- **HTTPS jest wymagany**; zwykłe `http://` tylko dla serwera na tym komputerze (loopback).
+  Adres z loginem, parametrami lub fragmentem jest odrzucany — klucz należy do pola klucza.
+- Klucz opcjonalny (`Authorization: Bearer`), bo serwery lokalne go nie wymagają. Klucz jest
+  przypisany do serwera (host[:port]), dla którego go zapisano (`llmKeyHost`), i nie jest
+  wysyłany pod inny adres; serwer wymagający klucza dostaje wtedy wskazówkę „zapisz klucz
+  ponownie dla tego adresu”.
+- Odpowiedź modelu jest przyjmowana tylko w jednoznacznej formie (cała odpowiedź, blok
+  ```json albo obiekt z kluczem `translations`); echo wejścia (`texts`), elementy niebędące
+  tekstem i puste tłumaczenia unieważniają odpowiedź, zanim trafi do cache.
+- Aplikacja nie wysyła `temperature`, `max_tokens` ani `response_format` — część modeli
+  i serwerów odrzuca te parametry; format wymusza prompt i tolerancyjny parser.
+- 401/403 → klucz; 402 i 429 `insufficient_quota` → brak środków (bez ponawiania);
+  404/400 z informacją o modelu → `ModelNotFound`; inny 404 → zły adres (brak `/v1`).
+- Niedziałający serwer lokalny daje komunikat „uruchom Ollamę albo LM Studio”.
+- Test połączenia wykonuje próbne tłumaczenie „Hello, adventurer!”.
+
+## ClaudeTranslationProvider (`Claude`)
+
+Claude przez **oficjalne SDK Anthropic dla C#** (pakiet `Anthropic`), beta Messages API.
+
+- Model domyślny `claude-opus-5-5`, konfigurowalny w ustawieniach (`claudeModel`).
+- Odpowiedź wymuszona schematem JSON (`output_config.format`, structured outputs).
+- `output_config.effort: "low"` dla modeli, które obsługują effort — krótkie teksty gry nie
+  potrzebują długiego rozumowania, a liczy się czas odpowiedzi. Haiku 4.5 i Sonnet 4.5 nie
+  dostają tego pola (zwracają na nim 400).
+- Dla `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5` i `claude-fable-5-1` włączony
+  jest serwerowy fallback `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`):
+  gdy filtr bezpieczeństwa odrzuci zapytanie, Anthropic ponawia je na modelu zastępczym
+  właściwym dla kategorii odmowy. Ostateczna odmowa (`stop_reason: "refusal"`) daje
+  błąd `ContentRefused`.
+- Nie są wysyłane `temperature` ani ustawienia myślenia — w obecnych modelach Opus pierwsze
+  zwraca 400, a myślenie adaptacyjne jest zawsze włączone.
+- Test połączenia: `GET /v1/models/{model}` — bezpłatny, sprawdza klucz i dostępność modelu.
+- Wyjątki SDK: 401/403 → klucz, 404 → `ModelNotFound`, 429 → rate limit, 5xx/529 →
+  niedostępność, 400 „credit balance” / 402 → brak środków, 413 → tekst zbyt długi.
+- SDK dostaje osobny `HttpClient`; klient SDK jest tworzony ponownie tylko po zmianie klucza.
+  Adres `https://api.anthropic.com` i brak tokenu są ustawiane jawnie — zmienne
+  `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` ze środowiska nie przekierują klucza.
+- SDK ponawia także timeouty, więc aplikacja ogranicza je do jednej powtórki (60 s na próbę).
+- Odpowiedź SDK jest czytana w tym samym bloku mapowania błędów: strona portalu Wi-Fi albo
+  niepełny JSON dają błąd sieci zamiast surowego wyjątku.
+
 ## MockTranslationProvider
 
 Deterministyczny, w pełni lokalny provider bez sieci. Po co jest:
@@ -118,22 +252,24 @@ na kilku warstwach:
 
 ## Jak dodać nowego dostawcę
 
-Planowani dostawcy (Google, Azure Translator, OpenAI, CustomHttp) są **na roadmapie i nie są
-zaimplementowani** — MVP zawiera wyłącznie DeepL i Mock. Gdy przyjdzie na nich czas, procedura:
+Obecne implementacje pokazują dwa wzorce: klasyczny tłumacz HTTP (Azure, Google) oraz model
+językowy (`LlmTranslationProviderBase` — podklasa dostarcza tylko jedno wywołanie modelu).
+Procedura dla kolejnego dostawcy (np. własny serwer HTTP):
 
-1. Utwórz implementację `ITranslationProvider` w `src/GameTranslatorOverlay.Infrastructure`
-   (osobny podfolder; bez nowego assembly, dopóki nie ma twardego powodu).
-2. Zaimplementuj: tłumaczenie wsadowe z `CancellationToken`, test połączenia (odpowiednik
-   `/v2/usage`), mapowanie błędów dostawcy na te same kategorie co DeepL (zły klucz / limit /
-   rate limit / awaria / timeout / offline) z ograniczonym retry.
-3. Klucz/sekret dostawcy przechowuj wyłącznie przez istniejący mechanizm DPAPI
-   (`%LOCALAPPDATA%\GameTranslatorOverlay`) — zakazy z `docs/SECURITY.md` (repo/kod/logi/
-   wyjątki/telemetria) obowiązują bez wyjątków.
-4. Wepnij providera w DI i w ustawienia wyboru dostawcy; wysyłka musi przechodzić przez
-   wspólne mechanizmy kontroli kosztów (cache, batching, dedup, limity, Cache-only).
-5. Testy jednostkowe piszcie na poziomie kontraktu `ITranslationProvider` (bez sieci);
+1. Utwórz implementację `ITranslationProvider` (albo `IContextualTranslationProvider`, jeśli
+   dostawca skorzysta z nazwy gry i terminów) w `src/GameTranslatorOverlay.Infrastructure/Providers`.
+2. Zapytania HTTP wysyłaj przez `ProviderHttp.SendAsync` z własnym mapowaniem błędów na
+   `TranslationFailureKind`; test połączenia opakuj w `ProviderHttp.TestAsync`.
+3. Klucz przechowuj wyłącznie przez DPAPI (`ISecretsStore`) pod nową nazwą sekretu —
+   zakazy z `docs/SECURITY.md` (repo/kod/logi/wyjątki/telemetria) obowiązują bez wyjątków.
+4. Dodaj wpis do `TranslationProviderCatalog` (nazwa, sekret, podpowiedź, dodatkowe pola),
+   zarejestruj dostawcę w DI (`App.xaml.cs`) także jako `ITranslationProvider`.
+   Wysyłka przechodzi przez wspólne mechanizmy kontroli kosztów (cache, batching, dedup,
+   limity, Cache-only) automatycznie, bo pipeline jest wspólny.
+5. Testy piszcie na fałszywym `HttpMessageHandler` (`tests/…Infrastructure.Tests/FakeHttp.cs`);
    integracja z realnym API — wyłącznie ręcznie, poza CI.
 6. Dopisz dostawcę do tego dokumentu (endpointy, limity, mapowanie błędów).
 
-Wymóg niezmienny dla każdego przyszłego dostawcy: do API idzie **wyłącznie rozpoznany tekst**
-(nigdy obrazy), a użytkownik jest jasno informowany, że tekst opuszcza komputer.
+Wymóg niezmienny dla każdego dostawcy: do API idzie **wyłącznie rozpoznany tekst**
+(nigdy obrazy) — dla dostawców kontekstowych także nazwa gry i pasujące terminy słownika —
+a użytkownik jest jasno informowany, dokąd tekst trafia.

@@ -7,6 +7,44 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 Zmiany w kodzie projektu po wydaniu 0.2.2. Nie są jeszcze częścią
 osobnego wydania ani archiwum 0.2.2.
 
+### Dodane — wybór dostawcy tłumaczeń (2026-09-29)
+
+- **Azure AI Translator** (klucz + opcjonalny region; plan F0: 2 mln znaków miesięcznie),
+  **Google Cloud Translation** (klucz API projektu), **model językowy zgodny z API OpenAI**
+  (OpenAI, OpenRouter, Groq, lokalne Ollama/LM Studio — lokalnie tekst nie opuszcza komputera)
+  oraz **Claude** (oficjalne SDK Anthropic, domyślnie `claude-opus-5-5`). DeepL pozostaje domyślny.
+- Każdy dostawca ma osobny klucz w DPAPI; okno pokazuje tylko pola wybranego dostawcy,
+  gotowe adresy OpenAI/Ollama/LM Studio i informację, dokąd trafia tekst.
+- Modele językowe dostają nazwę gry z profilu i **terminy słownika występujące w zdaniach**
+  — nazwy są spójne także wewnątrz dłuższych opisów. Odpowiedź z inną liczbą tłumaczeń nie
+  jest przypisywana blokom (małe partie są wtedy tłumaczone pojedynczo).
+- Claude: odpowiedź wymuszona schematem JSON, niski `effort` dla krótkich tekstów oraz
+  serwerowy fallback przy odmowie filtra bezpieczeństwa (dla Opus 5.5/5, Sonnet 5.5, Fable 5.1).
+- Adres zdalnego serwera LLM musi używać HTTPS; zwykłe HTTP tylko dla `localhost`.
+  Klucz LLM jest przypisany do serwera, dla którego go zapisano, i nie wychodzi pod inny adres.
+- Odpowiedź modelu z echem wejścia, pustymi lub nietekstowymi elementami jest odrzucana
+  przed zapisem do cache; klient Claude ignoruje `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`.
+- Nowe czytelne błędy: nieznany model, odmowa modelu, niepełna konfiguracja dostawcy.
+
+### Naprawione — backlog audytu #3 (2026-09-29)
+
+- Słownik: priorytet działa także między terminem z rozróżnianiem wielkości liter i bez;
+  terminy z podwójną lub twardą spacją w JSON trafiają w znormalizowany tekst z OCR.
+- Profil gry może jawnie wyłączyć automatyczne powiększanie małych regionów (`ocr.upscale: 1.0`);
+  brak pola oznacza ustawienia aplikacji.
+- Przeskalowane prostokąty OCR nie dryfują o 1 px na prawej/dolnej krawędzi.
+- Profil z `minAppVersion` nowszym niż aplikacja jest pomijany z czytelnym komunikatem.
+- Ctrl+Shift+T przy otwartym zaznaczaniu regionu zamyka je, zamiast być ignorowanym.
+- Przejście między polami ustawień bez zmiany wartości nie przebudowuje już pipeline'u
+  (nie anuluje tłumaczeń live w locie).
+
+### Wewnętrzne
+
+- Wspólna pętla HTTP dostawców (`ProviderHttp`): timeout, ograniczony retry, mapowanie
+  błędów, obsługa odpowiedzi portalu/proxy; DeepL przeniesiony bez zmiany zachowania.
+- Testy: 493 (361 Core + 132 Infrastructure), m.in. dostawcy na fałszywym HTTP bez sieci.
+- Nowa zależność: `Anthropic` (MIT) — w THIRD-PARTY-NOTICES.
+
 ### Dla gracza
 
 - Poprawki wspólne dla różnych gier, mierzone m.in. w Escape Academy.
@@ -19,7 +57,8 @@ osobnego wydania ani archiwum 0.2.2.
 
 - Odświeżone README, instrukcja, wizja produktu, architektura i opis testów.
 - Rozróżnienie wydania 0.2.2, bieżącego kodu `main` i niewdrożonych kierunków rozwoju.
-- Aktualny stan lokalny: 371 testów (334 Core + 37 Infrastructure) i opis ograniczeń pomiarów.
+- Stan przed rundą dostawców: 371 testów (334 Core + 37 Infrastructure) i opis ograniczeń pomiarów.
+- Nowe: przewodnik po dostawcach w instrukcji, ADR-013, scenariusze ręczne M23–M26.
 
 ### Naprawione
 

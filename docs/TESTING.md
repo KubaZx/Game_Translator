@@ -1,8 +1,10 @@
 # Testy i pomiary — GameTranslatorOverlay
 
-Stan sprawdzony lokalnie 15 września 2026: **371 testów xUnit** — **334 Core** i
-**37 Infrastructure**, kompilacja bez ostrzeżeń. Smoke test
-Windows OCR z lokalnym Mockiem również przeszedł.
+Stan sprawdzony 29 września 2026: **493 testy xUnit** — **361 Core** i
+**132 Infrastructure** — oraz kompilacja całego rozwiązania (z aplikacją WPF) bez ostrzeżeń.
+Ta runda była weryfikowana na Linuksie (.NET 10 SDK, `-p:EnableWindowsTargeting=true`):
+testy DPAPI i smoke test Windows OCR wymagają Windows i nie były w niej uruchamiane.
+Poprzedni pełny przebieg na Windows (15 września 2026): 371 testów i smoke test z Mockiem.
 
 Rozdzielamy testy logiki, lokalne sondy z rzeczywistym capture/OCR i ocenę
 fizycznej nakładki przez użytkownika. Wynik jednej grupy nie zastępuje pozostałych.
@@ -24,7 +26,12 @@ wykonuje się osobno; nie są częścią standardowego `dotnet test`.
 
 - Normalizację OCR z zachowaniem liczb, znaków i zakresów; grupowanie linii,
   filtr śmieci, podobieństwo odczytów, hashe i geometrię.
-- Dopasowanie słownika, konflikty, priorytet ręcznych poprawek i lokalnych wyników.
+- Dopasowanie słownika, konflikty, priorytet ręcznych poprawek i lokalnych wyników;
+  priorytet między terminami z rozróżnianiem wielkości liter i bez, normalizację kluczy
+  oraz wyszukiwanie terminów wewnątrz zdań (całe słowa, dłuższe frazy najpierw).
+- Przekazywanie nazwy gry i pasujących terminów dostawcom kontekstowym.
+- Skalowanie OCR: jawne wyłączenie auto-powiększenia w profilu, skalowanie krawędzi
+  prostokątów bez dryfu oraz porównanie `minAppVersion` profilu z wersją aplikacji.
 - Deduplikację tłumaczeń, Cache-only, rezerwacje znaków dla równoległych operacji,
   ponowny odczyt cache oraz anulowanie zapisu po zmianie konfiguracji pipeline'u.
 - Ograniczenie pracy do zadanej liczby zadań, obserwowanie błędów i domykanie sesji.
@@ -47,9 +54,18 @@ Ich powiązanie z sesją sprawdzają osobne sondy i obserwacje użytkownika.
 - SQLite: odczyt/zapis, migracje, import/eksport oraz zachowanie ręcznych poprawek.
 - DeepL na fałszywym `HttpMessageHandler`: format żądań i odpowiedzi, wybór endpointu,
   batchowanie, błędy 403/456/429, retry, timeout i uwierzytelnianie w nagłówku.
+- Azure i Google: nagłówki z kluczem i regionem (klucz nigdy w adresie), parametry
+  języków, mapowanie błędów, brak ponawiania wyczerpanego limitu, odpowiedź proxy.
+- Modele językowe: prompt (języki, gra, terminy, „dane, nie instrukcje”), tolerancyjny
+  parser JSON, walidacja adresu (HTTPS poza localhost), tłumaczenie pojedyncze przy złej
+  liczbie wyników, odmowa modelu, brak modelu, niedziałający serwer lokalny.
+- Claude przez oficjalne SDK: model domyślny, fallback przy odmowie z nagłówkiem beta,
+  schemat JSON, `effort` tylko dla obsługujących go modeli, błędy API i test przez Models API.
+- Katalog dostawców i zapis nowych ustawień (także odczyt starego `settings.json`).
+- Zgodność dostarczonych profili z bieżącą wersją aplikacji (`minAppVersion`).
 - DPAPI: szyfrowanie i odszyfrowanie danych dla bieżącego użytkownika Windows.
 
-Testy nie wywołują prawdziwego DeepL ani nie czytają klucza użytkownika.
+Testy nie wywołują prawdziwych usług tłumaczeniowych ani nie czytają klucza użytkownika.
 Pliki tymczasowe są odizolowane od danych aplikacji.
 
 ## Uruchamianie

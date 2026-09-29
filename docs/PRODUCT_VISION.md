@@ -28,7 +28,8 @@ nie wymaga Pythona, CUDA ani lokalnego modelu AI.
 | Ręczne tłumaczenie | Ctrl+Shift+T, zaznaczenie regionu, wynik w panelu lub nakładce |
 | Automatyczny live | obserwacja wybranego okna, OCR zmian i okresowe ponowne sprawdzanie |
 | Prezentacja | bloki przy oryginale lub z zakrywaniem, albo pasek napisów na dole |
-| Własne słownictwo | edycja słownika, ręczne poprawki, import i eksport |
+| Dostawcy tłumaczeń | DeepL, Azure AI Translator, Google, Claude, serwer LLM zgodny z OpenAI (także lokalny), Mock |
+| Własne słownictwo | edycja słownika, ręczne poprawki, import i eksport; dla modeli językowych także terminy wewnątrz zdań |
 | Kontrola użycia | lokalne wyniki, deduplikacja i rezerwacje znaków przed API |
 | Prywatność | lokalny OCR, Cache-only i prywatny cache w pamięci |
 
@@ -43,7 +44,8 @@ pozycjonowanie. Nie oznaczają zakończenia prac nad jakością w ruchu.
 2. PrintWindow/GDI przechwytuje obraz; systemowy OCR rozpoznaje go lokalnie.
 3. Aplikacja grupuje i normalizuje tekst. W live sprawdza również jego aktualność.
 4. Wynik wybierany jest według priorytetu: **ręczna poprawka → słownik → cache → API**.
-5. Brakujący tekst trafia do DeepL, jeżeli pozwala na to tryb pracy i limit użycia.
+5. Brakujący tekst trafia do wybranego dostawcy (domyślnie DeepL), jeżeli pozwala na to
+   tryb pracy i limit użycia. Modele językowe dostają też nazwę gry i pasujące terminy słownika.
 6. Aktualne tłumaczenie pojawia się w nakładce przepuszczającej kliknięcia.
 
 Do dostawcy trafia wyłącznie tekst, nigdy obraz. W live stary wynik może uzupełnić
@@ -77,7 +79,9 @@ a kolejne usprawnienia nie powinny wymagać rozpoznania konkretnego tytułu.
 
 To kierunki dalszych pomiarów, nie wdrożone funkcje. Automatyczne wydzielanie
 tooltipów, osobny tryb historii i wyjaśnianie treści przez LLM także nie są obecnie
-funkcjami aplikacji. Szczegóły i historia prac: [ROADMAP.md](ROADMAP.md).
+funkcjami aplikacji; model językowy może być wyłącznie wybranym dostawcą tłumaczeń
+(opcjonalnie, bez dołączania modelu do paczki — [ADR-013](TECHNOLOGY_DECISIONS.md)).
+Szczegóły i historia prac: [ROADMAP.md](ROADMAP.md).
 
 ## Granice działania
 

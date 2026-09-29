@@ -105,4 +105,82 @@ public class GlossaryTests
     {
         Assert.Throws<FormatException>(() => GlossarySerializer.FromJson("null"));
     }
+
+    [Fact]
+    public void Priorytet_dziala_takze_miedzy_terminem_dokladnym_a_bez_wielkosci_liter()
+    {
+        var service = CreateService(
+            new GlossaryTerm("Spirit", "Duch", CaseSensitive: true, Priority: 0),
+            new GlossaryTerm("spirit", "Esencja ducha", Priority: 10));
+
+        Assert.True(service.TryTranslateExact("Spirit", out var translation));
+        Assert.Equal("Esencja ducha", translation);
+    }
+
+    [Fact]
+    public void Przy_rownym_priorytecie_wygrywa_termin_dokladny()
+    {
+        var service = CreateService(
+            new GlossaryTerm("spirit", "Esencja ducha", Priority: 5),
+            new GlossaryTerm("Spirit", "Duch", CaseSensitive: true, Priority: 5));
+
+        Assert.True(service.TryTranslateExact("Spirit", out var exact));
+        Assert.Equal("Duch", exact);
+        Assert.True(service.TryTranslateExact("SPIRIT", out var insensitive));
+        Assert.Equal("Esencja ducha", insensitive);
+    }
+
+    [Fact]
+    public void Termin_z_podwojna_lub_twarda_spacja_trafia_w_znormalizowany_tekst()
+    {
+        var service = CreateService(
+            new GlossaryTerm("Energy  Shield", "Tarcza energetyczna"),
+            new GlossaryTerm("Life Flask", "Flakon życia"));
+
+        Assert.True(service.TryTranslateExact("Energy Shield", out var shield));
+        Assert.Equal("Tarcza energetyczna", shield);
+        Assert.True(service.TryTranslateExact("Life Flask", out var flask));
+        Assert.Equal("Flakon życia", flask);
+    }
+
+    [Fact]
+    public void FindTermsIn_znajduje_terminy_wewnatrz_zdan_jako_cale_slowa()
+    {
+        var service = CreateService(
+            new GlossaryTerm("Armour", "Pancerz"),
+            new GlossaryTerm("Arm", "Ramię"),
+            new GlossaryTerm("Waystone", "Kamień drogi"));
+
+        var terms = service.FindTermsIn(["+25% increased Armour", "Nothing here"]);
+
+        var term = Assert.Single(terms);
+        Assert.Equal("Pancerz", term.Target);
+    }
+
+    [Fact]
+    public void FindTermsIn_preferuje_dluzsza_fraze_nad_jej_fragmentem()
+    {
+        var service = CreateService(
+            new GlossaryTerm("Shield", "Tarcza"),
+            new GlossaryTerm("Energy Shield", "Tarcza energetyczna"));
+
+        var onlyPhrase = service.FindTermsIn(["+40 to maximum Energy Shield"]);
+        var both = service.FindTermsIn(["Energy Shield protects your Shield"]);
+
+        Assert.Equal(["Energy Shield"], onlyPhrase.Select(static t => t.Source));
+        Assert.Equal(["Energy Shield", "Shield"], both.Select(static t => t.Source));
+    }
+
+    [Fact]
+    public void FindTermsIn_respektuje_wielkosc_liter_i_limit()
+    {
+        var service = CreateService(
+            new GlossaryTerm("Rage", "Szał", CaseSensitive: true),
+            new GlossaryTerm("Stun", "Ogłuszenie"),
+            new GlossaryTerm("Freeze", "Zamrożenie"));
+
+        Assert.Empty(service.FindTermsIn(["The rage of the storm"]));
+        Assert.Single(service.FindTermsIn(["Rage builds up"]));
+        Assert.Single(service.FindTermsIn(["stun and freeze"], maxTerms: 1));
+    }
 }

@@ -80,9 +80,18 @@ dostępny stale w ustawieniach/oknie „O programie"). Dokładna treść:
 
 ## Przechowywanie kluczy API
 
-Klucz API (np. DeepL) jest szyfrowany przez **Windows DPAPI** (`ProtectedData`, zakres
-`CurrentUser`) i zapisywany w `%LOCALAPPDATA%\GameTranslatorOverlay`. Odszyfrować go może
-wyłącznie ten sam użytkownik Windows na tej samej maszynie.
+Klucze API (DeepL, Azure, Google, Anthropic, serwer LLM — każdy w osobnym pliku) są
+szyfrowane przez **Windows DPAPI** (`ProtectedData`, zakres `CurrentUser`) i zapisywane
+w `%LOCALAPPDATA%\GameTranslatorOverlay`. Odszyfrować je może wyłącznie ten sam użytkownik
+Windows na tej samej maszynie.
+
+Klucze trafiają wyłącznie do nagłówków zapytań (`DeepL-Auth-Key`, `Ocp-Apim-Subscription-Key`,
+`X-goog-api-key`, `x-api-key`, `Authorization: Bearer`) — nigdy do adresu URL. Adres serwera
+zgodnego z OpenAI musi używać **HTTPS**; zwykłe HTTP jest dozwolone tylko dla serwera na tym
+komputerze (loopback), a adres z loginem lub parametrami jest odrzucany. Dzięki temu klucz
+i tekst z ekranu nie przechodzą przez sieć otwartym tekstem. Klucz serwera LLM jest przypisany
+do adresu, dla którego go zapisano, i nie jest wysyłany do innego serwera. Klient Claude ma
+jawnie ustawiony adres API, więc zmienne środowiskowe SDK nie przekierują klucza.
 
 Czego **NIGDY** nie robimy z kluczami API:
 

@@ -137,6 +137,33 @@ public sealed class ContentCatalogTests : IDisposable
     }
 
     [Fact]
+    public void ProfileCatalog_pomija_profil_wymagajacy_nowszej_aplikacji()
+    {
+        var root = Path.Combine(_temp.Path, "profiles");
+        Directory.CreateDirectory(Path.Combine(root, "z-przyszlosci"));
+        File.WriteAllText(Path.Combine(root, "z-przyszlosci", "profile.json"),
+            """{"id":"z-przyszlosci","name":"Profil z przyszłości","sourceLanguage":"en","minAppVersion":"9.0.0"}""");
+
+        var (profiles, issues) = new ProfileCatalog([root], new Version(0, 2, 2)).LoadAll();
+
+        Assert.Empty(profiles);
+        var issue = Assert.Single(issues);
+        Assert.Contains("9.0.0", issue.Message);
+    }
+
+    [Fact]
+    public void Dostarczone_profile_sa_zgodne_z_obecna_wersja_aplikacji()
+    {
+        var repoProfiles = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "profiles"));
+        Assert.True(Directory.Exists(repoProfiles), repoProfiles);
+
+        var (profiles, issues) = new ProfileCatalog([repoProfiles]).LoadAll();
+
+        Assert.Empty(issues);
+        Assert.Contains(profiles, static p => p.Id == "path-of-exile-2");
+    }
+
+    [Fact]
     public void GlossaryCatalog_laduje_slownik_wg_pary_jezykow()
     {
         var root = Path.Combine(_temp.Path, "glossaries");

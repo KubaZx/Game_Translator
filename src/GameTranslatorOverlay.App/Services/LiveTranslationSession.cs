@@ -126,6 +126,9 @@ public sealed class LiveSessionOptions
     public bool EnableDiagnostics { get; init; }
 
     public double OcrUpscale { get; init; }
+
+    /// <summary>False, gdy profil jawnie wyłączył automatyczne powiększanie małych wycinków.</summary>
+    public bool AllowAutoUpscale { get; init; } = true;
 }
 
 /// <summary>
@@ -528,7 +531,8 @@ public sealed class LiveTranslationSession(
                 var downscale = OcrScaling.ComputeDownscale(source.Width, source.Height, ocrProvider.MaxImageDimension);
                 var factor = downscale < 1.0
                     ? downscale
-                    : OcrScaling.ComputeUpscale(source.Width, source.Height, ocrProvider.MaxImageDimension, preferredUpscale);
+                    : OcrScaling.ComputeUpscale(
+                        source.Width, source.Height, ocrProvider.MaxImageDimension, preferredUpscale, options.AllowAutoUpscale);
 
                 if (Math.Abs(factor - 1.0) > 0.001)
                 {

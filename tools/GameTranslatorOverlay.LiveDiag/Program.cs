@@ -9,6 +9,7 @@ using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.App.Ocr;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.Core.Glossary;
+using GameTranslatorOverlay.Core.Ocr;
 using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Core.Usage;
 using GameTranslatorOverlay.Infrastructure.Caching;
@@ -123,11 +124,13 @@ internal static class Program
             else
             {
                 var profile = orchestrator.ActiveProfile;
+                var upscale = OcrScaling.ResolvePreference(profile?.Ocr?.Upscale, settings.OcrUpscale);
                 var options = new LiveSessionOptions
                 {
                     Fps = profile?.ChangeDetection?.Fps ?? 6,
                     ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.0,
-                    OcrUpscale = profile?.Ocr?.Upscale ?? settings.OcrUpscale,
+                    OcrUpscale = upscale.Preferred,
+                    AllowAutoUpscale = upscale.AllowAuto,
                     DebugFrameDumpDir = cli.DumpFrames ? Path.Combine(diagnosticRoot, "frames") : null,
                     EnableDiagnostics = true,
                 };

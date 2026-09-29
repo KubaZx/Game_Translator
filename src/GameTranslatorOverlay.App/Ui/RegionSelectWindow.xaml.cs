@@ -28,6 +28,9 @@ public partial class RegionSelectWindow : Window
         return window._completion.Task;
     }
 
+    /// <summary>Czy okno zaznaczania jest właśnie otwarte.</summary>
+    public static bool IsOpen => _active is not null;
+
     /// <summary>Zamyka otwarte okno zaznaczania — np. gdy aplikacja kończy pracę.</summary>
     public static void CloseActive() => _active?.Close();
 
