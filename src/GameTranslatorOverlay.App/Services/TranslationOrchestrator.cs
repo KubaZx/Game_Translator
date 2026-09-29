@@ -189,8 +189,9 @@ public sealed class TranslationOrchestrator(
             // Kopia pikseli oryginału do próbkowania koloru tekstu (przed skalowaniem).
             var pixelsForColor = ScreenCapture.ToOcrBitmap(bitmap);
 
-            var preferredUpscale = ActiveProfile?.Ocr?.Upscale ?? settings.OcrUpscale;
-            var upscale = OcrScaling.ComputeUpscale(bitmap.Width, bitmap.Height, ocrProvider.MaxImageDimension, preferredUpscale);
+            var preference = OcrScaling.ResolvePreference(ActiveProfile?.Ocr?.Upscale, settings.OcrUpscale);
+            var upscale = OcrScaling.ComputeUpscale(
+                bitmap.Width, bitmap.Height, ocrProvider.MaxImageDimension, preference.Preferred, preference.AllowAuto);
             var downscale = OcrScaling.ComputeDownscale(bitmap.Width, bitmap.Height, ocrProvider.MaxImageDimension);
             var factor = downscale < 1.0 ? downscale : upscale;
 

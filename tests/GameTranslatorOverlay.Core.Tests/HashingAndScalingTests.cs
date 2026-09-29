@@ -55,4 +55,53 @@ public class HashingAndScalingTests
         var union = new RectPx(10, 10, 20, 20).Union(new RectPx(50, 40, 10, 10));
         Assert.Equal(new RectPx(10, 10, 50, 40), union);
     }
+
+    [Fact]
+    public void ComputeUpscale_bez_automatyki_nie_powieksza_malych_regionow()
+    {
+        Assert.Equal(1.0, OcrScaling.ComputeUpscale(200, 60, 2600, preferredUpscale: 1.0, allowAutoUpscale: false));
+        Assert.Equal(3.0, OcrScaling.ComputeUpscale(200, 60, 2600, preferredUpscale: 3.0, allowAutoUpscale: false));
+    }
+
+    [Theory]
+    [InlineData(null, 0.0, 0.0, true)]
+    [InlineData(null, 1.0, 1.0, true)]
+    [InlineData(1.0, 0.0, 1.0, false)]
+    [InlineData(2.5, 0.0, 2.5, true)]
+    public void ResolvePreference_rozroznia_brak_ustawienia_od_jawnego_1(
+        double? profileUpscale, double settingsUpscale, double expectedPreferred, bool expectedAuto)
+    {
+        var preference = OcrScaling.ResolvePreference(profileUpscale, settingsUpscale);
+
+        Assert.Equal(expectedPreferred, preference.Preferred);
+        Assert.Equal(expectedAuto, preference.AllowAuto);
+    }
+
+    [Theory]
+    [InlineData(0.5)]
+    [InlineData(1.0 / 1.5)]
+    [InlineData(1.0 / 3.0)]
+    [InlineData(2.0)]
+    public void RectPx_Scale_zachowuje_krawedzie_bez_dryfu(double factor)
+    {
+        var rect = new RectPx(5, 7, 13, 9);
+
+        var scaled = rect.Scale(factor);
+
+        Assert.Equal((int)Math.Round(rect.X * factor), scaled.X);
+        Assert.Equal((int)Math.Round(rect.Right * factor), scaled.Right);
+        Assert.Equal((int)Math.Round(rect.Y * factor), scaled.Y);
+        Assert.Equal((int)Math.Round(rect.Bottom * factor), scaled.Bottom);
+    }
+
+    [Fact]
+    public void RectPx_Scale_z_powrotem_trafia_w_oryginal()
+    {
+        // Typowy przypadek OCR: 1.5× przed rozpoznaniem, wynik skalowany odwrotnie.
+        var original = new RectPx(101, 57, 333, 41);
+
+        var roundTrip = original.Scale(1.5).Scale(1.0 / 1.5);
+
+        Assert.Equal(original, roundTrip);
+    }
 }

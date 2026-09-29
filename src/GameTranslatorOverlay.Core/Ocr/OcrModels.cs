@@ -35,11 +35,18 @@ public readonly record struct RectPx(int X, int Y, int Width, int Height)
         return right <= x || bottom <= y ? default : new RectPx(x, y, right - x, bottom - y);
     }
 
-    public RectPx Scale(double factor) => new(
-        (int)Math.Round(X * factor),
-        (int)Math.Round(Y * factor),
-        (int)Math.Round(Width * factor),
-        (int)Math.Round(Height * factor));
+    /// <summary>
+    /// Skaluje krawędzie, a nie początek i rozmiar osobno: niezależne zaokrąglanie X i Width
+    /// przesuwało prawą (dolną) krawędź nawet o 1 px względem prawdziwej przeskalowanej.
+    /// </summary>
+    public RectPx Scale(double factor)
+    {
+        var x = (int)Math.Round(X * factor);
+        var y = (int)Math.Round(Y * factor);
+        var right = (int)Math.Round(Right * factor);
+        var bottom = (int)Math.Round(Bottom * factor);
+        return new RectPx(x, y, right - x, bottom - y);
+    }
 }
 
 public sealed record OcrWord(string Text, RectPx Box);

@@ -401,6 +401,14 @@ public partial class MainWindow : Window
     {
         if (_selectingRegion)
         {
+            if (RegionSelectWindow.IsOpen)
+            {
+                // Ponowny skrót przy otwartym zaznaczaniu działa jak Esc — zamyka selektor
+                // (wcześniej był po cichu ignorowany). Kolejne naciśnięcie otwiera go od nowa.
+                RegionSelectWindow.CloseActive();
+                return;
+            }
+
             // Ponowny skrót w trakcie wiszącego tłumaczenia = prawdziwe latest-wins:
             // anulujemy starą operację zamiast po cichu ignorować użytkownika.
             _orchestrator.CancelActiveOperation();
@@ -742,13 +750,15 @@ public partial class MainWindow : Window
         }
 
         var profile = _orchestrator.ActiveProfile;
+        var upscale = OcrScaling.ResolvePreference(profile?.Ocr?.Upscale, _settings.OcrUpscale);
         var options = new LiveSessionOptions
         {
             Fps = profile?.ChangeDetection?.Fps ?? 6,
             // Domyślnie 0: każda mocna zmiana komórki budzi przetwarzanie — krótkie
             // linijki dialogów w grach ze statycznym obrazem zmieniają ledwie kilka komórek.
             ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.0,
-            OcrUpscale = profile?.Ocr?.Upscale ?? _settings.OcrUpscale,
+            OcrUpscale = upscale.Preferred,
+            AllowAutoUpscale = upscale.AllowAuto,
         };
 
         // Wczesne utworzenie HWND nakładki, żeby wiedzieć, czy wykluczenie z capture działa.

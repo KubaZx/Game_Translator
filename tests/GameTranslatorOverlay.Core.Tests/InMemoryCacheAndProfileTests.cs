@@ -139,6 +139,45 @@ public class ProfileValidatorTests
         Assert.NotEmpty(ProfileValidator.Validate(profile));
     }
 
+    [Theory]
+    [InlineData("0.1.0", true)]
+    [InlineData("0.2.2", true)]
+    [InlineData("v0.2", true)]
+    [InlineData("0.2.2-beta.1", true)]
+    [InlineData("0.3.0", false)]
+    [InlineData("1", false)]
+    public void MinAppVersion_porownuje_sie_z_wersja_aplikacji(string minAppVersion, bool accepted)
+    {
+        var profile = ValidProfile();
+        profile.MinAppVersion = minAppVersion;
+
+        var errors = ProfileValidator.Validate(profile, new Version(0, 2, 2, 0));
+
+        Assert.Equal(accepted, errors.Count == 0);
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("1.2.3.4")]
+    public void Niepoprawny_minAppVersion_zglasza_blad(string minAppVersion)
+    {
+        var profile = ValidProfile();
+        profile.MinAppVersion = minAppVersion;
+
+        Assert.NotEmpty(ProfileValidator.Validate(profile));
+    }
+
+    [Fact]
+    public void Profil_bez_upscale_nie_nadpisuje_ustawien_a_jawne_1_jest_poprawne()
+    {
+        var withoutUpscale = ProfileSerializer.FromJson("""{"id":"a","name":"A","ocr":{"minTextHeight":10}}""");
+        var explicitOne = ProfileSerializer.FromJson("""{"id":"b","name":"B","ocr":{"upscale":1.0}}""");
+
+        Assert.Null(withoutUpscale.Ocr!.Upscale);
+        Assert.Equal(1.0, explicitOne.Ocr!.Upscale);
+        Assert.Empty(ProfileValidator.Validate(explicitOne));
+    }
+
     [Fact]
     public void Serializer_czyta_schemat_json_profilu()
     {

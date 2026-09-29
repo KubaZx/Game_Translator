@@ -22,7 +22,11 @@ public sealed class GameProfile
 
 public sealed class OcrProfileSettings
 {
-    public double Upscale { get; set; } = 1.0;
+    /// <summary>
+    /// Powiększenie przed OCR: brak = ustawienia aplikacji (automatyka), 1.0 = bez
+    /// powiększania, powyżej 1.0 = stały współczynnik (do 4.0).
+    /// </summary>
+    public double? Upscale { get; set; }
     public int MinTextHeight { get; set; } = 8;
 }
 
@@ -55,7 +59,11 @@ public static class ProfileSerializer
 
 public static class ProfileValidator
 {
-    public static IReadOnlyList<string> Validate(GameProfile profile)
+    /// <summary>
+    /// Sprawdza profil. Gdy podano <paramref name="appVersion"/>, profil wymagający nowszej
+    /// aplikacji (pole „minAppVersion”) jest błędny — może używać ustawień, których ta wersja nie zna.
+    /// </summary>
+    public static IReadOnlyList<string> Validate(GameProfile profile, Version? appVersion = null)
     {
         var errors = new List<string>();
 
@@ -80,7 +88,7 @@ public static class ProfileValidator
         {
             errors.Add("Profil musi wskazywać język źródłowy (pole „sourceLanguage”).");
         }
-        if (profile.Ocr is { } ocr && (ocr.Upscale < 1.0 || ocr.Upscale > 4.0))
+        if (profile.Ocr is { Upscale: { } upscale } && (upscale < 1.0 || upscale > 4.0))
         {
             errors.Add("Wartość ocr.upscale musi mieścić się w zakresie 1.0–4.0.");
         }
@@ -89,6 +97,43 @@ public static class ProfileValidator
             errors.Add("Wartość changeDetection.fps musi mieścić się w zakresie 0–30.");
         }
 
+        if (!string.IsNullOrWhiteSpace(profile.MinAppVersion))
+        {
+            if (!TryParseVersion(profile.MinAppVersion, out var required))
+            {
+                errors.Add($"Pole „minAppVersion” („{profile.MinAppVersion}”) nie jest numerem wersji (np. 0.2.2).");
+            }
+            else if (appVersion is not null && Normalize(appVersion) < required)
+            {
+                errors.Add($"Profil wymaga nowszej wersji aplikacji ({required.ToString(3)} lub nowszej); " +
+                           $"obecna wersja: {Normalize(appVersion).ToString(3)}.");
+            }
+        }
+
         return errors;
     }
+
+    /// <summary>
+    /// Czyta wersję SemVer („0.2.2”, „v0.3”, „1.0.0-beta.1”) jako major.minor.patch;
+    /// przyrostki przedpremierowe i metadane są pomijane.
+    /// </summary>
+    public static bool TryParseVersion(string text, out Version version)
+    {
+        var core = text.Trim().TrimStart('v', 'V');
+        var cut = core.IndexOfAny(['-', '+']);
+        if (cut >= 0) core = core[..cut];
+        if (!core.Contains('.')) core += ".0";
+
+        if (Version.TryParse(core, out var parsed) && parsed.Revision <= 0)
+        {
+            version = Normalize(parsed);
+            return true;
+        }
+
+        version = new Version(0, 0, 0);
+        return false;
+    }
+
+    private static Version Normalize(Version version) =>
+        new(version.Major, version.Minor, Math.Max(0, version.Build));
 }
