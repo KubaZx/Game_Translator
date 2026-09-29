@@ -1,12 +1,14 @@
 # Roadmap — GameTranslatorOverlay
 
-## Obecny stan — 15 września 2026
+## Obecny stan — 29 września 2026
 
 Ostatnie opublikowane wydanie to **0.2.2**. Na `main` są już późniejsze poprawki
 live: aktualność sceny i lokalnych opisów, nadzorowane tłumaczenia w toku,
 stabilizacja kolejnych odczytów oraz położenia. Kolejna lokalna poprawka zachowuje
-napisy o identycznym obrazie źródła podczas ruchu tła. Przeszło **371 testów**, jawna
-kompilacja App i smoke test Windows OCR. Wyniki opisano w rundach poniżej.
+napisy o identycznym obrazie źródła podczas ruchu tła. Runda 29 września dodaje
+kolejnych dostawców tłumaczeń (Azure, Google, modele językowe z kontekstem gry i słownika)
+i zamyka pozycje backlogu audytu #3. Przeszło **482 testy** i kompilacja całego
+rozwiązania; próby wizualne nowych pól okna czekają na Windows (M23–M26).
 
 Produkt jest rozwijany dla różnych gier. Escape Academy służy do pomiarów;
 PoE2 jest jednym z obsługiwanych przypadków z dodatkowym profilem. Aktualny priorytet
@@ -95,7 +97,7 @@ Słowniki wg schematu `glossaries/<id>/en-pl.json` (dopasowanie całych słów/f
 
 **Kryterium ukończenia:** użytkownik dodaje termin do słownika i poprawia tłumaczenie z poziomu UI; korekta wygrywa z każdym innym źródłem; słownik da się wyeksportować i zaimportować bez utraty danych; konflikty są raportowane.
 
-### Etap 11 — Opcjonalne profile gier ✅ (autodetekcja po procesie gry; walidacja minAppVersion — planowana)
+### Etap 11 — Opcjonalne profile gier ✅ (autodetekcja po procesie gry; walidacja minAppVersion od 2026-09-29)
 
 Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po nazwie procesu/tytule okna, parametry OCR i detekcji zmian, powiązany słownik, `minAppVersion`). Pierwszy dostarczony profil: Path of Exile 2 wraz ze słownikiem terminów.
 
@@ -171,17 +173,17 @@ Przy każdym konflikcie decyzyjnym rozstrzyga niższy numer:
 
 ## Backlog po audycie #3 (2026-08-06, znaleziska LOW odłożone świadomie)
 
-- `OcrScaling.ComputeUpscale`: wartość 1.0 z profilu jest nieodróżnialna od „nie ustawiono"
-  (profil nie może jawnie WYŁĄCZYĆ auto-powiększenia małych regionów) — wymaga pola nullable
-  w profilu, zmiana kontraktu.
-- `GlossaryService`: termin case-sensitive zawsze wygrywa z case-insensitive niezależnie od
-  Priority (priorytet działa tylko wewnątrz jednej mapy).
-- `GlossaryService`: klucze terminów są tylko Trim(), a wejście jest normalizowane
-  (NBSP/wielokrotne spacje) — termin z podwójną spacją w JSON nigdy nie trafi.
-- `RectPx.Scale`: zaokrąglanie X i Width osobno dryfuje krawędź do 1 px od prawdziwej
-  przeskalowanej — poprawka wymaga przeliczenia oczekiwań w testach skalowania.
-- Ctrl+Shift+T podczas OTWARTEGO selektora regionu jest ignorowany (latest-wins nie obejmuje
-  fazy zaznaczania) — wymaga anulowania RegionSelectWindow z zewnątrz.
+Zamknięte 2026-09-29 (szczegóły w rundzie poniżej):
+
+- ✅ `OcrScaling.ComputeUpscale`: profil może jawnie wyłączyć auto-powiększenie (`upscale: 1.0`);
+  brak pola oznacza ustawienia aplikacji.
+- ✅ `GlossaryService`: priorytet działa między terminami z rozróżnianiem wielkości liter i bez.
+- ✅ `GlossaryService`: klucze terminów są normalizowane jak tekst z OCR.
+- ✅ `RectPx.Scale`: skalowanie krawędzi zamiast X i Width osobno — bez dryfu 1 px.
+- ✅ Ctrl+Shift+T przy otwartym selektorze regionu zamyka go (jak Esc).
+
+Otwarte:
+
 - Windows Graphics Capture jako alternatywna ścieżka capture — wg pomiarów na PoE2 (audyt #3
   i diagnoza live) GDI/PrintWindow działa dobrze (25–48 ms, zero fallbacku), więc WGC to
   ulepszenie „nice to have", nie naprawa.
@@ -356,3 +358,30 @@ pikseli na blok. Animowane lub przezroczyste tło nie daje takiego dowodu. Pierw
 jeszcze niewyświetlone tłumaczenie menu nadal może zostać odrzucone przy ruchu.
 Cała runda odbyła się bez gry i bez DeepL. Próby wyglądu, innych DPI oraz rozszerzenie
 na pozostałe sposoby przechwytywania pozostają do wykonania.
+
+### Runda 2026-09-29 — dostawcy tłumaczeń, słownik w kontekście i backlog audytu #3
+
+Runda wspólna dla wszystkich gier; nie zmienia progów ani logiki sesji live.
+
+- **Dostawcy:** Azure AI Translator (2 mln znaków miesięcznie w planie F0), Google Cloud
+  Translation, model językowy przez API zgodne z OpenAI (OpenAI, OpenRouter, Groq, lokalne
+  Ollama/LM Studio) i Claude na oficjalnym SDK Anthropic. DeepL pozostaje domyślny;
+  każdy dostawca ma osobny klucz DPAPI. Decyzja i jej stosunek do DoD pkt 1: ADR-013.
+- **Wspólny rdzeń HTTP** (`ProviderHttp`): timeout, ograniczony retry, mapowanie błędów;
+  DeepL przeniesiony bez zmiany zachowania (dotychczasowe testy DeepL bez zmian).
+- **Słownik w kontekście:** modele językowe dostają nazwę gry z profilu i terminy słownika
+  występujące w tłumaczonych zdaniach (`FindTermsIn`, całe słowa, dłuższe frazy najpierw).
+  Odpowiedź z inną liczbą tłumaczeń nie jest przypisywana blokom — małe partie są wtedy
+  tłumaczone pojedynczo.
+- **Backlog audytu #3:** pięć z sześciu pozycji zamknięte (wyżej); `minAppVersion` profili
+  jest sprawdzany przy wczytywaniu.
+- **Okno aplikacji:** przejście między polami bez zmiany wartości nie zapisuje ustawień
+  i nie przebudowuje pipeline'u, więc nie anuluje tłumaczeń live w locie.
+
+Weryfikacja: 482 testy (361 Core + 121 Infrastructure) i kompilacja całego rozwiązania
+z aplikacją WPF bez ostrzeżeń — na Linuksie z `-p:EnableWindowsTargeting=true`. Nie było
+w tej rundzie: uruchomienia okna, testów DPAPI, smoke testu Windows OCR, SceneReplay ani
+wywołań prawdziwych usług tłumaczeniowych. Jakość tłumaczeń poszczególnych dostawców
+i modeli nie została zmierzona. Do wykonania na Windows: M23–M26 z MANUAL_TESTING.md
+oraz powtórka smoke testu i scenariuszy SceneReplay (zmiana `RectPx.Scale` może przesunąć
+pozycję bloku o 1 px względem wcześniejszych pomiarów).

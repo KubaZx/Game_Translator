@@ -50,10 +50,15 @@ Implementacje kontraktów z Core, które wymagają świata zewnętrznego, ale ni
 - **Cache**: SQLite przez `Microsoft.Data.Sqlite`, migracje przez `PRAGMA user_version`.
 - **Tłumaczenie**: `DeepLTranslationProvider` (HTTP, `/v2/translate` batch do 50 tekstów,
   `/v2/usage` do testu połączenia i licznika; `api-free.deepl.com` dla kluczy `:fx`,
-  `api.deepl.com` dla pro; obsługa 403/456/429/timeout/braku sieci) oraz
-  `MockTranslationProvider` (deterministyczny — testy i praca bez klucza).
-- **Klucze API**: Windows DPAPI (`ProtectedData`, zakres CurrentUser), zapis w
-  `%LOCALAPPDATA%\GameTranslatorOverlay`.
+  `api.deepl.com` dla pro; obsługa 403/456/429/timeout/braku sieci),
+  `AzureTranslatorProvider`, `GoogleTranslateProvider`, dostawcy modeli językowych
+  (`OpenAiCompatibleTranslationProvider` dla OpenAI/Ollamy/LM Studio oraz
+  `ClaudeTranslationProvider` na oficjalnym SDK Anthropic) i `MockTranslationProvider`
+  (deterministyczny — testy i praca bez klucza). Wspólną pętlę HTTP (timeout, ograniczony
+  retry, mapowanie błędów) zapewnia `ProviderHttp`; opis dla UI — `TranslationProviderCatalog`.
+  Szczegóły: [API_PROVIDERS.md](API_PROVIDERS.md).
+- **Klucze API**: Windows DPAPI (`ProtectedData`, zakres CurrentUser), osobny sekret na
+  dostawcę, zapis w `%LOCALAPPDATA%\GameTranslatorOverlay`.
 - **Pliki**: odczyt/zapis profili gier i słowników (JSON, schematy w rozdz. 7),
   `settings.json`.
 - **Logowanie**: konfiguracja Serilog (plik rolling; bez treści tłumaczeń w trybie
@@ -113,8 +118,11 @@ Rozpoznaje tekst na bitmapie. Obecna implementacja: `WindowsOcrProvider`
 
 ### ITranslationProvider
 
-Tłumaczy partię tekstów. Implementacje: `DeepLTranslationProvider`,
-`MockTranslationProvider` (obie w Infrastructure).
+Tłumaczy partię tekstów. Implementacje: `DeepLTranslationProvider`, `AzureTranslatorProvider`,
+`GoogleTranslateProvider`, `OpenAiCompatibleTranslationProvider`, `ClaudeTranslationProvider`
+(Infrastructure) oraz `MockTranslationProvider` (Core). Dostawcy modeli językowych
+implementują też `IContextualTranslationProvider` — pipeline przekazuje im
+`TranslationContext` (nazwa gry z profilu + terminy słownika z tłumaczonej partii).
 
 - Wejście: lista tekstów + para językowa; wyjście: lista tłumaczeń w tej samej kolejności.
 - Batch (DeepL: do 50 tekstów na zapytanie).
@@ -140,7 +148,10 @@ Lokalny słownik terminów — działa PRZED tłumaczeniem maszynowym i bez siec
 
 - Ładuje słowniki JSON (`glossaries/<id>/en-pl.json`, schemat w rozdz. 7).
 - Dopasowanie: całe słowa/frazy (nigdy fragment słowa), dłuższe frazy przed krótszymi,
-  konflikt rozstrzyga `priority`.
+  konflikt rozstrzyga `priority` (także między terminem z rozróżnianiem wielkości liter
+  i bez; przy remisie wygrywa dokładny). Klucze są normalizowane jak tekst z OCR.
+- `TryTranslateExact` tłumaczy lokalnie tekst będący w całości terminem;
+  `FindTermsIn` wskazuje terminy wewnątrz zdań dla dostawców kontekstowych.
 - Wykrywa i raportuje konflikty (ten sam `source` → różne `target`).
 - Etap 10: edycja terminów z UI, import/eksport.
 
@@ -220,6 +231,11 @@ rdzeń aplikacji jest uniwersalny. Konwencja pól: camelCase.
   "minAppVersion": "0.1.0"
 }
 ```
+
+- `ocr.upscale`: brak pola = ustawienia aplikacji (automatyczne 2× dla małych regionów),
+  `1.0` = bez powiększania, `1.0`–`4.0` = stały współczynnik.
+- `minAppVersion` (SemVer, np. `0.2.2`; przyrostek `-beta` jest pomijany): profil wymagający
+  nowszej aplikacji nie jest wczytywany, a problem trafia do logu.
 
 ### Słownik — `glossaries/<id>/en-pl.json`
 

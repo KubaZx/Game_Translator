@@ -597,3 +597,47 @@ M17–M22. Przy późniejszej próbie w grze sprawdź:
 Ochrona wymaga identycznych pikseli źródła z marginesem 3 px i tej samej wielkości
 przechwyconego okna. Nie dotyczy klatek ze skalowaniem OCR ani przechwytywania
 zapasowego z ekranu. Brak ochrony w takich warunkach nie dowodzi regresji tej funkcji.
+
+## M23 — Wybór dostawcy tłumaczeń i dodatkowe pola (2026-09-29)
+
+Dotyczy od: wielu dostawców tłumaczeń. Runda była sprawdzona testami i kompilacją,
+bez uruchomienia okna — wygląd i zachowanie pól wymagają tej próby.
+
+**Kroki:**
+1. Przełącz „Dostawca tłumaczeń” kolejno na DeepL, Azure, Google, Model językowy, Claude, Mock.
+2. Dla Azure wpisz region z błędem (np. `west europe`), przejdź tabulatorem dalej.
+3. Dla Modelu językowego kliknij kolejno OpenAI / Ollama / LM Studio; wpisz `http://example.com/v1`.
+4. Zapisz klucz dla Azure, przełącz na DeepL i z powrotem.
+5. Przejdź tabulatorem przez pola bez zmieniania wartości przy działającym live.
+
+**Oczekiwany wynik:** nagłówek sekcji pokazuje wybranego dostawcę; widoczne są tylko jego
+pola (region / adres i model / model Claude); dla Mock pole klucza jest wyłączone. Zły region
+wraca do poprzedniej wartości z ostrzeżeniem w statusie; adres `http://` zdalnego serwera daje
+ostrzeżenie o HTTPS. Klucze są osobne: klucz Azure nie zastępuje klucza DeepL. Samo przejście
+przez pola nie zapisuje ustawień i nie przerywa tłumaczeń live. Ciemny motyw pozostaje czytelny.
+
+## M24 — Lokalny model językowy (Ollama / LM Studio)
+
+**Kroki:**
+1. Uruchom Ollamę z pobranym modelem; w aplikacji wybierz Model językowy → Ollama, podaj model.
+2. Kliknij Testuj; przetłumacz region z tekstem gry i uruchom krótko tryb live.
+3. Zatrzymaj Ollamę i kliknij Testuj ponownie; podaj nieistniejący model.
+
+**Oczekiwany wynik:** status klucza mówi, że tekst zostaje na tym komputerze; test pokazuje
+próbne tłumaczenie; terminy z aktywnego słownika pojawiają się w tłumaczeniu dłuższych zdań.
+Zatrzymany serwer daje komunikat o uruchomieniu Ollamy/LM Studio, zły model — o nazwie modelu.
+
+## M25 — Claude
+
+**Kroki:** zapisz klucz Anthropic, kliknij Testuj, przetłumacz opis przedmiotu z profilem PoE2;
+zmień model na `claude-haiku-4-5` i powtórz.
+
+**Oczekiwany wynik:** test podaje nazwę modelu; tłumaczenie używa terminów ze słownika PoE2;
+zmiana modelu działa bez restartu. Zły klucz daje komunikat o kluczu, nie wyjątek.
+
+## M26 — Ctrl+Shift+T przy otwartym zaznaczaniu
+
+**Kroki:** wciśnij Ctrl+Shift+T, a przy otwartym zaznaczaniu wciśnij go ponownie; potem trzeci raz.
+
+**Oczekiwany wynik:** drugie naciśnięcie zamyka zaznaczanie (status „Zaznaczanie anulowane.”),
+trzecie otwiera je od nowa.

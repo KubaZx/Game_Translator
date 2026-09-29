@@ -17,21 +17,62 @@ najnowszych poprawek stabilności — szczegóły w
    gry** (dla angielskiego: *Ustawienia → Czas i język → Język i region → Dodaj język →
    English (United States)*). Status OCR widać na dole głównego okna.
 
-## Pierwsze uruchomienie — klucz DeepL
+## Pierwsze uruchomienie — wybór dostawcy tłumaczeń
 
-1. Przygotuj konto i klucz **DeepL API**. Zwykły dostęp do internetowego tłumacza DeepL nie zastępuje klucza API.
-2. Skopiuj swój klucz API, wklej w sekcji **Klucz API** i kliknij
-   **Zapisz klucz**, potem **Testuj**. Klucz jest przechowywany lokalnie z ochroną
-   Windows DPAPI i używany do uwierzytelniania żądań do DeepL.
-3. Bez klucza możesz używać dostawcy **Mock** (testowy — dokleja `[PL]` zamiast tłumaczyć)
-   albo trybu **Cache-only** (lokalne poprawki, słownik i zapisane tłumaczenia).
+W polu **Dostawca tłumaczeń** wybierz, kto tłumaczy tekst. Sekcja pod spodem pokazuje
+pola potrzebne dla wybranego dostawcy. Każdy dostawca ma **osobny klucz** — zapisanie
+klucza Azure nie usuwa klucza DeepL. Klucze są przechowywane lokalnie z ochroną Windows
+DPAPI. Po wpisaniu klucza kliknij **Zapisz klucz**, a potem **Testuj**.
+
+| Dostawca | Kiedy wybrać | Co przygotować |
+|---|---|---|
+| **DeepL** | domyślny, dobra jakość EN→PL | klucz DeepL API (darmowy kończy się na `:fx`, 500 tys. znaków/mies.) |
+| **Azure AI Translator** | najwięcej darmowych znaków | klucz zasobu Translator (plan F0: 2 mln znaków/mies.) i region, np. `westeurope` (puste dla zasobu globalnego) |
+| **Google Cloud Translation** | alternatywa dla DeepL | klucz API projektu z włączonym Cloud Translation API |
+| **Model językowy (OpenAI / Ollama / LM Studio…)** | tłumaczenie z kontekstem gry; lokalnie — bez internetu | adres serwera i nazwa modelu; klucz tylko dla usług w chmurze |
+| **Claude (Anthropic)** | tłumaczenie z kontekstem gry przez Claude | klucz z console.anthropic.com; model domyślny `claude-opus-5-5` |
+| **Mock** | test działania bez internetu | nic — dokleja `[PL]` zamiast tłumaczyć |
+
+Bez klucza możesz też korzystać z trybu **Cache-only** (lokalne poprawki, słownik
+i zapisane tłumaczenia). Zwykły dostęp do tłumacza na stronie DeepL lub Google nie
+zastępuje klucza API.
+
+### Modele językowe: nazwa gry i słownik w tłumaczeniu
+
+Dostawcy **Model językowy** i **Claude** dostają razem z tekstem nazwę gry z aktywnego
+profilu oraz te terminy z Twojego słownika, które występują w tłumaczonych zdaniach
+(np. „Energy Shield” → „Tarcza energetyczna” także wewnątrz dłuższego opisu). Dzięki temu
+nazwy są spójne w całej grze. Klasyczni tłumacze (DeepL, Azure, Google) używają słownika
+tylko dla tekstów, które w całości są terminem.
+
+### Lokalny model — tłumaczenie bez wysyłania tekstu
+
+1. Zainstaluj [Ollamę](https://ollama.com) albo [LM Studio](https://lmstudio.ai)
+   i pobierz model (np. w Ollamie: `ollama pull qwen2.5:7b`).
+2. Wybierz dostawcę **Model językowy**, kliknij przycisk **Ollama** albo **LM Studio**
+   (wpisze adres serwera) i podaj nazwę modelu.
+3. Klucz zostaw pusty i kliknij **Testuj** — zobaczysz próbne tłumaczenie.
+
+Adres `http://localhost…` oznacza, że tekst nie opuszcza komputera; aplikacja pokazuje to
+pod polem klucza. Adres zdalnego serwera musi zaczynać się od `https://`. Mały model
+lokalny tłumaczy wolniej i słabiej niż usługi w chmurze — sprawdza się najlepiej
+w trybie ręcznym i przy dialogach.
+
+### Claude
+
+Domyślnym modelem jest `claude-opus-5-5`; w polu **Model** możesz wybrać tańszy
+i szybszy model (np. `claude-haiku-4-5`) albo wpisać inny identyfikator. Gdy filtr
+bezpieczeństwa odrzuci fragment (zdarza się rzadko, np. przy brutalnych opisach),
+Claude sam ponawia zapytanie na modelu zastępczym wskazanym przez Anthropic; dotyczy to
+modeli `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5` i `claude-fable-5-1`.
+Opłaty rozlicza Anthropic według zużytych tokenów, nie znaków.
 
 ## Tłumaczenie ręczne (podstawowy tryb)
 
 1. Uruchom grę w trybie **okienkowym** lub **borderless fullscreen** (pełny ekran
    „wyłączny” nie jest obsługiwany).
 2. Wciśnij **Ctrl+Shift+T** — ekran przyciemni się; zaznacz myszą fragment z tekstem
-   (tooltip, dialog). **Esc** anuluje.
+   (tooltip, dialog). **Esc** albo ponowne **Ctrl+Shift+T** anuluje zaznaczanie.
 3. Tłumaczenie pojawi się w panelu obok zaznaczenia (albo w nakładce — do wyboru
    w „Wyświetlanie wyniku”). Panel nie zabiera grze fokusu; **Ctrl+Shift+H** chowa nakładkę.
 
@@ -85,7 +126,8 @@ zapewniają jednakowego czasu i wyglądu w każdej grze.
 ## Prywatność
 
 - Do internetu wysyłany jest **wyłącznie rozpoznany tekst** (nigdy obraz) i tylko do
-  wybranego dostawcy tłumaczeń.
+  wybranego dostawcy tłumaczeń. Modele językowe dostają dodatkowo nazwę gry z profilu
+  i pasujące terminy słownika. Lokalny serwer LLM (`localhost`) nie wysyła niczego.
 - **Tryb prywatny**: nic nie zapisuje się na dysku — cache działa tylko w pamięci,
   a „+ Słownik” obowiązuje do końca sesji.
 - **Tryb Cache-only**: tłumaczenie korzysta z lokalnych wyników i nie wysyła brakującego tekstu do dostawcy.
@@ -97,7 +139,7 @@ zapewniają jednakowego czasu i wyglądu w każdej grze.
 |---|---|
 | Ctrl+Shift+T | przetłumacz zaznaczony region |
 | Ctrl+Shift+H | ukryj / pokaż nakładkę |
-| Esc (podczas zaznaczania) | anuluj |
+| Esc lub Ctrl+Shift+T (podczas zaznaczania) | anuluj |
 
 Skróty można zmienić w pliku `settings.json` w folderze danych (wymagany modyfikator
 Ctrl/Alt/Shift dla liter i cyfr).
@@ -110,8 +152,13 @@ Ctrl/Alt/Shift dla liter i cyfr).
 | OCR nie widzi tekstu | zaznacz większy fragment; zwiększ rozmiar czcionki w grze; unikaj mocno ozdobnych fontów |
 | Czarny podgląd okna | gra blokuje przechwytywanie okna — przełącz na borderless; tryb regionu (Ctrl+Shift+T) zwykle działa mimo to |
 | „DeepL odrzucił klucz” | sprawdź klucz (darmowy kończy się na `:fx`) i czy plan API jest aktywny |
+| „Azure Translator odrzucił klucz” | sprawdź klucz i **region** zasobu; dla zasobu globalnego zostaw region pusty |
+| „Cloud Translation API nie jest włączone” | włącz Cloud Translation API w projekcie Google, do którego należy klucz |
+| „Serwer LLM na tym komputerze nie odpowiada” | uruchom Ollamę albo serwer w LM Studio; sprawdź port w adresie |
+| „Wybrany model nie istnieje” | popraw nazwę modelu; w Ollamie pobierz go: `ollama pull <model>` |
+| „Model językowy odmówił przetłumaczenia” | filtr treści dostawcy; spróbuj innego modelu albo dostawcy dla tego fragmentu |
 | Nakładka niewidoczna na nagraniu OBS | to celowe — nakładka jest wykluczona z przechwytywania ekranu |
-| Widać `[PL]` i nadal angielski tekst | wybrano Mock; do prawdziwego tłumaczenia online wybierz DeepL i skonfiguruj klucz API |
+| Widać `[PL]` i nadal angielski tekst | wybrano Mock; do prawdziwego tłumaczenia wybierz innego dostawcę i skonfiguruj go |
 | Live jest opóźniony lub znika przy ruchu | zatrzymaj na chwilę kamerę; sprawdź osobno czas nowego wyniku i znikania starego; porównaj z ręcznym regionem |
 | W Cache-only nie pojawia się nowy opis | tego tekstu może nie być w lokalnych wynikach; tryb celowo nie pyta dostawcy |
 | Inny problem | zajrzyj do logów: folder danych → `logs\` (logi nie zawierają treści z ekranu) |

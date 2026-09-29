@@ -247,3 +247,36 @@ wydzielenie projektu będzie mechaniczne (kod już stoi za interfejsem).
 - **Osobny projekt per provider** — struktura na wyrost przy jednym realnym providerze;
   YAGNI.
 - **Provider w App** — mieszałby HTTP z warstwą UI i uniemożliwił testowanie bez WPF.
+
+## ADR-013: Kolejni dostawcy tłumaczeń, w tym opcjonalne modele językowe (2026-09-29)
+
+**Kontekst.** DeepL Free (500 tys. znaków miesięcznie) szybko się wyczerpuje w trybie live.
+Słownik działał tylko dla tekstów będących w całości terminem, więc nazwy wewnątrz dłuższych
+zdań tłumaczono niespójnie. Część graczy chce też tłumaczyć bez wysyłania tekstu do internetu.
+
+**Decyzja.** Obok DeepL (nadal domyślnego) i Mocka dochodzą: **Azure AI Translator**
+(2 mln znaków miesięcznie w planie F0), **Google Cloud Translation**, **model językowy przez
+API zgodne z OpenAI** (OpenAI, OpenRouter, Groq, lokalne Ollama/LM Studio) oraz **Claude**.
+Wszystkie są opcjonalne i wybierane w oknie aplikacji; każdy ma osobny klucz w DPAPI.
+Dostawcy HTTP dzielą pętlę `ProviderHttp`; dostawcy modeli językowych implementują
+`IContextualTranslationProvider` i dostają nazwę gry oraz terminy słownika z tłumaczonej partii.
+
+- **Claude** korzysta z oficjalnego SDK Anthropic (`Anthropic`, MIT) — SDK śledzi zmiany API
+  (beta fallback przy odmowie, structured outputs, effort) lepiej niż ręczny HTTP.
+  Dostaje osobny `HttpClient`.
+- **Serwery zgodne z OpenAI** obsługujemy ręcznym HTTP z minimalnym zestawem pól
+  (`model`, `messages`): serwery różnią się obsługą `temperature`, `max_tokens`
+  i `response_format`, a SDK jednego dostawcy nie gwarantuje zgodności z pozostałymi.
+  HTTPS jest wymagany poza serwerem na tym komputerze.
+
+**Stosunek do ADR-007 i DoD pkt 1.** Paczka nadal **nie zawiera, nie instaluje i nie wymaga**
+żadnego modelu AI, Pythona ani CUDA — domyślna konfiguracja działa jak dotąd. Odrzucony
+w ADR-007 „lokalny model tłumaczący” oznaczał model dostarczany i wymagany przez aplikację;
+tutaj użytkownik może jedynie wskazać własny, osobno uruchomiony serwer. Decyzja rozszerza
+zakres produktu i powinna zostać potwierdzona przez zespół przed kolejnym wydaniem.
+
+**Odrzucone alternatywy.**
+- **Model dołączony do paczki** — łamie DoD pkt 1 i zwiększa paczkę o gigabajty.
+- **Jedno SDK OpenAI dla wszystkich modeli** — lokalne serwery obsługują różne podzbiory API.
+- **Słowniki DeepL (glossary API)** — wymagają zarządzania słownikami po stronie DeepL;
+  możliwe w przyszłości; kontekst dla modeli językowych nie wymaga stanu na serwerze.

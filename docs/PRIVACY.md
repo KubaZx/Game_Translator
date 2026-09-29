@@ -17,8 +17,10 @@ lokalnie, i mówimy wprost, co opuszcza komputer**.
 
 Rozpoznawanie tekstu wykonuje **systemowy OCR Windows** (`Windows.Media.Ocr`) — w całości
 na komputerze użytkownika. Obraz nie jest nigdzie wysyłany w celu rozpoznania tekstu.
-Wymagany jest zainstalowany pakiet językowy Windows dla języka źródłowego; program nie
-korzysta z żadnych chmurowych ani lokalnych modeli AI (brak LLM, brak zewnętrznych silników OCR).
+Wymagany jest zainstalowany pakiet językowy Windows dla języka źródłowego; rozpoznawanie
+tekstu nie korzysta z żadnych modeli AI ani zewnętrznych silników OCR. Model językowy
+(LLM) może być użyty wyłącznie do **tłumaczenia**, i tylko gdy użytkownik sam wybierze
+takiego dostawcę (patrz niżej).
 
 ## Co trafia do API tłumaczeniowego
 
@@ -26,10 +28,18 @@ korzysta z żadnych chmurowych ani lokalnych modeli AI (brak LLM, brak zewnętrz
   fragmenty, które faktycznie wymagają tłumaczenia (po odfiltrowaniu śmieci i po sprawdzeniu
   słownika oraz cache).
 - **Nigdy nie są wysyłane screenshoty** ani żadne inne obrazy.
+- Dostawcy oparci na modelach językowych (**Claude** oraz **Model językowy** zgodny z API
+  OpenAI) dostają razem z tekstem nazwę gry z aktywnego profilu i te terminy słownika
+  (źródło → tłumaczenie), które występują w tłumaczonych zdaniach — również terminy dodane
+  przez użytkownika. Klasyczni tłumacze (DeepL, Azure, Google) dostają tylko tekst.
+- **Lokalny serwer LLM** (Ollama, LM Studio pod adresem `localhost`) przetwarza tekst na tym
+  komputerze — nic nie wychodzi do internetu. Aplikacja pokazuje przy kluczu, dokąd trafia
+  tekst dla wybranego adresu serwera. Adres zdalny musi używać HTTPS.
 - **Ważne i mówione wprost w aplikacji:** korzystanie z zewnętrznego API oznacza, że rozpoznany
-  tekst **opuszcza komputer** i trafia na serwery dostawcy tłumaczeń (np. DeepL). Kto nie chce
-  wysyłać niczego do sieci, może pracować w trybie **Cache-only** (nic nie wychodzi do sieci;
-  tłumaczone jest tylko to, co już jest w cache/słowniku) albo z `MockTranslationProvider`.
+  tekst **opuszcza komputer** i trafia na serwery wybranego dostawcy tłumaczeń (DeepL,
+  Microsoft Azure, Google, Anthropic albo wskazany serwer LLM). Kto nie chce wysyłać niczego
+  do sieci, może pracować w trybie **Cache-only** (nic nie wychodzi do sieci; tłumaczone jest
+  tylko to, co już jest w cache/słowniku), z lokalnym serwerem LLM albo z `MockTranslationProvider`.
   Zasady przetwarzania tekstu po stronie dostawcy opisuje polityka prywatności tego dostawcy.
 
 ## Screenshoty i zrzuty debugowe
@@ -64,7 +74,7 @@ Wszystkie dane programu leżą w `%LOCALAPPDATA%\GameTranslatorOverlay`:
 |---|---|---|
 | `settings.json` | ustawienia programu | bez klucza API w postaci jawnej |
 | cache SQLite | pary tekst źródłowy → tłumaczenie | pomijany w trybie prywatnym (cache tylko w pamięci) |
-| klucz API | zaszyfrowany Windows DPAPI (`CurrentUser`) | odczyta go tylko ten sam użytkownik Windows na tej maszynie |
+| klucze API (osobny dla każdego dostawcy) | zaszyfrowane Windows DPAPI (`CurrentUser`) | odczyta je tylko ten sam użytkownik Windows na tej maszynie |
 | logi (Serilog, rolling) | zdarzenia techniczne, błędy (stack trace tylko do logu) | nigdy kluczy API; bez treści tłumaczeń w trybie prywatnym |
 | profile i słowniki | pliki JSON (`profiles/`, `glossaries/`) | dane statyczne, bez treści użytkownika |
 

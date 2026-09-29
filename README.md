@@ -23,8 +23,10 @@ poprawki jakości live opisane w sekcji **Niewydane** w [CHANGELOG.md](CHANGELOG
 Paczka wydania 0.2.2 nie zawiera tych późniejszych zmian; aktualny kod można
 zbudować instrukcją poniżej. Numer wersji aplikacji pozostaje 0.2.2 do kolejnego wydania.
 
-Stan lokalnej weryfikacji na 15 września 2026: **371 testów** — 334 Core i 37 Infrastructure;
-kompilacja bez ostrzeżeń i test Windows OCR z lokalnym dostawcą Mock przeszły.
+Stan weryfikacji na 29 września 2026: **482 testy** — 361 Core i 121 Infrastructure —
+oraz kompilacja całego rozwiązania bez ostrzeżeń. Nowi dostawcy tłumaczeń nie byli jeszcze
+sprawdzani w uruchomionym oknie na Windows (scenariusze M23–M26 w
+[MANUAL_TESTING.md](docs/MANUAL_TESTING.md)); ostatni smoke test Windows OCR: 15 września.
 Próby wizualne w różnych grach, przy różnych DPI i monitorach pozostają osobnym
 zadaniem. Projekt nadal rozwijamy, szczególnie pod kątem dynamicznej rozgrywki.
 
@@ -34,7 +36,11 @@ zadaniem. Projekt nadal rozwijamy, szczególnie pod kątem dynamicznej rozgrywki
 - **Tryb live:** automatyczne rozpoznawanie zmian tekstu w wybranym oknie gry.
 - **Dwa sposoby prezentacji:** bloki przy oryginale, także z zakrywaniem tekstu,
   albo wspólny pasek napisów na dole.
+- **Wybór dostawcy tłumaczeń:** DeepL, Azure AI Translator, Google Cloud Translation,
+  Claude albo dowolny serwer zgodny z API OpenAI — także lokalna Ollama / LM Studio,
+  przy której tekst nie opuszcza komputera.
 - **Słowniki i własne poprawki:** edytor, import i eksport, spójne nazwy i terminy.
+  Modele językowe dostają nazwę gry i terminy słownika także wewnątrz dłuższych zdań.
 - **Pamięć tłumaczeń:** cache SQLite, łączenie powtarzających się zapytań oraz limity użycia.
 - **Praca bez wysyłania tłumaczeń:** Cache-only korzysta z lokalnych wyników;
   Mock służy do sprawdzania działania bez klucza API.
@@ -44,6 +50,12 @@ zadaniem. Projekt nadal rozwijamy, szczególnie pod kątem dynamicznej rozgrywki
 Priorytet wyniku: **ręczna poprawka → słownik → cache → dostawca tłumaczenia**.
 
 ## Ostatnie poprawki w kodzie
+
+Najnowsza runda (29 września) dodaje wybór dostawcy tłumaczeń z osobnymi kluczami,
+przekazywanie nazwy gry i terminów słownika do modeli językowych oraz zamyka pozycje
+backlogu audytu #3 (priorytety i normalizacja słownika, jawne wyłączenie powiększania
+w profilu, skalowanie prostokątów bez dryfu, `minAppVersion`, skrót przy otwartym
+zaznaczaniu). Szczegóły: [CHANGELOG.md](CHANGELOG.md), [dostawcy](docs/API_PROVIDERS.md).
 
 Stare napisy są usuwane po wykrytej zmianie sceny, a spóźniona odpowiedź nie powinna
 przywracać poprzedniego widoku. Potwierdzone lokalne zastąpienie lub przykrycie
@@ -80,7 +92,8 @@ nakładki. Nie są gwarancją wyniku w każdej grze. Warunki i ograniczenia:
 
 - Windows 10 (2004+) lub Windows 11; aplikacja portable dla win-x64.
 - Pakiet językowy Windows OCR dla języka gry, np. angielski.
-- Klucz **DeepL API**, jeśli chcesz tłumaczyć online. Mock i Cache-only działają bez klucza.
+- Klucz wybranego dostawcy (**DeepL**, Azure, Google albo Anthropic), jeśli chcesz tłumaczyć
+  online. Lokalny serwer LLM, Mock i Cache-only działają bez klucza.
 - Gra w trybie okienkowym lub borderless fullscreen.
 
 Paczka portable zawiera środowisko .NET. Nie wymaga Pythona, CUDA ani pobierania
@@ -90,8 +103,9 @@ lokalnych modeli AI. Do samodzielnego budowania potrzebny jest **.NET 10 SDK** n
 
 1. Pobierz i rozpakuj [wydanie portable](https://github.com/KubaZx/Game_Translator/releases).
    Uruchom `GameTranslatorOverlay.exe`.
-2. Do tłumaczenia online wybierz **DeepL**, wpisz klucz API, kliknij **Zapisz klucz**
+2. Wybierz dostawcę tłumaczeń (domyślnie **DeepL**), wpisz klucz API, kliknij **Zapisz klucz**
    i **Testuj**. Do próby działania wybierz **Mock** — dodaje `[PL]`, nie tłumaczy tekstu.
+   Porównanie dostawców i konfiguracja lokalnego modelu: [instrukcja](docs/USER_GUIDE.md).
 3. Uruchom grę w oknie lub borderless i wybierz jej okno na liście aplikacji.
 4. Kliknij **▶ Start live**. Ustaw **Przy oryginale** lub **Napisy na dole**.
    W trybie bloków opcja **Na oryginale (zakrywa)** umieszcza wynik na tekście gry.
@@ -127,8 +141,9 @@ Program przechwytuje wybrane okno lub region i rozpoznaje tekst lokalnie.
 zrzutów gry podczas zwykłego działania; osobne narzędzia diagnostyczne mają opisane
 opcje zapisu obrazów.
 
-Klucz API jest przechowywany lokalnie z ochroną Windows DPAPI i używany do
-uwierzytelniania żądań do DeepL. Dane aplikacji znajdują się w
+Klucze API są przechowywane lokalnie z ochroną Windows DPAPI (osobno dla każdego dostawcy)
+i wysyłane wyłącznie w nagłówkach żądań do wybranego dostawcy. Modele językowe dostają
+dodatkowo nazwę gry i pasujące terminy słownika. Dane aplikacji znajdują się w
 `%LOCALAPPDATA%\GameTranslatorOverlay`. Tryb prywatny używa cache w pamięci;
 Cache-only wyłącza wysyłanie brakujących tłumaczeń do dostawcy.
 
@@ -148,8 +163,10 @@ dotnet test GameTranslatorOverlay.slnx -c Release --no-build --no-restore
 dotnet run --project tools/GameTranslatorOverlay.SmokeTest -c Release --no-build --no-restore
 ```
 
-Testy xUnit używają atrap i lokalnych danych; nie potrzebują klucza DeepL ani
+Testy xUnit używają atrap i lokalnych danych; nie potrzebują kluczy API ani
 aktywnej gry. Smoke test sprawdza rzeczywisty Windows OCR na syntetycznym obrazie.
+Poza Windows (np. Linux) testy i kompilację całego rozwiązania uruchomisz z
+`-p:EnableWindowsTargeting=true`; testy DPAPI i OCR wymagają jednak Windows.
 Pełny podział: [TESTING.md](docs/TESTING.md).
 
 Uruchomienie z kodu: `dotnet run --project src/GameTranslatorOverlay.App`.
@@ -172,7 +189,7 @@ użytkownika opisano w [MANUAL_TESTING.md](docs/MANUAL_TESTING.md).
 ## Kod i dokumentacja
 
 - `src/GameTranslatorOverlay.Core` — logika tekstu, tłumaczenia, kosztów i stabilizacji.
-- `src/GameTranslatorOverlay.Infrastructure` — DeepL, SQLite, DPAPI i obsługa plików.
+- `src/GameTranslatorOverlay.Infrastructure` — dostawcy tłumaczeń, SQLite, DPAPI i obsługa plików.
 - `src/GameTranslatorOverlay.App` — interfejs WPF, przechwytywanie, Windows OCR i nakładka.
 - `tests/` — testy Core i Infrastructure; `tools/` — narzędzia lokalne.
 - `profiles/` i `glossaries/` — opcjonalne profile oraz słowniki.
