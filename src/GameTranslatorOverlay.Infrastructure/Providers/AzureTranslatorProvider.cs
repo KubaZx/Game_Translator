@@ -22,7 +22,7 @@ public sealed class AzureTranslatorProvider(
     Func<string?> apiKeyAccessor,
     Func<string?> regionAccessor,
     AzureTranslatorOptions? options = null,
-    ILogger<AzureTranslatorProvider>? logger = null) : ITranslationProvider
+    ILogger<AzureTranslatorProvider>? logger = null) : ITranslationProvider, IWarmableTranslationProvider
 {
     public const string ProviderName = "Azure";
     private const string Endpoint = "https://api.cognitive.microsofttranslator.com/translate";
@@ -96,6 +96,11 @@ public sealed class AzureTranslatorProvider(
         }
         return results;
     }
+
+    public Task WarmUpAsync(CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(apiKeyAccessor())
+            ? Task.CompletedTask
+            : ProviderHttp.WarmUpAsync(httpClient, new Uri("https://api.cognitive.microsofttranslator.com/"), cancellationToken);
 
     private static TranslationException MapError(ProviderHttpFailure failure) => failure.StatusCode switch
     {

@@ -427,6 +427,9 @@ public partial class MainWindow : Window
         _selectingRegion = true;
         try
         {
+            // Połączenie z dostawcą zestawia się, gdy użytkownik zaznacza region — pierwsze
+            // tłumaczenie nie czeka potem na DNS i TLS.
+            _orchestrator.WarmUpActiveProvider();
             var region = await RegionSelectWindow.SelectAsync();
             if (region is not { } selected)
             {
@@ -823,6 +826,8 @@ public partial class MainWindow : Window
         {
             _logger.LogWarning("Wykluczenie nakładki z przechwytywania nie działa na tym systemie — aktywny filtr anty-sprzężeniowy");
         }
+
+        _orchestrator.WarmUpActiveProvider();
 
         LiveTranslationSession? session = null;
         session = new LiveTranslationSession(

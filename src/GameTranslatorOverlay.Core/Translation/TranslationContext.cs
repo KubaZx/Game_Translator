@@ -15,6 +15,16 @@ public sealed record TranslationContext(string? GameName, IReadOnlyList<Glossary
 }
 
 /// <summary>
+/// Dostawca, który potrafi zawczasu nawiązać połączenie (DNS, TCP, TLS), zanim pojawi się
+/// tekst do tłumaczenia. Rozgrzewka nie wysyła klucza ani treści i nigdy nie rzuca wyjątku
+/// poza anulowaniem.
+/// </summary>
+public interface IWarmableTranslationProvider
+{
+    Task WarmUpAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// Dostawca, który przyjmuje dodatkowy kontekst tłumaczenia. Pipeline wywołuje ten wariant
 /// zamiast <see cref="ITranslationProvider.TranslateBatchAsync"/>, jeśli dostawca go implementuje.
 /// </summary>

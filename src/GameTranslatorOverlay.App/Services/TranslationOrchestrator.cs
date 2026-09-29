@@ -307,6 +307,44 @@ public sealed class TranslationOrchestrator(
         return Task.Run(() => userGlossaryStore.AddTerm(term, settings.SourceLanguage, settings.TargetLanguage));
     }
 
+    private static readonly TimeSpan WarmUpInterval = TimeSpan.FromSeconds(30);
+    private long _lastWarmUpTicks = long.MinValue / 2;
+
+    /// <summary>
+    /// Nawiązuje połączenie z aktywnym dostawcą, zanim pojawi się tekst — np. gdy użytkownik
+    /// zaczyna zaznaczać region albo uruchamia live. Bez klucza i treści; pomijane
+    /// w Cache-only (tryb obiecuje brak ruchu sieciowego) i częściej niż co 30 s.
+    /// </summary>
+    public void WarmUpActiveProvider()
+    {
+        if (settings.CacheOnlyMode || ActiveProvider is not IWarmableTranslationProvider warmable) return;
+
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref _lastWarmUpTicks);
+        if (now - last < WarmUpInterval.TotalMilliseconds
+            || Interlocked.CompareExchange(ref _lastWarmUpTicks, now, last) != last)
+        {
+            return;
+        }
+
+        var epoch = (Volatile.Read(ref _pipelineState)?.EpochToken) ?? CancellationToken.None;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await warmable.WarmUpAsync(epoch).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Zmiana ustawień w trakcie rozgrzewki — bez znaczenia.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Rozgrzewka połączenia z dostawcą nie powiodła się");
+            }
+        });
+    }
+
     public Task<ProviderStatus> TestActiveProviderAsync(CancellationToken cancellationToken = default) =>
         ActiveProvider.TestConnectionAsync(cancellationToken);
 

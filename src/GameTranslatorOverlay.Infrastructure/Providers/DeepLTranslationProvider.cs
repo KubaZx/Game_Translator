@@ -20,7 +20,7 @@ public sealed class DeepLTranslationProvider(
     HttpClient httpClient,
     Func<string?> apiKeyAccessor,
     DeepLOptions? options = null,
-    ILogger<DeepLTranslationProvider>? logger = null) : ITranslationProvider
+    ILogger<DeepLTranslationProvider>? logger = null) : ITranslationProvider, IWarmableTranslationProvider
 {
     public const string ProviderName = "DeepL";
 
@@ -63,6 +63,15 @@ public sealed class DeepLTranslationProvider(
                 .ConfigureAwait(false));
         }
         return results;
+    }
+
+    public Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        // Klucz wybiera tylko host (Free/Pro) — nie jest wysyłany.
+        var apiKey = apiKeyAccessor();
+        return string.IsNullOrWhiteSpace(apiKey)
+            ? Task.CompletedTask
+            : ProviderHttp.WarmUpAsync(httpClient, new Uri(GetBaseUrl(apiKey) + "/"), cancellationToken);
     }
 
     private const int MaxContextChars = 1500;

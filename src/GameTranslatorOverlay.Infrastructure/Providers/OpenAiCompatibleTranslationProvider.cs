@@ -21,7 +21,8 @@ public sealed class OpenAiCompatibleTranslationProvider(
     Func<string?> modelAccessor,
     LlmProviderOptions? options = null,
     ILogger<OpenAiCompatibleTranslationProvider>? logger = null)
-    : LlmTranslationProviderBase(options, logger ?? NullLogger<OpenAiCompatibleTranslationProvider>.Instance)
+    : LlmTranslationProviderBase(options, logger ?? NullLogger<OpenAiCompatibleTranslationProvider>.Instance),
+      IWarmableTranslationProvider
 {
     public const string ProviderName = "LLM";
 
@@ -121,6 +122,16 @@ public sealed class OpenAiCompatibleTranslationProvider(
             }
             return choice?.Message?.Content;
         }
+    }
+
+    public Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        // Serwer lokalny nie wymaga DNS ani TLS — nie ma czego rozgrzewać.
+        if (!LlmEndpoint.TryNormalize(endpointAccessor(), out var baseUri, out _) || LlmEndpoint.IsLoopback(baseUri!))
+        {
+            return Task.CompletedTask;
+        }
+        return ProviderHttp.WarmUpAsync(httpClient, new Uri(baseUri!.GetLeftPart(UriPartial.Authority) + "/"), cancellationToken);
     }
 
     private static bool IsQuotaExhausted(ProviderHttpFailure failure) =>

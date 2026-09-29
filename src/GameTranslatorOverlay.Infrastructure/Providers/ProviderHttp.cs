@@ -19,6 +19,22 @@ public class HttpProviderOptions
     public TimeSpan MaxRetryDelay { get; set; } = TimeSpan.FromSeconds(20);
 }
 
+/// <summary>
+/// HttpClient dla dostawców. Domyślnie .NET zamyka bezczynne połączenie po minucie, więc
+/// każda dłuższa chwila bez dialogu kosztowała nowe DNS + TCP + TLS przy następnym
+/// tłumaczeniu. Pula trzyma połączenia dłużej, a ograniczony czas życia odświeża DNS.
+/// </summary>
+public static class ProviderHttpClientFactory
+{
+    public static HttpClient Create() => new(new SocketsHttpHandler
+    {
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(30),
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+    });
+}
+
 /// <summary>Nieudana odpowiedź dostawcy: status i (krótka) treść błędu do klasyfikacji.</summary>
 internal sealed record ProviderHttpFailure(int StatusCode, string Body)
 {
@@ -33,6 +49,32 @@ internal sealed record ProviderHttpFailure(int StatusCode, string Body)
 internal static class ProviderHttp
 {
     private const int MaxErrorBodyChars = 4096;
+    private static readonly TimeSpan WarmUpTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Nawiązuje połączenie z serwerem dostawcy pustym zapytaniem HEAD — bez klucza i bez
+    /// treści. Odpowiedź (zwykle 404/405) jest bez znaczenia; liczy się gotowe połączenie w puli.
+    /// </summary>
+    public static async Task WarmUpAsync(HttpClient httpClient, Uri origin, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(WarmUpTimeout);
+            using var request = new HttpRequestMessage(HttpMethod.Head, origin);
+            using var response = await httpClient
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or InvalidOperationException)
+        {
+            // Rozgrzewka jest tylko optymalizacją — właściwe zapytanie samo zgłosi błąd sieci.
+        }
+    }
 
     public static async Task<HttpResponseMessage> SendAsync(
         HttpClient httpClient,
