@@ -169,6 +169,15 @@ public partial class App : Application
     {
         try
         {
+            try
+            {
+                // Liczniki użycia cache są zapisywane zbiorczo — domykamy ostatnią partię.
+                _host?.Services.GetService<SqliteTranslationCache>()?.FlushUsageStatistics();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Nie udało się zapisać liczników użycia cache przy zamknięciu");
+            }
             _host?.StopAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
             _host?.Dispose();
         }
