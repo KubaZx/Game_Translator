@@ -40,6 +40,17 @@ public class LlmTranslationPromptTests
         Assert.Equal(["Hello \"hero\"", "Zażółć"], texts);
     }
 
+    [Fact]
+    public void Poprzednie_linie_trafiaja_do_wiadomosci_jako_osobne_pole()
+    {
+        var message = LlmTranslationPrompt.BuildUserMessage(["I'm ready."], ["Are you coming?"]);
+
+        using var document = JsonDocument.Parse(message[(message.IndexOf('\n') + 1)..]);
+        Assert.Equal("Are you coming?", document.RootElement.GetProperty("previous_lines")[0].GetString());
+        Assert.Equal("I'm ready.", document.RootElement.GetProperty("texts")[0].GetString());
+        Assert.StartsWith("Translate these 1 strings:", message);
+    }
+
     [Theory]
     [InlineData("""{"translations": ["Cześć", "Świat"]}""")]
     [InlineData("""["Cześć", "Świat"]""")]

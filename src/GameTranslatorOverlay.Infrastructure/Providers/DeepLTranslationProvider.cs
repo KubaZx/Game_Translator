@@ -20,7 +20,8 @@ public sealed class DeepLTranslationProvider(
     HttpClient httpClient,
     Func<string?> apiKeyAccessor,
     DeepLOptions? options = null,
-    ILogger<DeepLTranslationProvider>? logger = null) : ITranslationProvider, IWarmableTranslationProvider
+    ILogger<DeepLTranslationProvider>? logger = null)
+    : IContextualTranslationProvider, IWarmableTranslationProvider
 {
     public const string ProviderName = "DeepL";
 
@@ -37,10 +38,18 @@ public sealed class DeepLTranslationProvider(
 
     internal static string MapLanguage(string language) => language.Trim().ToUpperInvariant();
 
-    public async Task<IReadOnlyList<string>> TranslateBatchAsync(
+    public Task<IReadOnlyList<string>> TranslateBatchAsync(
         IReadOnlyList<string> texts,
         string sourceLanguage,
         string targetLanguage,
+        CancellationToken cancellationToken = default) =>
+        TranslateWithContextAsync(texts, sourceLanguage, targetLanguage, TranslationContext.Empty, cancellationToken);
+
+    public async Task<IReadOnlyList<string>> TranslateWithContextAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        string targetLanguage,
+        TranslationContext translationContext,
         CancellationToken cancellationToken = default)
     {
         if (texts.Count == 0) return [];
@@ -51,10 +60,10 @@ public sealed class DeepLTranslationProvider(
             throw new TranslationException(TranslationFailureKind.MissingApiKey, "Nie skonfigurowano klucza API DeepL.");
         }
 
-        // Teksty z jednej klatki są dla siebie kontekstem: krótka kwestia („Fine.”, „Leave.”)
-        // tłumaczona w izolacji bywa losowa, a z sąsiednimi blokami trafia w sens.
-        // DeepL nie tłumaczy ani nie bilinguje parametru context.
-        var context = BuildContext(texts);
+        // Teksty z jednej klatki i ostatnie kwestie są dla siebie kontekstem: krótka kwestia
+        // („Fine.”, „I'm ready.”) tłumaczona w izolacji bywa losowa albo w złym rodzaju,
+        // a z sąsiednimi liniami trafia w sens. DeepL nie tłumaczy ani nie bilinguje context.
+        var context = BuildContext(texts, translationContext.RecentTexts);
 
         var results = new List<string>(texts.Count);
         foreach (var chunk in texts.Chunk(Math.Max(1, _options.MaxBatchSize)))
@@ -76,20 +85,37 @@ public sealed class DeepLTranslationProvider(
 
     private const int MaxContextChars = 1500;
 
-    private static string? BuildContext(IReadOnlyList<string> texts)
+    internal static string? BuildContext(IReadOnlyList<string> texts, IReadOnlyList<string> recentTexts)
     {
-        if (texts.Count < 2) return null;
-        var builder = new System.Text.StringBuilder();
+        if (texts.Count + recentTexts.Count < 2) return null;
+
+        // Najpierw bieżąca klatka; z pozostałego miejsca najnowsze wcześniejsze linie.
+        var current = new List<string>();
+        var used = 0;
         foreach (var text in texts)
         {
-            var line = text.Replace('\n', ' ').Trim();
+            var line = OneLine(text);
             if (line.Length == 0) continue;
-            if (builder.Length + line.Length + 1 > MaxContextChars) break;
-            if (builder.Length > 0) builder.Append('\n');
-            builder.Append(line);
+            if (used + line.Length + 1 > MaxContextChars) break;
+            current.Add(line);
+            used += line.Length + 1;
         }
-        return builder.Length > 0 ? builder.ToString() : null;
+
+        var earlier = new List<string>();
+        for (var i = recentTexts.Count - 1; i >= 0; i--)
+        {
+            var line = OneLine(recentTexts[i]);
+            if (line.Length == 0) continue;
+            if (used + line.Length + 1 > MaxContextChars) break;
+            earlier.Insert(0, line);
+            used += line.Length + 1;
+        }
+
+        var lines = earlier.Concat(current).ToList();
+        return lines.Count > 0 && (texts.Count > 1 || earlier.Count > 0) ? string.Join('\n', lines) : null;
     }
+
+    private static string OneLine(string text) => text.Replace('\n', ' ').Trim();
 
     private async Task<IReadOnlyList<string>> TranslateChunkAsync(
         string[] chunk, string? context, string apiKey, string sourceLanguage, string targetLanguage, CancellationToken cancellationToken)

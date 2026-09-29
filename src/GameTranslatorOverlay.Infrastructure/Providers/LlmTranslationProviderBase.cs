@@ -66,15 +66,16 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
         var results = new List<string>(texts.Count);
         foreach (var chunk in texts.Chunk(Math.Max(1, Options.MaxBatchSize)))
         {
-            results.AddRange(await TranslateChunkAsync(chunk, systemPrompt, cancellationToken).ConfigureAwait(false));
+            results.AddRange(await TranslateChunkAsync(chunk, systemPrompt, context.RecentTexts, cancellationToken)
+                .ConfigureAwait(false));
         }
         return results;
     }
 
     private async Task<IReadOnlyList<string>> TranslateChunkAsync(
-        string[] chunk, string systemPrompt, CancellationToken cancellationToken)
+        string[] chunk, string systemPrompt, IReadOnlyList<string> previousLines, CancellationToken cancellationToken)
     {
-        var content = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage(chunk), cancellationToken)
+        var content = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage(chunk, previousLines), cancellationToken)
             .ConfigureAwait(false);
         if (LlmTranslationPrompt.ParseTranslations(content, chunk.Length) is { } parsed)
         {
@@ -93,7 +94,7 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
         var singles = new List<string>(chunk.Length);
         foreach (var text in chunk)
         {
-            var single = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage([text]), cancellationToken)
+            var single = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage([text], previousLines), cancellationToken)
                 .ConfigureAwait(false);
             var parsedSingle = LlmTranslationPrompt.ParseTranslations(single, 1) ?? throw UnreadableResponse(1);
             singles.Add(parsedSingle[0]);

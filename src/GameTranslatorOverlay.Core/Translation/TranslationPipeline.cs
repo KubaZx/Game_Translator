@@ -20,6 +20,9 @@ public sealed class TranslationPipelineOptions
 
     /// <summary>Najwięcej terminów słownika przekazywanych dostawcy kontekstowemu w jednej partii.</summary>
     public int MaxContextTerms { get; set; } = 40;
+
+    /// <summary>Ile ostatnich wysłanych tekstów dołączać jako kontekst (np. poprzednie kwestie dialogu).</summary>
+    public int MaxRecentContextTexts { get; set; } = 6;
 }
 
 public enum TranslationOrigin
@@ -59,6 +62,12 @@ public sealed class TranslationPipeline(
 
     private readonly ILogger _logger = logger ?? NullLogger<TranslationPipeline>.Instance;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _inFlight = new();
+
+    // Ostatnie teksty wysłane do dostawcy tego pipeline'u (od najstarszego). Pipeline jest
+    // budowany od nowa przy zmianie dostawcy, więc kontekst nigdy nie trafia do innego
+    // dostawcy niż ten, który już widział te teksty.
+    private readonly Lock _recentGate = new();
+    private readonly LinkedList<string> _recentSent = new();
 
     public ITranslationProvider Provider => provider;
     public TranslationPipelineOptions Options => options;
@@ -241,7 +250,35 @@ public sealed class TranslationPipeline(
     {
         var terms = glossary.FindTermsIn(texts, options.MaxContextTerms);
         var gameName = string.IsNullOrWhiteSpace(options.GameName) ? null : options.GameName.Trim();
-        return gameName is null && terms.Count == 0 ? TranslationContext.Empty : new TranslationContext(gameName, terms);
+        var recent = RecentTextsExcluding(texts);
+        return gameName is null && terms.Count == 0 && recent.Count == 0
+            ? TranslationContext.Empty
+            : new TranslationContext(gameName, terms) { RecentTexts = recent };
+    }
+
+    private IReadOnlyList<string> RecentTextsExcluding(IReadOnlyList<string> texts)
+    {
+        lock (_recentGate)
+        {
+            if (_recentSent.Count == 0) return [];
+            var current = texts.ToHashSet(StringComparer.Ordinal);
+            return _recentSent.Where(text => !current.Contains(text)).ToList();
+        }
+    }
+
+    private void RememberSent(IEnumerable<string> texts)
+    {
+        var limit = Math.Max(0, options.MaxRecentContextTexts);
+        if (limit == 0) return;
+        lock (_recentGate)
+        {
+            foreach (var text in texts)
+            {
+                _recentSent.Remove(text);
+                _recentSent.AddLast(text);
+            }
+            while (_recentSent.Count > limit) _recentSent.RemoveFirst();
+        }
     }
 
     private async Task TranslateChunkAsync(
@@ -307,6 +344,7 @@ public sealed class TranslationPipeline(
         }
 
         reservation.Complete();
+        RememberSent(textsToSend);
 
         for (var i = 0; i < chunk.Length; i++)
         {
