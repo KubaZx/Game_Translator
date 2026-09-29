@@ -36,13 +36,19 @@ Bez klucza możesz też korzystać z trybu **Cache-only** (lokalne poprawki, sł
 i zapisane tłumaczenia). Zwykły dostęp do tłumacza na stronie DeepL lub Google nie
 zastępuje klucza API.
 
-### Modele językowe: nazwa gry i słownik w tłumaczeniu
+### Słownik wewnątrz zdań (DeepL, Claude, model językowy)
 
-Dostawcy **Model językowy** i **Claude** dostają razem z tekstem nazwę gry z aktywnego
-profilu oraz te terminy z Twojego słownika, które występują w tłumaczonych zdaniach
-(np. „Energy Shield” → „Tarcza energetyczna” także wewnątrz dłuższego opisu). Dzięki temu
-nazwy są spójne w całej grze. Klasyczni tłumacze (DeepL, Azure, Google) używają słownika
-tylko dla tekstów, które w całości są terminem.
+Terminy z Twojego słownika działają także w środku dłuższych zdań
+(np. „Energy Shield” → „Tarcza energetyczna” w „+40 to maximum Energy Shield”):
+
+- **DeepL** dostaje glosariusz zbudowany ze słownika i sam odmienia terminy po polsku.
+  Glosariusz zapisuje się na Twoim koncie DeepL jako „GameTranslatorOverlay …”; po zmianie
+  słownika aplikacja podmienia go na nowy. W trybie prywatnym glosariusz nie powstaje.
+- **Model językowy** i **Claude** dostają pasujące terminy i nazwę gry z profilu.
+- **Azure** i **Google** używają słownika tylko dla tekstów, które w całości są terminem.
+
+Tłumaczenia zapisane w cache przed dodaniem terminu nie zmieniają się same. Popraw je ręcznie
+albo wyczyść cache.
 
 ### Lokalny model — tłumaczenie bez wysyłania tekstu
 
@@ -116,6 +122,19 @@ i dokładniej dopasowuje pozycję. Na wzorzystym tle albo przy niepewnym OCR sta
 napis może być chwilowo podtrzymany. Te mechanizmy ograniczają błędy, ale nie
 zapewniają jednakowego czasu i wyglądu w każdej grze.
 
+## Szybkość
+
+Panel **Szybkość** pokazuje medianę czasów z bieżącej sesji (p90 = 9 na 10 przypadków
+było szybszych):
+
+- **Nowy tekst** — od przechwycenia klatki do gotowego napisu, gdy trzeba było zapytać dostawcę,
+- **Znany** — to samo dla tekstu z cache albo słownika,
+- **nazwa dostawcy** (np. DeepL) — samo zapytanie do dostawcy,
+- **OCR** i **Klatka** — rozpoznanie tekstu i przechwycenie obrazu.
+
+**Kopiuj raport** kopiuje szczegóły do schowka (bez tekstu z gry), a **Wyzeruj** zaczyna
+pomiar od nowa, np. po zmianie dostawcy. Czasy nie obejmują samego rysowania nakładki.
+
 ## Słownik i dane
 
 - **📖 Słownik…** — edytor prywatnego słownika: dodawanie, edycja, priorytety,
@@ -128,9 +147,10 @@ zapewniają jednakowego czasu i wyglądu w każdej grze.
 
 - Do internetu wysyłany jest **wyłącznie rozpoznany tekst** (nigdy obraz) i tylko do
   wybranego dostawcy tłumaczeń. Modele językowe dostają dodatkowo nazwę gry z profilu
-  i pasujące terminy słownika. Lokalny serwer LLM (`localhost`) nie wysyła niczego.
+  i pasujące terminy słownika, a DeepL glosariusz ze słownika (zapisany na Twoim koncie
+  DeepL). Lokalny serwer LLM (`localhost`) nie wysyła niczego.
 - **Tryb prywatny**: nic nie zapisuje się na dysku — cache działa tylko w pamięci,
-  a „+ Słownik” obowiązuje do końca sesji.
+  a „+ Słownik” obowiązuje do końca sesji. Glosariusz DeepL nie jest wtedy tworzony.
 - **Tryb Cache-only**: tłumaczenie korzysta z lokalnych wyników i nie wysyła brakującego tekstu do dostawcy.
 - Pełna polityka: `PRIVACY.md`.
 

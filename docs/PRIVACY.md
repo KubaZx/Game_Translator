@@ -31,7 +31,11 @@ takiego dostawcę (patrz niżej).
 - Dostawcy oparci na modelach językowych (**Claude** oraz **Model językowy** zgodny z API
   OpenAI) dostają razem z tekstem nazwę gry z aktywnego profilu i te terminy słownika
   (źródło → tłumaczenie), które występują w tłumaczonych zdaniach — również terminy dodane
-  przez użytkownika. Klasyczni tłumacze (DeepL, Azure, Google) dostają tylko tekst.
+  przez użytkownika. Azure i Google dostają tylko tekst.
+- **DeepL** dostaje glosariusz ze słownika (terminy źródło → tłumaczenie, także dodane przez
+  użytkownika), gdy tłumaczony tekst zawiera co najmniej jeden termin. Glosariusz jest
+  **przechowywany na koncie DeepL** użytkownika pod nazwą `GameTranslatorOverlay …`; po zmianie
+  słownika aplikacja usuwa swoje poprzednie wersje. W trybie prywatnym glosariusz nie jest tworzony.
 - Dostawcy z kontekstem (DeepL, Claude, model językowy) dostają też do 6 ostatnich linii,
   które **wcześniej wysłano już do tego samego dostawcy** w bieżącej sesji — jako kontekst,
   bez ponownego tłumaczenia. Zmiana dostawcy czyści tę historię; teksty z cache i słownika
@@ -67,7 +71,8 @@ treść (np. czat w grze). Po włączeniu:
 - **brak historii** — tłumaczenia nie są zapisywane w historii,
 - **brak logowania treści** — logi (Serilog) nie zawierają żadnych tłumaczonych tekstów,
 - **cache tylko ulotny** — wpisy cache trzymane są wyłącznie w pamięci, nie w bazie SQLite,
-- **czyszczenie po sesji** — po zamknięciu programu ulotne dane sesji są usuwane.
+- **czyszczenie po sesji** — po zamknięciu programu ulotne dane sesji są usuwane,
+- **bez glosariusza DeepL** — słownik nie jest zapisywany na koncie DeepL.
 
 Uwaga: tryb prywatny nie zmienia faktu, że przy korzystaniu z zewnętrznego API rozpoznany
 tekst nadal jest wysyłany do dostawcy tłumaczeń. Aby nic nie opuszczało komputera, połącz

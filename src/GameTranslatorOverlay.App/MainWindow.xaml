@@ -246,6 +246,20 @@
             </StackPanel>
           </GroupBox>
 
+          <GroupBox Header="Szybkość (mediana z tej sesji)" Foreground="White" Margin="0,12,0,0" Padding="8">
+            <StackPanel>
+              <TextBlock x:Name="TxtLatency"
+                         Foreground="#FF90A4AE"
+                         FontSize="12"
+                         TextWrapping="Wrap"
+                         Text="Brak pomiarów — przetłumacz coś albo uruchom live." />
+              <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                <Button Content="Kopiuj raport" Click="OnCopyLatencyReportClick" />
+                <Button Content="Wyzeruj" Click="OnResetLatencyClick" Margin="8,0,0,0" />
+              </StackPanel>
+            </StackPanel>
+          </GroupBox>
+
           <GroupBox Header="Dane i słownik" Foreground="White" Margin="0,12,0,0" Padding="8">
             <StackPanel Orientation="Horizontal">
               <Button Content="📖 Słownik…" Click="OnOpenGlossaryEditorClick" />

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using GameTranslatorOverlay.Core.Caching;
 using GameTranslatorOverlay.Core.Glossary;
 using GameTranslatorOverlay.Core.Text;
@@ -279,7 +280,11 @@ public sealed class TranslationPipeline(
         var recent = RecentTextsExcluding(texts);
         return gameName is null && terms.Count == 0 && recent.Count == 0
             ? TranslationContext.Empty
-            : new TranslationContext(gameName, terms) { RecentTexts = recent };
+            : new TranslationContext(gameName, terms)
+            {
+                RecentTexts = recent,
+                GlossaryTerms = terms.Count > 0 ? glossary.AllTerms : [],
+            };
     }
 
     private IReadOnlyList<string> RecentTextsExcluding(IReadOnlyList<string> texts)
@@ -336,6 +341,7 @@ public sealed class TranslationPipeline(
         }
 
         IReadOnlyList<string> translations;
+        var providerStarted = Stopwatch.GetTimestamp();
         try
         {
             // Dostawcy kontekstowi (modele językowe) dostają nazwę gry i terminy słownika
@@ -373,6 +379,9 @@ public sealed class TranslationPipeline(
         }
 
         reservation.Complete();
+        // Tylko udane odpowiedzi: błąd lub timeout zafałszowałby typowy czas dostawcy.
+        usage.Latency.Record(LatencyStage.Provider,
+            Stopwatch.GetElapsedTime(providerStarted).TotalMilliseconds);
         RememberSent(textsToSend);
 
         for (var i = 0; i < chunk.Length; i++)

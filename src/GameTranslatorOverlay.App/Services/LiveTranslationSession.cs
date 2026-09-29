@@ -5,6 +5,7 @@ using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.Core.Ocr;
 using GameTranslatorOverlay.Core.Text;
 using GameTranslatorOverlay.Core.Translation;
+using GameTranslatorOverlay.Core.Usage;
 using GameTranslatorOverlay.Core.Vision;
 using Microsoft.Extensions.Logging;
 
@@ -407,7 +408,7 @@ public sealed class LiveTranslationSession(
         double significantFraction;
         long captureMs;
 
-        var captureStartedTimestamp = options.EnableDiagnostics ? Stopwatch.GetTimestamp() : 0;
+        var captureStartedTimestamp = Stopwatch.GetTimestamp();
         var captureWatch = Stopwatch.StartNew();
         var (bitmap, usedScreenFallback) = ScreenCapture.CaptureWindowEx(gameWindowHandle);
         using (bitmap)
@@ -417,6 +418,7 @@ public sealed class LiveTranslationSession(
             {
                 return (0, 0, 0, false);
             }
+            orchestrator.Latency.Record(LatencyStage.Capture, captureWatch.Elapsed.TotalMilliseconds);
 
             if (usedScreenFallback && !_warnedAboutScreenFallback)
             {
@@ -914,6 +916,7 @@ public sealed class LiveTranslationSession(
             ocrTask = ObserveOperationTimeAsync(ocrTask, ocrStarted, elapsed => ocrOperationMs = elapsed);
         var ocrResult = await AwaitWithSceneChecksAsync(ocrTask, clock, cancellationToken, ocrStartedTimestamp: ocrStarted).ConfigureAwait(false);
         var ocrMs = ocrWatch.ElapsedMilliseconds;
+        orchestrator.Latency.Record(LatencyStage.Ocr, ocrWatch.Elapsed.TotalMilliseconds);
         var ocrSceneChecks = _diagnosticSceneChecks - ocrChecksBefore;
         var ocrSceneCheckMs = _diagnosticSceneCheckMs - ocrCheckMsBefore;
         if (!_sceneValidity.IsCurrent(generation))
@@ -1360,6 +1363,15 @@ public sealed class LiveTranslationSession(
         var retained = survivors.Count > 0 ? $" • podtrzymane {survivors.Count}" : string.Empty;
         var status = firstError
             ?? $"Live: {next.Count} bloków ({freshKeys.Count} nowych{retained}) • klatka {captureMs} ms • OCR {ocrMs} ms/{rawLineCount} linii • tłum. {translateMs} ms{scope}";
+
+        // Od przechwycenia tej klatki do gotowych napisów — osobno dla tekstu znanego
+        // (cache, słownik) i nowego (zapytanie do dostawcy). Bez czasu rysowania przez WPF.
+        if (outcomes.Any(static o => o.IsTranslated))
+        {
+            orchestrator.Latency.Record(
+                outcomes.Any(static o => o.Origin == TranslationOrigin.Provider) ? LatencyStage.NewText : LatencyStage.KnownText,
+                Stopwatch.GetElapsedTime(captureStartedTimestamp).TotalMilliseconds);
+        }
 
         var displayList = BuildDisplayList(bounds);
         var diagnostics = options.EnableDiagnostics

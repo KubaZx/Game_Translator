@@ -646,3 +646,24 @@ zmiana modelu działa bez restartu. Zły klucz daje komunikat o kluczu, nie wyj�
 
 **Oczekiwany wynik:** drugie naciśnięcie zamyka zaznaczanie (status „Zaznaczanie anulowane.”),
 trzecie otwiera je od nowa.
+
+## M27 — Glosariusz DeepL
+
+**Kroki:** dostawca DeepL z kluczem; w słowniku termin, np. „Waystone” → „Kamień drogi”.
+Zaznacz Ctrl+Shift+T tekst, w którym termin stoi w środku zdania (np. „You found a Waystone.”).
+Potem na koncie DeepL (lub w logu aplikacji) sprawdź glosariusze; dodaj drugi termin i powtórz
+z nowym tekstem.
+
+**Oczekiwany wynik:** tłumaczenie używa „Kamień drogi” w odpowiedniej formie (np. „Kamień
+drogi”, „Kamienia drogi”). Na koncie jest jeden glosariusz „GameTranslatorOverlay …”; po
+dodaniu terminu powstaje nowy, a stary znika. W trybie prywatnym glosariusz nie powstaje.
+Tekst bez terminów tłumaczy się jak dotąd.
+
+## M28 — Panel „Szybkość”
+
+**Kroki:** uruchom live w grze z dialogami na kilka minut, potem kliknij **Kopiuj raport**
+i wklej wynik do notatnika; kliknij **Wyzeruj**.
+
+**Oczekiwany wynik:** panel pokazuje medianę „Nowy tekst”, „Znany”, dostawcy, OCR i klatki,
+a p90 po co najmniej 5 pomiarach. Raport zawiera medianę, p90, maksimum i liczbę pomiarów,
+bez tekstu z gry. Po wyzerowaniu panel pokazuje „Brak pomiarów”.

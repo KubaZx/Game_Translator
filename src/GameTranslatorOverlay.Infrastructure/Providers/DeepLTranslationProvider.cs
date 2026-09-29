@@ -17,6 +17,12 @@ public sealed class DeepLOptions : HttpProviderOptions
     /// Null = domyślne zachowanie DeepL.
     /// </summary>
     public string? Formality { get; set; } = "prefer_less";
+
+    /// <summary>
+    /// Glosariusz DeepL ze słownika użytkownika, gdy tłumaczony tekst zawiera jego terminy.
+    /// Glosariusz jest przechowywany na koncie DeepL użytkownika (patrz PRIVACY.md).
+    /// </summary>
+    public bool UseGlossary { get; set; } = true;
 }
 
 /// <summary>
@@ -27,13 +33,21 @@ public sealed class DeepLTranslationProvider(
     HttpClient httpClient,
     Func<string?> apiKeyAccessor,
     DeepLOptions? options = null,
-    ILogger<DeepLTranslationProvider>? logger = null)
+    ILogger<DeepLTranslationProvider>? logger = null,
+    TimeProvider? timeProvider = null)
     : IContextualTranslationProvider, IWarmableTranslationProvider
 {
     public const string ProviderName = "DeepL";
 
     private readonly DeepLOptions _options = options ?? new DeepLOptions();
     private readonly ILogger _logger = logger ?? NullLogger<DeepLTranslationProvider>.Instance;
+    private DeepLGlossaryManager? _glossaries;
+
+    private DeepLGlossaryManager Glossaries =>
+        LazyInitializer.EnsureInitialized(ref _glossaries, () => new DeepLGlossaryManager(httpClient, _options, _logger, timeProvider));
+
+    /// <summary>Ustawienia zmieniane w locie (np. glosariusz wyłączony w trybie prywatnym).</summary>
+    public DeepLOptions Options => _options;
 
     public string Name => ProviderName;
     public bool RequiresApiKey => true;
@@ -72,11 +86,35 @@ public sealed class DeepLTranslationProvider(
         // a z sąsiednimi liniami trafia w sens. DeepL nie tłumaczy ani nie bilinguje context.
         var context = BuildContext(texts, translationContext.RecentTexts);
 
+        // Terminy słownika w tej partii → glosariusz DeepL (spójne, odmienione nazwy także
+        // w środku zdań). Brak glosariusza nigdy nie blokuje tłumaczenia.
+        var glossaryId = _options.UseGlossary && translationContext.GlossaryTerms.Count > 0
+            ? await Glossaries.GetGlossaryIdAsync(
+                translationContext.GlossaryTerms, apiKey, GetBaseUrl(apiKey), sourceLanguage, targetLanguage, cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+
         var results = new List<string>(texts.Count);
         foreach (var chunk in texts.Chunk(Math.Max(1, _options.MaxBatchSize)))
         {
-            results.AddRange(await TranslateChunkAsync(chunk, context, apiKey, sourceLanguage, targetLanguage, cancellationToken)
-                .ConfigureAwait(false));
+            IReadOnlyList<string> translated;
+            try
+            {
+                translated = await TranslateChunkAsync(chunk, context, glossaryId, apiKey, sourceLanguage, targetLanguage, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (TranslationException ex) when (glossaryId is not null
+                && ex.Kind is TranslationFailureKind.InvalidRequest or TranslationFailureKind.Unknown)
+            {
+                // Glosariusz mógł zostać usunięty z konta albo DeepL go nie przyjął —
+                // ta sama partia jeszcze raz bez niego; glosariusz wraca po przerwie.
+                _logger.LogWarning("DeepL odrzucił tłumaczenie z glosariuszem ({Kind}) — ponawiam bez glosariusza", ex.Kind);
+                Glossaries.Invalidate(glossaryId);
+                glossaryId = null;
+                translated = await TranslateChunkAsync(chunk, context, null, apiKey, sourceLanguage, targetLanguage, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            results.AddRange(translated);
         }
         return results;
     }
@@ -125,11 +163,13 @@ public sealed class DeepLTranslationProvider(
     private static string OneLine(string text) => text.Replace('\n', ' ').Trim();
 
     private async Task<IReadOnlyList<string>> TranslateChunkAsync(
-        string[] chunk, string? context, string apiKey, string sourceLanguage, string targetLanguage, CancellationToken cancellationToken)
+        string[] chunk, string? context, string? glossaryId, string apiKey, string sourceLanguage, string targetLanguage,
+        CancellationToken cancellationToken)
     {
         var request = new DeepLTranslateRequest(chunk, MapLanguage(sourceLanguage), MapLanguage(targetLanguage), context)
         {
             Formality = string.IsNullOrWhiteSpace(_options.Formality) ? null : _options.Formality,
+            GlossaryId = glossaryId,
         };
         var url = $"{GetBaseUrl(apiKey)}/v2/translate";
 
@@ -215,6 +255,10 @@ public sealed class DeepLTranslationProvider(
         [JsonPropertyName("formality")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Formality { get; init; }
+
+        [JsonPropertyName("glossary_id")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? GlossaryId { get; init; }
     }
 
     private sealed record DeepLTranslateResponse(

@@ -19,6 +19,9 @@ public sealed class UsageTracker
     public long GlossaryHits => Interlocked.Read(ref _glossaryHits);
     public long FailedRequests => Interlocked.Read(ref _failedRequests);
 
+    /// <summary>Czasy etapów (OCR, dostawca, gotowy napis) w tej sesji aplikacji.</summary>
+    public LatencyMonitor Latency { get; } = new();
+
     /// <summary>
     /// Null means unlimited. Changes apply to the next admission; already admitted
     /// requests retain their reservations and may complete even after the limit is lowered.
@@ -99,6 +102,7 @@ public sealed class UsageTracker
             Interlocked.Exchange(ref _glossaryHits, 0);
             Interlocked.Exchange(ref _failedRequests, 0);
         }
+        Latency.Reset();
     }
 
     /// <summary>

@@ -8,7 +8,7 @@ z API OpenAI, Claude, Mock), mechanizmy kontroli kosztów oraz sposób dodawania
 
 | Id (ustawienia) | Klasa | Sekret DPAPI | Dodatkowe ustawienia | Kontekst (gra + terminy) |
 |---|---|---|---|---|
-| `DeepL` | `DeepLTranslationProvider` | `deepl-api-key` | — | kontekst klatki (parametr DeepL `context`) |
+| `DeepL` | `DeepLTranslationProvider` | `deepl-api-key` | — | kontekst klatki (parametr DeepL `context`) i glosariusz ze słownika |
 | `Azure` | `AzureTranslatorProvider` | `azure-translator-key` | `azureRegion` | — |
 | `Google` | `GoogleTranslateProvider` | `google-translate-key` | — | — |
 | `LLM` | `OpenAiCompatibleTranslationProvider` | `llm-api-key` (opcjonalny) | `llmEndpoint`, `llmModel` | tak |
@@ -114,6 +114,25 @@ niczego więcej nie konfiguruje.
   razem zamiast strzelać pojedynczo (mniej żądań = mniejsza szansa na rate limit i szybszy
   łączny czas).
 - Wysyłany jest wyłącznie rozpoznany tekst (nigdy obrazy — patrz `docs/PRIVACY.md`).
+
+### /v2/glossaries — glosariusz ze słownika
+
+Gdy partia zawiera co najmniej jeden termin słownika (`TranslationContext.Terms`), pipeline
+dołącza cały aktywny słownik (`TranslationContext.GlossaryTerms`), a `DeepLGlossaryManager`
+zamienia go na glosariusz DeepL i dodaje `glossary_id` do `/v2/translate`:
+
+- wpisy TSV: bez pustych pól, tabulatorów, końców linii i znaków sterujących; każde źródło raz
+  (wyższy priorytet, potem termin z rozróżnianiem wielkości liter), posortowane — skrót treści
+  nie zależy od kolejności wczytania słowników; najwyżej 10 000 wpisów,
+- nazwa `GameTranslatorOverlay <skrót treści>`: `GET /v2/glossaries` znajduje istniejący
+  glosariusz (np. po restarcie), a gdy go nie ma — `POST /v2/glossaries` (bez ponawiania,
+  żeby nie tworzyć duplikatów),
+- starsze glosariusze tej aplikacji dla tej samej pary języków są usuwane w tle
+  (`DELETE /v2/glossaries/{id}`); cudze glosariusze na koncie nie są ruszane,
+- języki glosariusza bez wariantu regionalnego (`EN-GB` → `en`),
+- błąd listy/tworzenia albo odrzucone tłumaczenie z glosariuszem (400/404) → ta sama partia
+  bez glosariusza i 10 minut przerwy przed kolejną próbą,
+- `DeepLOptions.UseGlossary` (domyślnie tak); orchestrator wyłącza go w trybie prywatnym.
 
 ### /v2/usage — test połączenia i licznik
 

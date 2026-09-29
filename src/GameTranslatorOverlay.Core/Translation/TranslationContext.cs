@@ -18,6 +18,13 @@ public sealed record TranslationContext(string? GameName, IReadOnlyList<Glossary
     /// </summary>
     public IReadOnlyList<string> RecentTexts { get; init; } = [];
 
+    /// <summary>
+    /// Cały aktywny słownik — dla dostawców z własnymi glosariuszami (DeepL). Wypełniany
+    /// tylko wtedy, gdy partia zawiera co najmniej jeden termin (<see cref="Terms"/>),
+    /// żeby glosariusz nie powstawał dla tekstów, w których nic z niego nie występuje.
+    /// </summary>
+    public IReadOnlyList<GlossaryTerm> GlossaryTerms { get; init; } = [];
+
     public bool IsEmpty => string.IsNullOrWhiteSpace(GameName) && Terms.Count == 0 && RecentTexts.Count == 0;
 }
 

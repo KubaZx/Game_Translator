@@ -754,6 +754,9 @@ public partial class MainWindow : Window
             $"API: {_usage.ApiRequests} zapytań / {_usage.ApiCharacters:N0} znaków  •  " +
             $"Cache: {_usage.CacheHits}  •  Słownik: {_usage.GlossaryHits}  •  Błędy: {_usage.FailedRequests}";
 
+        var latency = _usage.Latency.Describe(_orchestrator.ActiveProvider.Name);
+        TxtLatency.Text = latency.Length > 0 ? latency : "Brak pomiarów — przetłumacz coś albo uruchom live.";
+
         if (++_statusTicks % 5 != 0 || _settings.PrivateMode) return;
         try
         {
@@ -773,6 +776,32 @@ public partial class MainWindow : Window
             _logger.LogWarning(ex, "Nie udało się odczytać statystyk cache");
             TxtCacheStatus.Text = "Cache SQLite: statystyki chwilowo niedostępne (szczegóły w logu).";
         }
+    }
+
+    private void OnCopyLatencyReportClick(object sender, RoutedEventArgs e)
+    {
+        var report = _usage.Latency.Report(_orchestrator.ActiveProvider.Name);
+        if (report.Length == 0)
+        {
+            SetStatus("Brak pomiarów czasu do skopiowania.");
+            return;
+        }
+        try
+        {
+            Clipboard.SetText(report);
+            SetStatus("Raport czasów skopiowany do schowka.");
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            SetStatus("Schowek jest zajęty przez inny program — spróbuj ponownie.");
+        }
+    }
+
+    private void OnResetLatencyClick(object sender, RoutedEventArgs e)
+    {
+        _usage.Latency.Reset();
+        TxtLatency.Text = "Brak pomiarów — przetłumacz coś albo uruchom live.";
+        SetStatus("Pomiary czasu wyzerowane.");
     }
 
     private void SetStatus(string message)
