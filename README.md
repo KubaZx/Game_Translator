@@ -25,7 +25,7 @@ zbudować instrukcją poniżej. Numer wersji aplikacji pozostaje 0.2.2 do kolejn
 
 Stan weryfikacji na 29 września 2026: **509 testów** — 363 Core i 146 Infrastructure —
 oraz kompilacja całego rozwiązania bez ostrzeżeń. Nowi dostawcy tłumaczeń nie byli jeszcze
-sprawdzani w uruchomionym oknie na Windows (scenariusze M23–M26 w
+sprawdzani w uruchomionym oknie na Windows, a CI uruchamia testy na Windows i Linuksie (scenariusze M23–M26 w
 [MANUAL_TESTING.md](docs/MANUAL_TESTING.md)); ostatni smoke test Windows OCR: 15 września.
 Próby wizualne w różnych grach, przy różnych DPI i monitorach pozostają osobnym
 zadaniem. Projekt nadal rozwijamy, szczególnie pod kątem dynamicznej rozgrywki.
@@ -41,7 +41,10 @@ zadaniem. Projekt nadal rozwijamy, szczególnie pod kątem dynamicznej rozgrywki
   przy której tekst nie opuszcza komputera.
 - **Słowniki i własne poprawki:** edytor, import i eksport, spójne nazwy i terminy.
   Modele językowe dostają nazwę gry i terminy słownika także wewnątrz dłuższych zdań.
-- **Pamięć tłumaczeń:** cache SQLite, łączenie powtarzających się zapytań oraz limity użycia.
+- **Kontekst dialogu:** poprzednie kwestie trafiają do dostawcy jako kontekst (DeepL i modele
+  językowe) — pomaga m.in. w polskim rodzaju gramatycznym krótkich wypowiedzi.
+- **Pamięć tłumaczeń:** cache SQLite z szybką pamięcią trafień w RAM, łączenie powtarzających
+  się zapytań oraz limity użycia.
 - **Praca bez wysyłania tłumaczeń:** Cache-only korzysta z lokalnych wyników;
   Mock służy do sprawdzania działania bez klucza API.
 - **Profile opcjonalne:** ustawienia ogólne i profil PoE2 w zestawie; pozostałe gry
@@ -51,11 +54,20 @@ Priorytet wyniku: **ręczna poprawka → słownik → cache → dostawca tłumac
 
 ## Ostatnie poprawki w kodzie
 
-Najnowsza runda (29 września) dodaje wybór dostawcy tłumaczeń z osobnymi kluczami,
-przekazywanie nazwy gry i terminów słownika do modeli językowych oraz zamyka pozycje
-backlogu audytu #3 (priorytety i normalizacja słownika, jawne wyłączenie powiększania
-w profilu, skalowanie prostokątów bez dryfu, `minAppVersion`, skrót przy otwartym
-zaznaczaniu). Szczegóły: [CHANGELOG.md](CHANGELOG.md), [dostawcy](docs/API_PROVIDERS.md).
+Rundy z 29 września:
+
+- **Wybór dostawcy tłumaczeń** z osobnymi kluczami (DeepL, Azure, Google, Claude, serwer
+  zgodny z OpenAI, także lokalny) oraz nazwa gry i terminy słownika w kontekście modeli językowych.
+- **Szybkość:** trafienia cache w RAM i zbiorczy zapis statystyk — w lokalnym pomiarze
+  (50 klatek × 20 bloków z cache) z ~10–13 ms do ~0,25 ms na klatkę. Połączenia z dostawcą
+  żyją dłużej i są zestawiane zawczasu przy zaznaczaniu regionu i starcie live.
+- **Jakość:** do 6 poprzednich linii jako kontekst dla DeepL i modeli językowych.
+- **Backlog audytu #3:** priorytety i normalizacja słownika, jawne wyłączenie powiększania
+  w profilu, skalowanie prostokątów bez dryfu, `minAppVersion`, skrót przy otwartym zaznaczaniu.
+- **CI:** dodatkowy szybki przebieg testów na Linuksie.
+
+Zysk z połączeń zawczasu i wpływ kontekstu na jakość nie zostały jeszcze zmierzone w grze.
+Szczegóły: [CHANGELOG.md](CHANGELOG.md), [dostawcy](docs/API_PROVIDERS.md).
 
 Stare napisy są usuwane po wykrytej zmianie sceny, a spóźniona odpowiedź nie powinna
 przywracać poprzedniego widoku. Potwierdzone lokalne zastąpienie lub przykrycie
