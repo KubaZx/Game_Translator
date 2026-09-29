@@ -18,7 +18,7 @@ i pokazuje polską wersję w przezroczystej nakładce nad grą. Klikanie przez n
 | Ukrycie nakładki | `Ctrl+Shift+H` |
 | Wygląd | bloki przy oryginale (opcjonalnie zakrywające tekst) albo napisy na dole |
 | Dostawcy | DeepL, Azure AI Translator, Google, Claude, serwer zgodny z OpenAI (także lokalna Ollama / LM Studio), Mock |
-| Słownik | własne terminy i poprawki, import/eksport |
+| Słownik | własne terminy i poprawki, import/eksport; w DeepL jako glosariusz (terminy odmieniane także w środku zdań) |
 | Kontekst | do 6 poprzednich linii dialogu + nazwa gry + terminy słownika |
 | Cache | SQLite z pamięcią w RAM; ten sam tekst nie idzie drugi raz do API |
 | Offline | Cache-only (bez API), lokalny model LLM, Mock (test bez klucza) |
@@ -42,8 +42,11 @@ Kolejność wyboru tłumaczenia: **ręczna poprawka → słownik → cache → d
 
 Pomiary z lokalnych sond (własne okno testowe, prawdziwy Windows OCR, Mock zamiast
 prawdziwego dostawcy). Mierzą moment gotowości napisu w aplikacji, nie rysowanie na ekranie.
-Czas odpowiedzi DeepL i innych dostawców nie był mierzony. Zależy od sieci i długości tekstu.
+Czas odpowiedzi DeepL i innych dostawców nie był jeszcze mierzony. Zależy od sieci i długości tekstu.
 Szczegóły: [ROADMAP.md](docs/ROADMAP.md).
+
+Własne czasy z gry pokazuje panel **Szybkość** w oknie aplikacji: mediana i p90 dla nowego
+i znanego tekstu, odpowiedzi dostawcy, OCR i przechwycenia. **Kopiuj raport** kopiuje je do schowka.
 
 ## Szybki start
 
@@ -96,7 +99,7 @@ dotnet run --project src/GameTranslatorOverlay.App
 - Linux: dodaj `-p:EnableWindowsTargeting=true` (testy DPAPI i OCR wymagają Windows).
 - Paczka portable: `./tools/package.ps1` → `dist/`.
 - Wydanie: tag `v*` → CI buduje zip i dodaje go do Releases.
-- Testy: 531 (383 Core + 148 Infrastructure), bez kluczy API i bez gry. Szczegóły: [TESTING.md](docs/TESTING.md).
+- Testy: 562 (402 Core + 160 Infrastructure), bez kluczy API i bez gry. Szczegóły: [TESTING.md](docs/TESTING.md).
 
 ## Struktura
 

@@ -8,8 +8,9 @@ live wprowadzone po 0.2.2: aktualność sceny i lokalnych opisów, nadzorowane t
 stabilizacja kolejnych odczytów oraz położenia. Kolejna lokalna poprawka zachowuje
 napisy o identycznym obrazie źródła podczas ruchu tła. Runda 29 września dodaje
 kolejnych dostawców tłumaczeń (Azure, Google, modele językowe z kontekstem gry i słownika)
-i zamyka pozycje backlogu audytu #3. Przeszło **531 testów** i kompilacja całego
-rozwiązania; próby wizualne nowych pól okna czekają na Windows (M23–M26).
+i zamyka pozycje backlogu audytu #3; kolejna runda dodaje licznik czasu i glosariusze DeepL.
+Przeszły **562 testy** i kompilacja całego
+rozwiązania; próby wizualne nowych pól okna czekają na Windows (M23–M28).
 
 Produkt jest rozwijany dla różnych gier. Escape Academy służy do pomiarów;
 PoE2 jest jednym z obsługiwanych przypadków z dodatkowym profilem. Aktualny priorytet
@@ -401,3 +402,18 @@ pozycję bloku o 1 px względem wcześniejszych pomiarów).
 - **CI:** job testów na `ubuntu-latest` i cache NuGet.
 
 Weryfikacja: 531 testów (383 Core + 148 Infrastructure), kompilacja całego rozwiązania.
+
+### Runda 2026-09-29 (3) — licznik czasu i glosariusze DeepL
+
+- **Licznik czasu:** `LatencyMonitor` (Core, w `UsageTracker`) zbiera w pamięci ostatnie
+  200 próbek na etap: przechwycenie, OCR, udane zapytanie do dostawcy oraz klatka → gotowy
+  napis osobno dla tekstu nowego i znanego. Panel „Szybkość” pokazuje medianę i p90,
+  „Kopiuj raport” — mediana, p90, maksimum i liczba pomiarów. Czas rysowania nakładki
+  przez WPF nie jest mierzony. Cel: prawdziwe czasy DeepL z gry zamiast pomiarów z Mocka.
+- **Glosariusze DeepL:** `DeepLGlossaryManager` buduje glosariusz z całego słownika, gdy
+  partia zawiera termin; jeden glosariusz na zawartość słownika (ponowne użycie po
+  restarcie), sprzątanie starych wersji w tle, 10 minut przerwy po błędzie, ponowienie
+  tłumaczenia bez glosariusza. Wyłączone w trybie prywatnym. Nie sprawdzono jeszcze na
+  prawdziwym koncie DeepL (proxy środowiska blokuje DeepL) — do potwierdzenia w M27.
+
+Weryfikacja: 562 testy (402 Core + 160 Infrastructure), kompilacja całego rozwiązania.

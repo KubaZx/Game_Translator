@@ -77,6 +77,9 @@ public sealed class TranslationOrchestrator(
         _providers.FirstOrDefault(p => p.Name.Equals(settings.Provider?.Trim(), StringComparison.OrdinalIgnoreCase))
         ?? deepLProvider;
 
+    /// <summary>Czasy etapów tej sesji aplikacji (live i ręczne tłumaczenie).</summary>
+    public LatencyMonitor Latency => usage.Latency;
+
     public ITranslationCache CurrentCache => _privateCache is { } inMemory ? inMemory : persistentCache;
 
     public void Initialize()
@@ -129,6 +132,9 @@ public sealed class TranslationOrchestrator(
         }
 
         usage.SessionCharacterLimit = settings.SessionCharacterLimit;
+
+        // Glosariusz DeepL jest przechowywany na koncie DeepL — tryb prywatny go nie tworzy.
+        deepLProvider.Options.UseGlossary = !settings.PrivateMode;
 
         var pipeline = new TranslationPipeline(
             glossaryService,
@@ -184,6 +190,7 @@ public sealed class TranslationOrchestrator(
             var captureWatch = Stopwatch.StartNew();
             using var bitmap = ScreenCapture.CaptureScreenRegion(region);
             var captureElapsed = captureWatch.ElapsedMilliseconds;
+            usage.Latency.Record(LatencyStage.Capture, captureWatch.Elapsed.TotalMilliseconds);
             cancellationToken.ThrowIfCancellationRequested();
 
             // Kopia pikseli oryginału do próbkowania koloru tekstu (przed skalowaniem).
@@ -217,6 +224,7 @@ public sealed class TranslationOrchestrator(
                     };
                 }
 
+                usage.Latency.Record(LatencyStage.Ocr, ocrWatch.Elapsed.TotalMilliseconds);
                 return (result, pixelsForColor, captureElapsed, ocrWatch.ElapsedMilliseconds);
             }
             finally
@@ -255,6 +263,12 @@ public sealed class TranslationOrchestrator(
             settings.TargetLanguage,
             cancellationToken).ConfigureAwait(false);
         var translateMs = translateWatch.ElapsedMilliseconds;
+        if (outcomes.Any(static o => o.IsTranslated))
+        {
+            usage.Latency.Record(
+                outcomes.Any(static o => o.Origin == TranslationOrigin.Provider) ? LatencyStage.NewText : LatencyStage.KnownText,
+                totalWatch.Elapsed.TotalMilliseconds);
+        }
 
         var translated = new List<TranslatedBlock>(blocks.Count);
         for (var i = 0; i < blocks.Count; i++)

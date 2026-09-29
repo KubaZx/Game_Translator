@@ -4,7 +4,22 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
-Brak zmian po wydaniu 0.3.1.
+### Jakość tłumaczeń
+
+- **Glosariusze DeepL ze słownika:** gdy tłumaczony tekst zawiera termin ze słownika, DeepL
+  dostaje glosariusz zbudowany z całego aktywnego słownika. Nazwy przedmiotów, postaci i miejsc
+  są tłumaczone spójnie także w środku zdań, z polską odmianą. Glosariusz powstaje raz dla danej
+  zawartości słownika (po restarcie jest ponownie używany), a po zmianie słownika stare wersje
+  tej aplikacji są usuwane z konta DeepL w tle. Błąd glosariusza nie blokuje tłumaczenia:
+  aplikacja tłumaczy bez niego i próbuje ponownie po 10 minutach. W trybie prywatnym glosariusz
+  nie jest tworzony.
+
+### Szybkość
+
+- **Panel „Szybkość”** w oknie aplikacji: mediana i p90 z tej sesji dla nowego tekstu
+  (klatka → gotowy napis), znanego tekstu (cache/słownik), odpowiedzi dostawcy, OCR
+  i przechwycenia klatki. Przycisk **Kopiuj raport** kopiuje szczegóły (mediana, p90, maksimum,
+  liczba pomiarów) — bez tekstu z gry. Czasy są tylko w pamięci.
 
 ## [0.3.1] — 2026-09-29
 

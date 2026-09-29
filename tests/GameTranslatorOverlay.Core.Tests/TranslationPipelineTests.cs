@@ -308,6 +308,23 @@ public class TranslationPipelineTests
     }
 
     [Fact]
+    public async Task Caly_slownik_trafia_do_kontekstu_tylko_gdy_partia_zawiera_termin()
+    {
+        var glossary = new GlossaryService();
+        glossary.AddTerm(new GlossaryTerm("Energy Shield", "Tarcza energetyczna"));
+        glossary.AddTerm(new GlossaryTerm("Waystone", "Kamień drogi"));
+        var provider = new ContextualProvider();
+        var pipeline = new TranslationPipeline(
+            glossary, new InMemoryTranslationCache(), provider, new UsageTracker(), new TranslationPipelineOptions());
+
+        await pipeline.TranslateAsync(["Nothing to see here"], "en", "pl");
+        await pipeline.TranslateAsync(["+40 to maximum Energy Shield"], "en", "pl");
+
+        Assert.Empty(provider.Contexts[0].GlossaryTerms);
+        Assert.Equal(2, provider.Contexts[1].GlossaryTerms.Count);
+    }
+
+    [Fact]
     public async Task Ostatnie_wyslane_linie_trafiaja_jako_kontekst_kolejnej_partii()
     {
         var cache = new InMemoryTranslationCache();
