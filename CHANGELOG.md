@@ -4,7 +4,22 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
-Brak zmian po wydaniu 0.3.0.
+### Jakość tłumaczeń
+
+- **Zawinięte zdania tłumaczone w całości:** dialog lub opis rozbity w grze na kilka wierszy
+  był wysyłany z podziałami, a tłumacz (m.in. DeepL) traktował każdy wiersz jak osobne zdanie
+  — gramatyka rozpadała się na granicach wierszy. Teraz miękkie zawinięcia są sklejane przed
+  tłumaczeniem, a wynik jest rozkładany z powrotem na tyle samo, równych wierszy. Menu,
+  statystyki przedmiotów i osobne zdania pozostają rozdzielone. Dotyczy wszystkich dostawców.
+- Wcześniejsze automatyczne tłumaczenia wieloliniowe z cache są tłumaczone ponownie jeden raz
+  (ręczne poprawki zostają; przy błędzie sieci, limicie i w Cache-only używany jest stary wynik).
+- Naprawa typowych pomyłek OCR przed tłumaczeniem: `l'm` / `l'll` / `l've` / `l'd` → `I…`,
+  samotne `|` przed słowem → `I`.
+- Forma „ty” wobec gracza: DeepL `formality: prefer_less`, a modele językowe dostają tę samą
+  wskazówkę oraz polecenie spójnego rodzaju mówiących.
+
+Wpływ na jakość nie był jeszcze mierzony na prawdziwych dialogach — do sprawdzenia
+checklistą [docs/QUALITY_CHECK.md](docs/QUALITY_CHECK.md).
 
 ## [0.3.0] — 2026-09-29
 

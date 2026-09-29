@@ -10,6 +10,13 @@ namespace GameTranslatorOverlay.Infrastructure.Providers;
 public sealed class DeepLOptions : HttpProviderOptions
 {
     public int MaxBatchSize { get; set; } = 50;
+
+    /// <summary>
+    /// Forma zwracania się do gracza. Lokalizacje gier używają formy „ty”, a nie „Pan/Pani”;
+    /// wariant „prefer_less” nie zgłasza błędu dla języków bez obsługi formalności.
+    /// Null = domyślne zachowanie DeepL.
+    /// </summary>
+    public string? Formality { get; set; } = "prefer_less";
 }
 
 /// <summary>
@@ -120,7 +127,10 @@ public sealed class DeepLTranslationProvider(
     private async Task<IReadOnlyList<string>> TranslateChunkAsync(
         string[] chunk, string? context, string apiKey, string sourceLanguage, string targetLanguage, CancellationToken cancellationToken)
     {
-        var request = new DeepLTranslateRequest(chunk, MapLanguage(sourceLanguage), MapLanguage(targetLanguage), context);
+        var request = new DeepLTranslateRequest(chunk, MapLanguage(sourceLanguage), MapLanguage(targetLanguage), context)
+        {
+            Formality = string.IsNullOrWhiteSpace(_options.Formality) ? null : _options.Formality,
+        };
         var url = $"{GetBaseUrl(apiKey)}/v2/translate";
 
         using var response = await ProviderHttp.SendAsync(
@@ -200,7 +210,12 @@ public sealed class DeepLTranslationProvider(
         [property: JsonPropertyName("source_lang")] string SourceLang,
         [property: JsonPropertyName("target_lang")] string TargetLang,
         [property: JsonPropertyName("context")]
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Context = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Context = null)
+    {
+        [JsonPropertyName("formality")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Formality { get; init; }
+    }
 
     private sealed record DeepLTranslateResponse(
         [property: JsonPropertyName("translations")] List<DeepLTranslationItem>? Translations);

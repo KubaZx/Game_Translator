@@ -69,6 +69,11 @@ public sealed class TranslationPipeline(
     private readonly Lock _recentGate = new();
     private readonly LinkedList<string> _recentSent = new();
 
+    // Tłumaczenia wieloliniowe w starym formacie (sprzed sklejania wierszy), pominięte, żeby
+    // przetłumaczyć je lepiej. Gdy dostawca zawiedzie (sieć, limit, błąd), gracz dostaje
+    // stary wynik zamiast komunikatu o błędzie.
+    private readonly ConcurrentDictionary<string, string> _staleFallbacks = new(StringComparer.Ordinal);
+
     public ITranslationProvider Provider => provider;
     public TranslationPipelineOptions Options => options;
 
@@ -123,6 +128,15 @@ public sealed class TranslationPipeline(
             }
         }
 
+        foreach (var (_, normalized) in normalizedInputs)
+        {
+            if (!_staleFallbacks.TryRemove(normalized, out var stale)) continue;
+            if (outcomes.TryGetValue(normalized, out var failed) && failed.TranslatedText is null)
+            {
+                outcomes[normalized] = failed with { TranslatedText = stale, Origin = TranslationOrigin.Cache, ErrorMessage = null };
+            }
+        }
+
         return normalizedInputs
             .Select(input => outcomes.TryGetValue(input.Normalized, out var outcome)
                 ? outcome with { SourceText = input.Source }
@@ -142,6 +156,18 @@ public sealed class TranslationPipeline(
             && cached.Provider.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase)
             && !provider.Name.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase))
             cached = null;
+
+        // Automatyczne tłumaczenie tekstu wieloliniowego sprzed sklejania wierszy było
+        // tłumaczone kawałkami (gramatyka rozbita na granicach wierszy) — tłumaczymy je
+        // ponownie raz, w nowym formacie; stary wynik zostaje jako zapasowy. W Cache-only
+        // nic nie wychodzi do sieci, więc stary wynik jest nadal najlepszym dostępnym.
+        // Ręczne korekty zawsze zostają.
+        if (!options.CacheOnlyMode && cached is { IsManual: false }
+            && cached.Context != TextReflow.FormatVersion && normalized.Contains('\n'))
+        {
+            _staleFallbacks[normalized] = cached.TranslatedText;
+            cached = null;
+        }
 
         // Manual corrections retain precedence over the glossary on both lookups.
         if (cached is { IsManual: true })
@@ -289,7 +315,10 @@ public sealed class TranslationPipeline(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var textsToSend = chunk.Select(static c => c.Normalized).ToList();
+        // Wiersze jednego zdania sklejamy przed wysłaniem (tłumacz nie rozbija gramatyki
+        // na granicach wierszy), a po tłumaczeniu przywracamy tę samą liczbę wierszy.
+        var reflowed = chunk.Select(static c => TextReflow.Unwrap(c.Normalized)).ToList();
+        var textsToSend = reflowed.Select(static r => r.Text).ToList();
         // Only owned, non-deduplicated texts reserve budget. Waiters reuse the owner's
         // admission and outcome; a different pipeline shares the same UsageTracker gate.
         using var reservation = usage.TryReserveApiCharacters(textsToSend.Sum(static t => t.Length));
@@ -349,7 +378,7 @@ public sealed class TranslationPipeline(
         for (var i = 0; i < chunk.Length; i++)
         {
             var (source, normalized, _, tcs) = chunk[i];
-            var translated = translations[i];
+            var translated = TextReflow.Rewrap(translations[i], reflowed[i].Plan);
             tcs.TrySetResult(translated);
             outcomes[normalized] = new TranslationOutcome(source, normalized, translated, TranslationOrigin.Provider);
 
@@ -362,7 +391,8 @@ public sealed class TranslationPipeline(
                 // A separate settings/privacy epoch may forbid writes to this captured cache.
                 cacheWriteCancellationToken.ThrowIfCancellationRequested();
                 await cache.StoreAsync(
-                    new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage, translated, provider.Name, GameProfile: string.Empty),
+                    new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage, translated, provider.Name,
+                        GameProfile: string.Empty, Context: TextReflow.FormatVersion),
                     cacheWriteCancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

@@ -35,6 +35,19 @@ Dostawcy HTTP (DeepL, Azure, Google, LLM) korzystają z jednej pętli zapytań:
 Claude korzysta z oficjalnego SDK Anthropic, które ma własne ponawianie; jego wyjątki są
 mapowane na te same rodzaje błędów.
 
+## Przygotowanie tekstu przed dostawcą (`TextReflow`)
+
+Pipeline skleja miękkie zawinięcia wierszy (poprzedni wiersz nie kończy zdania, a następny
+zaczyna się małą literą, po przecinku, po słowie łączącym typu „the/to/your” albo liczbą po
+zwykłym słowie) i naprawia jednoznaczne pomyłki OCR (`l'm` → `I'm`, `|` → `I`). Twarde
+podziały (menu, statystyki, osobne zdania) zostają jako osobne akapity. Po tłumaczeniu każdy
+akapit jest rozkładany na tyle wierszy, ile miał w oryginale (równe długości, bez dzielenia
+wyrazów); przy innej liczbie akapitów tłumaczenie zostaje bez zmian. Wpisy cache dostają
+znacznik `reflow-1` w kolumnie `context`; starsze automatyczne wpisy wieloliniowe są
+tłumaczone ponownie, z zachowaniem starego wyniku jako zapasowego.
+
+DeepL dostaje `formality: prefer_less` (forma „ty”; `DeepLOptions.Formality = null` wyłącza).
+
 ## Połączenia i rozgrzewka
 
 `ProviderHttpClientFactory.Create()` tworzy `HttpClient` z pulą bezczynnych połączeń na

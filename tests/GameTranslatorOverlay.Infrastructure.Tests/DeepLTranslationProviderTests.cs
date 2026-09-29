@@ -279,4 +279,17 @@ public class DeepLTranslationProviderTests
         using var body = JsonDocument.Parse(handler.Requests[0].Body);
         Assert.False(body.RootElement.TryGetProperty("context", out _));
     }
+
+    [Fact]
+    public async Task Domyslnie_prosi_o_forme_nieformalna_a_mozna_to_wylaczyc()
+    {
+        var handler = new FakeHandler(static (request, _) => Task.FromResult(EchoResponse(request)));
+        await CreateProvider(handler).TranslateBatchAsync(["Are you ready?"], "en", "pl");
+        await CreateProvider(handler, options: new DeepLOptions { Formality = null }).TranslateBatchAsync(["Are you ready?"], "en", "pl");
+
+        using var informal = JsonDocument.Parse(handler.Requests[0].Body);
+        using var neutral = JsonDocument.Parse(handler.Requests[1].Body);
+        Assert.Equal("prefer_less", informal.RootElement.GetProperty("formality").GetString());
+        Assert.False(neutral.RootElement.TryGetProperty("formality", out _));
+    }
 }

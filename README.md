@@ -22,7 +22,7 @@ obrazu i czytelności tekstu.
 dialogu i słownika, szybszy cache oraz poprawki stabilności live. Lista zmian:
 [CHANGELOG.md](CHANGELOG.md).
 
-Stan weryfikacji na 29 września 2026: **509 testów** — 363 Core i 146 Infrastructure —
+Stan weryfikacji na 29 września 2026: **531 testów** — 383 Core i 148 Infrastructure —
 oraz kompilacja całego rozwiązania bez ostrzeżeń. Nowi dostawcy tłumaczeń nie byli jeszcze
 sprawdzani w uruchomionym oknie na Windows, a CI uruchamia testy na Windows i Linuksie (scenariusze M23–M26 w
 [MANUAL_TESTING.md](docs/MANUAL_TESTING.md)); ostatni smoke test Windows OCR: 15 września.
