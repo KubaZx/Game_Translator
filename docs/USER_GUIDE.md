@@ -5,7 +5,7 @@ zewnętrzna nakładka: przechwytuje obraz, rozpoznaje tekst systemowym OCR Windo
 i wyświetla tłumaczenie nad grą — **nie dotykając plików ani procesu gry**.
 
 Projekt jest przeznaczony do różnych gier; nie wymaga profilu konkretnego tytułu.
-Instrukcja opisuje wydanie 0.3.0 — szczegóły w
+Instrukcja opisuje wydanie 0.3.1 — szczegóły w
 [historii zmian](https://github.com/KubaZx/Game_Translator/blob/main/CHANGELOG.md).
 
 ## Instalacja

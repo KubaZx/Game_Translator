@@ -18,7 +18,8 @@ obrazu i czytelności tekstu.
 
 ## Stan projektu
 
-**Ostatnie wydanie: 0.3.0** (29 września 2026) — wybór dostawcy tłumaczeń, kontekst
+**Ostatnie wydanie: 0.3.1** (29 września 2026) — zawinięte zdania tłumaczone w całości,
+naprawa typowych pomyłek OCR i forma „ty”; wcześniej w 0.3.0: wybór dostawcy tłumaczeń, kontekst
 dialogu i słownika, szybszy cache oraz poprawki stabilności live. Lista zmian:
 [CHANGELOG.md](CHANGELOG.md).
 
