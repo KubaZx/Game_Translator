@@ -67,7 +67,12 @@ public static partial class LlmTranslationPrompt
         if (context.Terms.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("Glossary (always use these translations for these terms):");
+            // Słownik podaje formę podstawową, a polskie zdanie wymaga odmiany („Kamień drogi” →
+            // „Kamieniem drogi”); słowo może też wystąpić w zwykłym znaczeniu („save the village”).
+            // Sztywne „always use” dawało nieodmienione wstawki i terminy w złym miejscu.
+            builder.AppendLine("Glossary (game terms). When a source word or phrase is used as this game term, use the given");
+            builder.AppendLine($"translation, inflected to fit {target} grammar (case, number, gender). Plural source forms");
+            builder.AppendLine("(e.g. \"Waystones\") are the same term. If the word is used in its ordinary sense, translate it normally:");
             foreach (var term in context.Terms)
             {
                 builder.AppendLine($"- {OneLine(term.Source)} => {OneLine(term.Target)}");

@@ -78,8 +78,13 @@ public class DeepLGlossaryTests
         }
     }
 
+    // Glosariusz powstaje w tle, a tłumaczenie czeka na niego najwyżej GlossaryWaitBudget.
+    // Te testy sprawdzają treść glosariusza i jego użycie od pierwszej partii, więc dają
+    // szybkiej atrapie zapas czasu, żeby wolny serwer CI nie zmieniał wyniku (zachowanie
+    // przy wolnym API sprawdza DeepLGlossaryBackgroundTests).
     private static DeepLTranslationProvider Provider(FakeDeepL fake, TimeProvider? clock = null, DeepLOptions? options = null) =>
-        new(new HttpClient(fake.Handler), static () => "key:fx", options, timeProvider: clock);
+        new(new HttpClient(fake.Handler), static () => "key:fx",
+            options ?? new DeepLOptions { GlossaryWaitBudget = TimeSpan.FromSeconds(10) }, timeProvider: clock);
 
     [Fact]
     public async Task Bez_terminow_w_partii_nie_ma_glosariusza()

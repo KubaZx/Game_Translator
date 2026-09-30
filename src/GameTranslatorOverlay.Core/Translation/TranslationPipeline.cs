@@ -283,8 +283,25 @@ public sealed class TranslationPipeline(
             : new TranslationContext(gameName, terms)
             {
                 RecentTexts = recent,
-                GlossaryTerms = terms.Count > 0 ? glossary.AllTerms : [],
+                GlossaryTerms = GlossaryTermsFor(terms),
             };
+    }
+
+    /// <summary>
+    /// Słownik dla glosariusza DeepL (przechowywanego na koncie użytkownika): tylko terminy,
+    /// które wolno zapisać poza komputerem, i tylko gdy partia zawiera co najmniej jeden
+    /// z nich. Termin z trybu prywatnego (bywa całą linią czatu) nigdy nie trafia na konto
+    /// DeepL — ani sam, ani jako wyzwalacz utworzenia glosariusza. Podpowiedzi dla LLM
+    /// (<see cref="TranslationContext.Terms"/>) idą razem z tekstem w tym samym zapytaniu
+    /// i niczego nie utrwalają, więc mogą korzystać ze wszystkich terminów.
+    /// </summary>
+    private IReadOnlyList<GlossaryTerm> GlossaryTermsFor(IReadOnlyList<GlossaryTerm> foundTerms)
+    {
+        if (foundTerms.Count == 0) return [];
+        var persistable = glossary.PersistableTerms;
+        if (persistable.Count == 0) return [];
+        var persistableSet = persistable.ToHashSet();
+        return foundTerms.Any(persistableSet.Contains) ? persistable : [];
     }
 
     private IReadOnlyList<string> RecentTextsExcluding(IReadOnlyList<string> texts)
