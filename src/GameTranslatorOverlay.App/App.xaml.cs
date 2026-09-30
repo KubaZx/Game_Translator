@@ -106,7 +106,8 @@ public partial class App : Application
         services.AddSingleton<JsonSettingsStore>();
         services.AddSingleton(static sp => sp.GetRequiredService<JsonSettingsStore>().Load());
         services.AddSingleton<ISecretsStore, DpapiSecretsStore>();
-        services.AddSingleton(sp => new SqliteTranslationCache(sp.GetRequiredService<AppPaths>().DatabasePath));
+        services.AddSingleton(sp => new SqliteTranslationCache(
+            sp.GetRequiredService<AppPaths>().DatabasePath, sp.GetRequiredService<ILogger<SqliteTranslationCache>>()));
         services.AddSingleton<IGlossaryService, GlossaryService>();
         services.AddSingleton(sp => ProfileCatalog.CreateDefault(sp.GetRequiredService<AppPaths>()));
         services.AddSingleton(sp => GlossaryCatalog.CreateDefault(sp.GetRequiredService<AppPaths>()));
