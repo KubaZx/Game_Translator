@@ -482,3 +482,7 @@ $RECYCLE.BIN/
 *.swp
 
 dist/
+
+# Korpus ewaluacyjny: prawdziwe linie z gier i wyniki ProviderEval zostają lokalnie
+eval/private/
+eval/out/
