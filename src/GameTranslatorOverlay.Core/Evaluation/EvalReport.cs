@@ -39,9 +39,9 @@ public static class EvalReport
     public static string SummaryTable(IReadOnlyList<EvalProviderRun> runs)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("| Dostawca | Wariant | Linie | chrF korpusu | Mediana | p90 | Błędy dostawcy | Linie z uwagami | "
+        builder.AppendLine("| Dostawca | Wariant | Linie | chrF korpusu | Mediana | p90 | 1. zapytanie | Błędy dostawcy | Linie z uwagami | "
                            + string.Join(" | ", CheckLabels.Select(static c => c.Label)) + " |");
-        builder.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|" + string.Concat(CheckLabels.Select(static _ => "---:|")));
+        builder.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|" + string.Concat(CheckLabels.Select(static _ => "---:|")));
         foreach (var run in runs.Where(static r => !r.Skipped))
         {
             builder.Append("| ").Append(Cell(run.Provider))
@@ -50,6 +50,7 @@ public static class EvalReport
                 .Append(" | ").Append(FormatScore(run.CorpusChrF))
                 .Append(" | ").Append(FormatLatency(run.Latency, p90: false))
                 .Append(" | ").Append(FormatLatency(run.Latency, p90: true))
+                .Append(" | ").Append(run.FirstRequestMs is { } first ? FormatMilliseconds(first) : "—")
                 .Append(" | ").Append(run.FailedCount.ToString(Invariant))
                 .Append(" | ").Append(run.LinesWithIssues.ToString(Invariant));
             foreach (var (kind, _) in CheckLabels)
@@ -83,7 +84,8 @@ public static class EvalReport
         builder.AppendLine($"- Wygenerowano: {info.GeneratedAt}");
         builder.AppendLine("- chrF: 0–100, n-gramy znakowe 1–6, beta = 2 (jak sacreBLEU). Jedna referencja — " +
                            "wynik służy do porównań względnych na tym samym korpusie, nie jako ocena bezwzględna.");
-        builder.AppendLine("- Czas: jedno zapytanie do dostawcy na linię (bez trafień w słownik i cache).");
+        builder.AppendLine("- Czas: jedno zapytanie do dostawcy na linię (bez trafień w słownik i cache). " +
+                           "Pierwsze zapytanie (połączenie, glosariusz DeepL) jest w osobnej kolumnie i nie wchodzi do mediany ani p90.");
         builder.AppendLine();
         builder.AppendLine("## Podsumowanie");
         builder.AppendLine();
@@ -163,11 +165,20 @@ public static class EvalReport
                     line.Line.Reference,
                     line.Hypothesis ?? string.Empty,
                 };
-                builder.AppendLine(string.Join(",", fields.Select(Csv)));
+                builder.AppendLine(string.Join(",", fields.Select(static f => Csv(ExcelSafe(f)))));
             }
         }
         return builder.ToString();
     }
+
+    /// <summary>
+    /// Excel (z myślą o nim CSV ma BOM) czyta pole zaczynające się od „=”, „+”, „-”, „@”
+    /// albo tabulatora jako formułę: modyfikator „+15% increased Attack Speed” staje się
+    /// błędem #NAME?, a tekst z gry mógłby nawet wstrzyknąć formułę. Apostrof na początku
+    /// to standardowe zabezpieczenie — Excel go nie pokazuje, skrypty muszą go zdjąć.
+    /// </summary>
+    public static string ExcelSafe(string value) =>
+        value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r' ? "'" + value : value;
 
     /// <summary>Pole CSV wg RFC 4180: cudzysłów, gdy zawiera przecinek, cudzysłów albo nowy wiersz.</summary>
     public static string Csv(string value)

@@ -33,7 +33,7 @@ public class EvaluationReportTests
 
         var rows = table.TrimEnd().Split('\n');
         Assert.Equal(3, rows.Length); // nagłówek, separator, jeden uruchomiony dostawca
-        Assert.Equal("| DeepL | v2 | 2/3 | 42.3 | 120 ms | 180 ms | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |", rows[2].TrimEnd('\r'));
+        Assert.Equal("| DeepL | v2 | 2/3 | 42.3 | 120 ms | 180 ms | — | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |", rows[2].TrimEnd('\r'));
     }
 
     [Fact]

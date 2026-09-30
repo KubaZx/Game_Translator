@@ -26,7 +26,8 @@ public sealed record EvalProviderRun(
     IReadOnlyList<EvalLineResult> Lines,
     double CorpusChrF,
     LatencySummary? Latency,
-    string? SkipReason = null)
+    string? SkipReason = null,
+    double? FirstRequestMs = null)
 {
     public bool Skipped => SkipReason is not null;
 
@@ -59,7 +60,11 @@ public sealed class EvalRunnerOptions
 /// (słownik → cache → dostawca, sklejanie wierszy, kontekst ostatnich linii), z cache
 /// wyłącznie w pamięci — ewaluacja niczego nie zapisuje w bazie tłumaczeń gracza.
 /// Każda linia to osobne zapytanie, jak kolejne napisy w grze, więc czas odpowiedzi
-/// jest mierzony per linia.
+/// jest mierzony per linia. Pierwsze zapytanie do dostawcy jest raportowane osobno
+/// (<see cref="EvalProviderRun.FirstRequestMs"/>) i nie wchodzi do mediany ani p90: niesie
+/// koszt „zimnego startu” — nawiązanie połączenia TLS, a w DeepL także listowanie, tworzenie
+/// i usuwanie glosariusza — który przy małym korpusie albo --limit przesuwałby p90, a nawet
+/// medianę, i krzywdził dostawców używających słownika po stronie serwera.
 /// </summary>
 public static class EvalRunner
 {
@@ -85,8 +90,7 @@ public static class EvalRunner
             new UsageTracker(),
             new TranslationPipelineOptions { GameName = options.GameName });
 
-        // Okno równe liczbie linii: mediana i p90 z całego przebiegu, nie z ostatnich 200.
-        var latency = new LatencyMonitor(Math.Max(1, lines.Count));
+        var providerLatencies = new List<double>();
         var results = new List<EvalLineResult>(lines.Count);
 
         foreach (var line in lines)
@@ -113,7 +117,7 @@ public static class EvalRunner
             double? lineLatency = null;
             if (outcome.Origin == TranslationOrigin.Provider && outcome.IsTranslated)
             {
-                latency.Record(LatencyStage.Provider, elapsed);
+                providerLatencies.Add(elapsed);
                 lineLatency = elapsed;
             }
 
@@ -141,6 +145,16 @@ public static class EvalRunner
         // nie może mieć lepszego wyniku korpusu tylko dlatego, że pominięto jego błędy.
         var corpus = ChrF.CorpusScore(results.Select(static r => ((string?)r.Hypothesis, (string?)r.Line.Reference)));
 
-        return new EvalProviderRun(provider.Name, options.Variant, results, corpus, latency.Summarize(LatencyStage.Provider));
+        // Okno równe liczbie linii: mediana i p90 z całego przebiegu, nie z ostatnich 200.
+        // Pierwszy pomiar (zimny start) pomijamy, chyba że jest jedynym — wtedy lepszy on niż brak.
+        var latency = new LatencyMonitor(Math.Max(1, providerLatencies.Count));
+        foreach (var ms in providerLatencies.Count > 1 ? providerLatencies.Skip(1) : providerLatencies)
+        {
+            latency.Record(LatencyStage.Provider, ms);
+        }
+        double? firstRequest = providerLatencies.Count > 0 ? providerLatencies[0] : null;
+
+        return new EvalProviderRun(provider.Name, options.Variant, results, corpus, latency.Summarize(LatencyStage.Provider),
+            FirstRequestMs: firstRequest);
     }
 }

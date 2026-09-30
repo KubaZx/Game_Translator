@@ -93,7 +93,9 @@ public class EvaluationCorpusTests
         var wrapped = run.Lines.Single(static l => l.Line.Id == "a2");
         Assert.Equal(2, TranslationChecks.ParagraphCount(wrapped.Hypothesis));
         Assert.Equal("[PL] Find the Waystone.", wrapped.Hypothesis!.Replace('\n', ' '));
-        Assert.Equal(4, run.Latency!.Count);
+        // Pierwsze zapytanie (zimny start) jest osobno — mediana i p90 liczą pozostałe trzy.
+        Assert.Equal(3, run.Latency!.Count);
+        Assert.NotNull(run.FirstRequestMs);
         Assert.All(run.Lines, static l => Assert.NotNull(l.LatencyMs));
         // Mock nie używa terminu słownika — kontrola to wykrywa.
         Assert.Contains(run.Lines.Single(static l => l.Line.Id == "a2").Checks!.Issues,

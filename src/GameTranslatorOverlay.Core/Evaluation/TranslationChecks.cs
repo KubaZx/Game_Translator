@@ -78,17 +78,26 @@ public static partial class TranslationChecks
         RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture)]
     private static partial Regex NumberPattern();
 
+    // To samo bez spacji jako separatora tysięcy: „Buy 3 100-gold potions” to dwie liczby (3 i 100),
+    // a nie 3100. Która interpretacja jest dobra, wiadomo dopiero po porównaniu z drugim tekstem.
+    [GeneratedRegex(@"(?<int>\d{1,3}(?<sep>[,.])\d{3}(?:\k<sep>\d{3})*)(?!\d)(?:[.,](?<frac>\d+))?|(?<int>\d+)(?:[.,](?<frac>\d+))?",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture)]
+    private static partial Regex NumberPatternWithoutSpaceGrouping();
+
     /// <summary>
     /// Liczby w tekście w postaci kanonicznej: bez separatorów tysięcy, z kropką dziesiętną
     /// („1,5” i „1.5” → „1.5”; „1,000” i „1 000” → „1000”). Polski zapis dziesiętny z przecinkiem
     /// nie jest więc błędem. Znak minus jest pomijany (tłumacz może zamienić go na półpauzę
     /// w zakresie „10–15”). Niejednoznaczne „1.500” traktujemy jak tysiące.
     /// </summary>
-    public static IReadOnlyList<string> ExtractNumbers(string? text)
+    public static IReadOnlyList<string> ExtractNumbers(string? text) => ExtractNumbers(text, spaceGrouping: true);
+
+    private static IReadOnlyList<string> ExtractNumbers(string? text, bool spaceGrouping)
     {
         if (string.IsNullOrEmpty(text)) return [];
         var numbers = new List<string>();
-        foreach (Match match in NumberPattern().Matches(text))
+        var pattern = spaceGrouping ? NumberPattern() : NumberPatternWithoutSpaceGrouping();
+        foreach (Match match in pattern.Matches(text))
         {
             var integerPart = new string(match.Groups["int"].Value.Where(char.IsAsciiDigit).ToArray()).TrimStart('0');
             if (integerPart.Length == 0) integerPart = "0";
@@ -98,16 +107,31 @@ public static partial class TranslationChecks
         return numbers;
     }
 
+    /// <summary>
+    /// Porównuje liczby dwa razy: ze spacją jako separatorem tysięcy („1 000” = „1,000”) i bez
+    /// („3 100-gold” = 3 i 100). Zgłasza problem tylko wtedy, gdy obie interpretacje się nie
+    /// zgadzają — spacja między dwiema liczbami nie może dawać fałszywego alarmu. Komunikat
+    /// pochodzi z interpretacji z mniejszą liczbą różnic.
+    /// </summary>
     public static TranslationCheckIssue? CheckNumbers(string source, string hypothesis)
     {
-        var missing = MultisetDifference(ExtractNumbers(source), ExtractNumbers(hypothesis));
-        var extra = MultisetDifference(ExtractNumbers(hypothesis), ExtractNumbers(source));
+        var (missing, extra) = CompareNumbers(source, hypothesis, spaceGrouping: true);
         if (missing.Count == 0 && extra.Count == 0) return null;
+        var (missingPlain, extraPlain) = CompareNumbers(source, hypothesis, spaceGrouping: false);
+        if (missingPlain.Count == 0 && extraPlain.Count == 0) return null;
+        if (missingPlain.Count + extraPlain.Count < missing.Count + extra.Count) (missing, extra) = (missingPlain, extraPlain);
 
         var parts = new List<string>();
         if (missing.Count > 0) parts.Add("brakuje " + string.Join(", ", missing));
         if (extra.Count > 0) parts.Add("nadmiarowe " + string.Join(", ", extra));
         return new TranslationCheckIssue(TranslationCheckKind.Numbers, "Liczby: " + string.Join("; ", parts) + ".");
+    }
+
+    private static (List<string> Missing, List<string> Extra) CompareNumbers(string source, string hypothesis, bool spaceGrouping)
+    {
+        var sourceNumbers = ExtractNumbers(source, spaceGrouping);
+        var hypothesisNumbers = ExtractNumbers(hypothesis, spaceGrouping);
+        return (MultisetDifference(sourceNumbers, hypothesisNumbers), MultisetDifference(hypothesisNumbers, sourceNumbers));
     }
 
     private static List<string> MultisetDifference(IReadOnlyList<string> left, IReadOnlyList<string> right)
@@ -133,26 +157,35 @@ public static partial class TranslationChecks
         "państwo", "państwa", "państwu", "państwem",
     };
 
-    // Angielskie tytuły, które poprawnie tłumaczy się właśnie przez „pan/pani” („Yes, sir.” →
-    // „Tak, panie.”) — wtedy forma nie jest złamaniem zasady „ty”.
+    // Angielskie zwroty, które poprawnie tłumaczy się właśnie przez „pan/pani” („Yes, sir.” →
+    // „Tak, panie.”) — wtedy forma nie jest złamaniem zasady „ty”. Tylko jednoznaczne: „master”,
+    // „miss”, „lady”, „lord” czy „mistress” to w grach zwykłe słowa („Master Volume”, „Don't
+    // miss”, „Lord of Ashes”), a pojedyncze wystąpienie wyłączałoby kontrolę dla całej linii.
     private static readonly HashSet<string> HonorificSourceWords = new(StringComparer.OrdinalIgnoreCase)
     {
-        "sir", "sirs", "madam", "madame", "ma'am", "lord", "lords", "lady", "ladies", "mister", "mr", "mrs", "ms",
-        "miss", "master", "mistress", "gentleman", "gentlemen", "lordship", "ladyship", "majesty", "highness",
+        "sir", "sirs", "madam", "madame", "ma'am", "mister", "mr", "mrs", "ms",
+        "milord", "milady", "m'lord", "m'lady", "lordship", "ladyship", "majesty", "highness",
     };
+
+    // Dwuwyrazowe zwroty do rozmówcy z tymi dwuznacznymi słowami („Yes, my lord.” → „Tak, panie.”).
+    [GeneratedRegex(@"\b(?:my|good)\s+(?:lord|lady|liege|master|mistress)\b|\bladies\s+and\s+gentlemen\b",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex HonorificSourcePhrase();
 
     [GeneratedRegex(@"[\p{L}']+", RegexOptions.CultureInvariant)]
     private static partial Regex WordPattern();
 
     /// <summary>
     /// Gra jest tłumaczona na „ty”. Zgłasza „Pan/Pani/Państwo” w tłumaczeniu, chyba że:
-    /// oryginał zawiera tytuł grzecznościowy (sir, lady, lord…), forma stoi przed nazwą
+    /// oryginał zawiera jednoznaczny zwrot grzecznościowy (sir, madam, my lord…), forma stoi przed nazwą
     /// pisaną wielką literą („Pan Ciemności”, „pani Anna” — tytuł, nie zwrot do gracza)
     /// albo ta sama forma występuje w referencji.
     /// </summary>
     public static TranslationCheckIssue? CheckFormalAddress(string source, string hypothesis, string? reference = null)
     {
-        if (WordPattern().Matches(source).Any(m => HonorificSourceWords.Contains(m.Value.TrimEnd('.')))) return null;
+        if (WordPattern().Matches(source).Any(m => HonorificSourceWords.Contains(m.Value.TrimEnd('.')))
+            || HonorificSourcePhrase().IsMatch(source))
+            return null;
 
         var referenceForms = reference is null
             ? []
@@ -199,14 +232,31 @@ public static partial class TranslationChecks
         "zapałem", "kryształem", "ideałem", "potencjałem", "rytuałem", "arsenałem", "masłem", "hasłem", "krzesłem",
         "wiosłem", "rzemiosłem", "węzłem", "osłem", "posłem", "orłem", "mułem", "szałem", "wałem", "mydłem",
         "źródłem", "światłem", "godłem", "berłem", "zawałem",
+        "tytułem", "skrzydłem", "szkłem", "kotłem", "wołem", "sokołem", "mozołem", "zespołem", "morałem",
+        "pedałem", "chochołem",
     };
 
-    // „dział” w złożeniach (rozdziałem, udziałem, podziałem) — żaden czasownik tak się nie kończy.
-    private const string DzialNounEnding = "działem";
+    // Końcówki rzeczowników w narzędniku, którymi nie kończy się żaden czasownik: „dział”
+    // (rozdziałem, udziałem), „mysł” (pomysłem, zmysłem, umysłem, przemysłem), „dzieło”
+    // (dziełem, arcydziełem), „strzał” (wystrzałem), „ogół/szczegół” — oraz przysłówek „ogółem”.
+    private static readonly string[] MasculineLookingNounEndings = ["działem", "mysłem", "dziełem", "strzałem", "gółem"];
+
+    // „-łam” bywa też trybem rozkazującym „łamać” z przedrostkiem („przełam”, „złam”, „połam”)
+    // i czasem teraźniejszym czasowników na „-łać” („wołam”, „działam”, „wysyłam”) — żadne
+    // z nich nie mówi nic o rodzaju. „wyłam” może być też „ja wyłam” (wyć), ale to rzadkie,
+    // a brak dowodu jest lepszy niż fałszywy dowód.
+    private static readonly HashSet<string> NonGenderedLamWords = new(StringComparer.Ordinal)
+    {
+        "złam", "przełam", "wyłam", "odłam", "połam", "załam", "nadłam", "ułam", "obłam", "rozłam", "włam",
+    };
+
+    private static readonly string[] NonGenderedLamEndings = ["wołam", "działam", "syłam"];
 
     /// <summary>
     /// Dowody rodzaju w tekście: czasowniki w 1. i 2. osobie czasu przeszłego
-    /// (-łam/-łaś żeński, -łem/-łeś męski) oraz „gotowa”/„gotowy”. „expect_gender” w korpusie
+    /// (-łam/-łaś żeński, -łem/-łeś męski), trybu przypuszczającego (-łabym/-łabyś żeński,
+    /// -łbym/-łbyś męski) oraz „gotowa”/„gotowy”. Znane rzeczowniki w narzędniku („pomysłem”),
+    /// tryb rozkazujący („przełam”) i czas teraźniejszy („wołam”) nie są dowodem. „expect_gender” w korpusie
     /// opisuje rodzaj, którego wymagają te formy w danej linii (mówiącego albo adresata).
     /// </summary>
     public static (int Feminine, int Masculine) GenderEvidence(string? text)
@@ -218,14 +268,19 @@ public static partial class TranslationChecks
             var word = match.Value.ToLowerInvariant();
             if (word == "gotowa") feminine++;
             else if (word == "gotowy") masculine++;
-            else if (word.Length >= 5 && (word.EndsWith("łam", StringComparison.Ordinal) || word.EndsWith("łaś", StringComparison.Ordinal)))
+            else if (word.Length >= 6 && (EndsWith(word, "łabym") || EndsWith(word, "łabyś"))) feminine++;
+            else if (word.Length >= 5 && (EndsWith(word, "łbym") || EndsWith(word, "łbyś"))) masculine++;
+            else if (word.Length >= 5 && (EndsWith(word, "łam") || EndsWith(word, "łaś"))
+                     && !NonGenderedLamWords.Contains(word) && !NonGenderedLamEndings.Any(e => EndsWith(word, e)))
                 feminine++;
-            else if (word.Length >= 5 && (word.EndsWith("łem", StringComparison.Ordinal) || word.EndsWith("łeś", StringComparison.Ordinal))
-                     && !MasculineLookingNouns.Contains(word) && !word.EndsWith(DzialNounEnding, StringComparison.Ordinal))
+            else if (word.Length >= 5 && (EndsWith(word, "łem") || EndsWith(word, "łeś"))
+                     && !MasculineLookingNouns.Contains(word) && !MasculineLookingNounEndings.Any(e => EndsWith(word, e)))
                 masculine++;
         }
         return (feminine, masculine);
     }
+
+    private static bool EndsWith(string word, string ending) => word.EndsWith(ending, StringComparison.Ordinal);
 
     /// <summary>
     /// Zgłasza zły rodzaj tylko przy dowodzie: w tłumaczeniu są formy przeciwnego rodzaju

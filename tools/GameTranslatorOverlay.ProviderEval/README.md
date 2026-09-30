@@ -56,8 +56,10 @@ słownika lub zapisu, 2 — złe opcje, 3 — żaden dostawca nie został urucho
   jak w aplikacji.
 - **Czas** to czas jednego wywołania pipeline'u dla linii, liczony tylko wtedy, gdy odpowiedział
   dostawca (bez trafień w słownik i cache). Raport podaje medianę i p90 (`LatencyMonitor`).
-  Pierwsze zapytanie zawiera zestawienie połączenia (DNS, TLS) — przy małym korpusie widać
-  to w p90.
+  Pierwsze zapytanie niesie „zimny start” — zestawienie połączenia (DNS, TLS), a w DeepL
+  ze słownikiem także listowanie, tworzenie i usuwanie glosariusza — więc jest w osobnej
+  kolumnie „1. zapytanie” i nie wchodzi do mediany ani p90 (chyba że jest jedynym pomiarem).
+  W `results.csv` każda linia, także pierwsza, ma swój czas.
 
 ## Raport
 
@@ -65,8 +67,12 @@ słownika lub zapisu, 2 — złe opcje, 3 — żaden dostawca nie został urucho
   błędy dostawcy, liczba linii z uwagami i liczniki każdej kontroli), pominięci dostawcy,
   a potem 10 najgorszych linii każdego dostawcy (najpierw nieprzetłumaczone, potem
   najniższy chrF) z oryginałem, referencją, tłumaczeniem i uwagami.
-- `results.csv` — wszystkie linie wszystkich dostawców (UTF-8 z BOM, kropka dziesiętna),
-  do własnych analiz w arkuszu.
+- `results.csv` — wszystkie linie wszystkich dostawców (UTF-8 z BOM, kropka dziesiętna,
+  przecinek jako separator), do własnych analiz w arkuszu. Pola zaczynające się od `=`, `+`,
+  `-` albo `@` (np. „+15% increased Attack Speed”) dostają na początku apostrof, żeby Excel
+  nie czytał ich jako formuł — skrypty (pandas itp.) muszą go zdjąć. Excel z polskimi
+  ustawieniami regionalnymi oczekuje średnika: zamiast dwukliku użyj
+  *Dane → Z pliku tekstowego/CSV* i wybierz przecinek jako separator.
 
 ## chrF — co mierzy i czego nie
 
@@ -98,9 +104,9 @@ Heurystyki, które zgłaszają problem tylko przy dowodzie:
 
 | Kontrola | Co zgłasza |
 |---|---|
-| Liczby | Liczba ze źródła zgubiona albo zmieniona („+15%” → „+51%”). „1.5” = „1,5”, „1,250” = „1250” = „1 250”. |
-| Pan/Pani | „Pan”, „Pani”, „Państwo” (i odmiany) zamiast „ty”. Pomija tytuły przed nazwą („Pan Ciemności”), zdania ze „sir/lady/lord…” w oryginale i formy obecne w referencji. |
-| Rodzaj | Dla `expect_gender`: formy przeciwnego rodzaju (-łam/-łaś/gotowa vs -łem/-łeś/gotowy) przy braku oczekiwanych. Zdanie bez form rodzajowych nie jest błędem. |
+| Liczby | Liczba ze źródła zgubiona albo zmieniona („+15%” → „+51%”). „1.5” = „1,5”, „1,250” = „1250” = „1 250”. Spacja między dwiema liczbami („Buy 3 100-gold potions” → „3 mikstury po 100”) nie jest błędem — zgłoszenie tylko, gdy nie pasuje żadna interpretacja. |
+| Pan/Pani | „Pan”, „Pani”, „Państwo” (i odmiany) zamiast „ty”. Pomija tytuły przed nazwą („Pan Ciemności”), zdania z jednoznacznym zwrotem w oryginale („sir”, „madam”, „ma'am”, „my lord”, „my lady”, „Your Majesty”…; samo „master”, „miss”, „lady” czy „lord” nie wystarcza) i formy obecne w referencji. |
+| Rodzaj | Dla `expect_gender`: formy przeciwnego rodzaju (-łam/-łaś/-łabym/gotowa vs -łem/-łeś/-łbym/gotowy) przy braku oczekiwanych. Rzeczowniki w narzędniku („pomysłem”, „skrzydłem”), tryb rozkazujący („przełam”) i czas teraźniejszy („wołam”) nie są dowodem. Zdanie bez form rodzajowych nie jest błędem. |
 | Słownik | Termin z oryginału, którego polski rdzeń (pierwsze min(5, długość−2) liter każdego słowa ≥ 4 liter) nie występuje w tłumaczeniu. |
 | Wiersze | Inna liczba niepustych wierszy niż w oryginale (nakładka musi pasować do okienka gry). |
 | Długość | Tłumaczenie krótsze niż 0,5× albo dłuższe niż 2× oryginału (bez spacji). |
