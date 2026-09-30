@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using GameTranslatorOverlay.Core.Text;
 
 namespace GameTranslatorOverlay.Core.Caching;
@@ -125,7 +126,7 @@ public sealed class InMemoryTranslationCache : ITranslationCache
             .Select(static e => new CacheExportEntry(
                 e.Translation.SourceText, e.Translation.NormalizedText, e.SourceLanguage, e.TargetLanguage,
                 e.Translation.TranslatedText, e.Translation.Provider, e.Translation.GameProfile,
-                e.Translation.IsManual, e.Translation.IsApproved))
+                e.Translation.IsManual, e.Translation.IsApproved, e.Translation.Context))
             .ToList();
         return Task.FromResult(JsonSerializer.Serialize(export, CacheExportEntry.JsonOptions));
     }
@@ -164,7 +165,11 @@ public sealed record CacheExportEntry(
     string Provider,
     string GameProfile,
     bool IsManual,
-    bool IsApproved)
+    bool IsApproved,
+    // Znacznik formatu/jakości (np. „reflow-1”) — bez niego import oznaczałby wszystkie
+    // wieloliniowe wpisy jako nieaktualne i tłumaczył je ponownie. Stare pliki eksportu
+    // go nie mają i nadal się importują (null).
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Context = null)
 {
     public static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -175,6 +180,6 @@ public sealed record CacheExportEntry(
 
     public NewCacheEntry ToNewCacheEntry() => new(
         SourceText, NormalizedText, SourceLanguage, TargetLanguage,
-        TranslatedText, Provider, GameProfile,
+        TranslatedText, Provider, GameProfile, Context,
         IsManual: IsManual, IsApproved: IsApproved);
 }

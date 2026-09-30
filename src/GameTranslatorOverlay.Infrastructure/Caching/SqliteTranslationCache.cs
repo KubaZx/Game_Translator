@@ -4,6 +4,8 @@ using System.Text.Json;
 using GameTranslatorOverlay.Core.Caching;
 using GameTranslatorOverlay.Core.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GameTranslatorOverlay.Infrastructure.Caching;
 
@@ -25,6 +27,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
 
     private readonly string _databasePath;
     private readonly string _connectionString;
+    private readonly ILogger _logger;
     private readonly Lock _initGate = new();
     private volatile bool _initialized;
 
@@ -45,9 +48,10 @@ public sealed class SqliteTranslationCache : ITranslationCache
     private long _lastFlushTicks = Environment.TickCount64;
     private int _backgroundFlush;
 
-    public SqliteTranslationCache(string databasePath)
+    public SqliteTranslationCache(string databasePath, ILogger<SqliteTranslationCache>? logger = null)
     {
         _databasePath = databasePath;
+        _logger = logger ?? NullLogger<SqliteTranslationCache>.Instance;
         _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     }
 
@@ -212,7 +216,9 @@ public sealed class SqliteTranslationCache : ITranslationCache
                 }
             }
             var hit = RecordUse(entry);
-            FlushUsageIfDue(connection);
+            // Odczyt nigdy nie zapisuje synchronicznie: zapis liczników może czekać do 30 s na
+            // blokadę albo paść (pełny dysk, plik tylko do odczytu) — a to tylko statystyka.
+            FlushUsageInBackgroundIfDue();
             return hit;
         }, cancellationToken);
     }
@@ -232,9 +238,21 @@ public sealed class SqliteTranslationCache : ITranslationCache
         _pendingUsage.Count >= UsageFlushThreshold
         || (!_pendingUsage.IsEmpty && Environment.TickCount64 - Interlocked.Read(ref _lastFlushTicks) >= UsageFlushInterval.TotalMilliseconds);
 
-    private void FlushUsageIfDue(SqliteConnection connection)
+    /// <summary>
+    /// Zapis liczników przed właściwą operacją (zapis, statystyki, czyszczenie, eksport).
+    /// Błąd statystyk jest logowany i nie blokuje operacji — liczniki wracają do kolejki.
+    /// </summary>
+    private void TryFlushUsage(SqliteConnection connection)
     {
-        if (IsUsageFlushDue()) FlushUsage(connection);
+        try
+        {
+            FlushUsage(connection);
+        }
+        catch (SqliteException ex)
+        {
+            _logger.LogWarning(ex, "Nie udało się zapisać liczników użycia cache (SQLite {Code}) — spróbuję ponownie później",
+                ex.SqliteErrorCode);
+        }
     }
 
     private void FlushUsageInBackgroundIfDue()
@@ -250,6 +268,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
             {
                 // Liczniki użycia to tylko statystyka — chwilowo zablokowana baza nie może
                 // przerywać tłumaczenia. Kolejna próba nastąpi przy następnym zapisie.
+                _logger.LogDebug(ex, "Zapis liczników użycia cache w tle nie powiódł się");
             }
             finally
             {
@@ -350,7 +369,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
         {
             Initialize();
             using var connection = OpenConnection();
-            FlushUsage(connection);
+            TryFlushUsage(connection);
             UpsertEntry(connection, entry, manualOverwrite: false);
             ForgetMemory(entry);
         }, cancellationToken);
@@ -362,7 +381,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
         {
             Initialize();
             using var connection = OpenConnection();
-            FlushUsage(connection);
+            TryFlushUsage(connection);
             UpsertEntry(
                 connection,
                 entry with { IsManual = true, IsApproved = true, Provider = "manual" },
@@ -413,7 +432,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
         {
             Initialize();
             using var connection = OpenConnection();
-            FlushUsage(connection);
+            TryFlushUsage(connection);
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*), COALESCE(SUM(is_manual), 0) FROM translations;";
             using var reader = command.ExecuteReader();
@@ -431,7 +450,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
         {
             Initialize();
             using var connection = OpenConnection();
-            FlushUsage(connection);
+            TryFlushUsage(connection);
             using var command = connection.CreateCommand();
             command.CommandText = keepManualCorrections
                 ? "DELETE FROM translations WHERE is_manual = 0;"
@@ -449,7 +468,9 @@ public sealed class SqliteTranslationCache : ITranslationCache
             Initialize();
             using var connection = OpenConnection();
             // Najpierw zapisujemy użycia — inaczej usunęlibyśmy wpisy czytane przed chwilą.
-            FlushUsage(connection);
+            // Gdy ten zapis się nie uda (np. zablokowana baza), sprzątanie i tak idzie dalej:
+            // w najgorszym razie zniknie wpis, który trzeba będzie przetłumaczyć ponownie.
+            TryFlushUsage(connection);
             using var command = connection.CreateCommand();
             command.CommandText = keepManualCorrections
                 ? "DELETE FROM translations WHERE last_used_at < $cutoff AND is_manual = 0;"
@@ -468,11 +489,11 @@ public sealed class SqliteTranslationCache : ITranslationCache
             Initialize();
             var entries = new List<CacheExportEntry>();
             using var connection = OpenConnection();
-            FlushUsage(connection);
+            TryFlushUsage(connection);
             using var command = connection.CreateCommand();
             command.CommandText = """
                 SELECT source_text, normalized_text, source_lang, target_lang, translated_text,
-                       provider, game_profile, is_manual, is_approved
+                       provider, game_profile, is_manual, is_approved, context
                 FROM translations;
                 """;
             using var reader = command.ExecuteReader();
@@ -481,7 +502,8 @@ public sealed class SqliteTranslationCache : ITranslationCache
                 entries.Add(new CacheExportEntry(
                     reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
                     reader.GetString(4), reader.GetString(5), reader.GetString(6),
-                    reader.GetInt64(7) != 0, reader.GetInt64(8) != 0));
+                    reader.GetInt64(7) != 0, reader.GetInt64(8) != 0,
+                    reader.IsDBNull(9) ? null : reader.GetString(9)));
             }
             return JsonSerializer.Serialize(entries, CacheExportEntry.JsonOptions);
         }, cancellationToken);
@@ -514,10 +536,10 @@ public sealed class SqliteTranslationCache : ITranslationCache
                 command.CommandText = """
                     INSERT OR IGNORE INTO translations
                         (text_hash, source_text, normalized_text, source_lang, target_lang, translated_text,
-                         provider, game_profile, is_manual, is_approved, created_at, last_used_at, use_count)
+                         provider, game_profile, context, is_manual, is_approved, created_at, last_used_at, use_count)
                     VALUES
                         ($hash, $source, $normalized, $src, $tgt, $translated,
-                         $provider, $profile, $manual, $approved, $now, $now, 1);
+                         $provider, $profile, $context, $manual, $approved, $now, $now, 1);
                     """;
                 command.Parameters.AddWithValue("$hash", TextHasher.Sha256Hex(entry.NormalizedText));
                 command.Parameters.AddWithValue("$source", entry.SourceText);
@@ -527,6 +549,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
                 command.Parameters.AddWithValue("$translated", entry.TranslatedText);
                 command.Parameters.AddWithValue("$provider", entry.Provider);
                 command.Parameters.AddWithValue("$profile", entry.GameProfile);
+                command.Parameters.AddWithValue("$context", (object?)entry.Context ?? DBNull.Value);
                 command.Parameters.AddWithValue("$manual", entry.IsManual ? 1 : 0);
                 command.Parameters.AddWithValue("$approved", entry.IsApproved ? 1 : 0);
                 command.Parameters.AddWithValue("$now", now);

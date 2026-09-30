@@ -27,9 +27,11 @@ public sealed class LlmProviderOptions : HttpProviderOptions
 /// <summary>
 /// Wspólna logika dostawców opartych na modelach językowych: prompt z kontekstem gry
 /// i terminologią, dzielenie na partie, odporne czytanie odpowiedzi i pojedynczy fallback.
-/// Podklasa dostarcza wyłącznie jedno wywołanie modelu.
+/// Podklasa dostarcza wyłącznie jedno wywołanie modelu. Model odpowiada niedeterministycznie,
+/// więc pipeline może raz ponowić wynik, który nie przeszedł kontroli jakości.
 /// </summary>
-public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, ILogger logger) : IContextualTranslationProvider
+public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, ILogger logger)
+    : IContextualTranslationProvider, IRetryableTranslationProvider
 {
     protected LlmProviderOptions Options { get; } = options ?? new LlmProviderOptions();
     protected ILogger Logger { get; } = logger;
