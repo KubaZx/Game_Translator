@@ -7,6 +7,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Grupa współdzielona TYLKO przez przebiegi tego samego PR-a: nowy push do PR-a
+# anuluje poprzedni, bo jego wynik i tak nikogo już nie interesuje. Push na main,
+# tagi v* i workflow_dispatch dostają unikalną grupę (run_id) — gdyby dzieliły
+# grupę per ref, GitHub trzymałby tylko jeden oczekujący przebieg i anulował
+# starsze oczekujące (commit B przy szybkich pushach A, B, C nie dostałby wyniku,
+# a ręcznie uruchomiony publish mógłby zniknąć). Dzięki temu każdy commit na main
+# i każde wydanie ma własny, dokończony przebieg, równolegle jak przed zmianą.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Szybka kontrola na Linuksie: kompilacja całego rozwiązania (także WPF dzięki
   # EnableWindowsTargeting) i testy xUnit. Testy DPAPI/OCR wymagają Windows —
@@ -31,10 +42,42 @@ jobs:
       - name: Build
         run: dotnet build GameTranslatorOverlay.slnx -c Release -p:EnableWindowsTargeting=true
 
-      - name: Test
+      # Pokrycie zbiera coverlet.collector (już w projektach testowych); co liczymy,
+      # a czego nie (kod generowany, obj/, same testy), ustala tests/coverage.runsettings.
+      # Testy DPAPI są tu Skipped ([WindowsFact]) — przechodzą w jobie build-test.
+      - name: Test z pokryciem
+        run: >
+          dotnet test GameTranslatorOverlay.slnx -c Release --no-build
+          -p:EnableWindowsTargeting=true
+          --collect:"XPlat Code Coverage"
+          --settings tests/coverage.runsettings
+          --results-directory TestResults
+
+      # ReportGenerator przypięty w .config/dotnet-tools.json, żeby raport wyglądał
+      # tak samo lokalnie i w CI. Scala raporty obu projektów testowych (Core jest
+      # pokrywany z obu stron) i daje HTML, podsumowanie Markdown i scaloną Coberturę.
+      - name: Raport pokrycia
         run: |
-          dotnet test tests/GameTranslatorOverlay.Core.Tests -c Release --no-build
-          dotnet test tests/GameTranslatorOverlay.Infrastructure.Tests -c Release --no-build
+          dotnet tool restore
+          dotnet tool run reportgenerator \
+            "-reports:TestResults/**/coverage.cobertura.xml" \
+            "-targetdir:TestResults/coverage-report" \
+            "-reporttypes:HtmlInline;MarkdownSummaryGithub;Cobertura"
+          cat TestResults/coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: TestResults/coverage-report/
+
+      # Progi kilka punktów poniżej zmierzonych (Core 95,1%, Infrastructure 84,9%
+      # przy wprowadzeniu) — łapią wyraźny spadek, nie ułamki procenta.
+      - name: Próg pokrycia
+        run: >
+          python3 tools/check-coverage.py TestResults/coverage-report/Cobertura.xml
+          GameTranslatorOverlay.Core=91
+          GameTranslatorOverlay.Infrastructure=80
 
   build-test:
     runs-on: windows-latest
