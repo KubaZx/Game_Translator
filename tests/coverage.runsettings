@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ustawienia pokrycia kodu dla coverlet.collector ("XPlat Code Coverage").
+  Użycie: patrz krok "Test z pokryciem" w jobie test-linux (.github/workflows/ci.yml)
+  oraz docs/TESTING.md.
+  Liczymy tylko nasz kod produkcyjny: bez projektów testowych, bez kodu generowanego
+  (source generatory, *.g.cs, XAML) i bez niczego z obj/, bo takie linie zawyżałyby
+  albo zaniżały procent i nie mówią nic o jakości testów.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Include>[GameTranslatorOverlay.*]*</Include>
+          <Exclude>[*.Tests]*,[xunit.*]*</Exclude>
+          <ExcludeByAttribute>Obsolete,GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+          <ExcludeByFile>**/obj/**,**/*.g.cs,**/*.g.i.cs,**/*.designer.cs,**/*.Designer.cs</ExcludeByFile>
+          <SkipAutoProps>true</SkipAutoProps>
+          <DeterministicReport>false</DeterministicReport>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

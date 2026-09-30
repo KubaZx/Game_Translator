@@ -1,0 +1,29 @@
+# Aktualizacje zależności raz w tygodniu z małym limitem otwartych PR-ów —
+# projekt ma jednego opiekuna, więc zalew PR-ów byłby gorszy niż kilka dni zwłoki.
+# Paczki testowe (xunit, Test SDK, coverlet) i akcje GitHuba grupujemy, żeby
+# drobne podbicia wersji przychodziły jednym PR-em zamiast kilkoma.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      test-stack:
+        patterns:
+          - xunit*
+          - Microsoft.NET.Test.Sdk
+          - coverlet*
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns:
+          - "*"
