@@ -7,11 +7,15 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Jeden przebieg na gałąź/PR: nowy push do PR-a anuluje poprzedni, bo jego wynik
-# i tak nikogo już nie interesuje. Push na main i tagi v* NIE są anulowane —
-# każdy commit na main i każde wydanie ma mieć własny, dokończony przebieg.
+# Grupa współdzielona TYLKO przez przebiegi tego samego PR-a: nowy push do PR-a
+# anuluje poprzedni, bo jego wynik i tak nikogo już nie interesuje. Push na main,
+# tagi v* i workflow_dispatch dostają unikalną grupę (run_id) — gdyby dzieliły
+# grupę per ref, GitHub trzymałby tylko jeden oczekujący przebieg i anulował
+# starsze oczekujące (commit B przy szybkich pushach A, B, C nie dostałby wyniku,
+# a ręcznie uruchomiony publish mógłby zniknąć). Dzięki temu każdy commit na main
+# i każde wydanie ma własny, dokończony przebieg, równolegle jak przed zmianą.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
