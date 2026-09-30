@@ -91,6 +91,32 @@ public static class TextReflow
     }
 
     /// <summary>
+    /// Odwrotność <see cref="Rewrap"/> dla tekstu pisanego przez gracza (ręczna korekta): wiersze
+    /// ułożone jak na ekranie skleja z powrotem w akapity planu, żeby w pamięci dialogu leżała
+    /// ta sama postać co surowy wynik dostawcy. Gdy liczba wierszy nie pasuje do planu, każdy
+    /// akapit źródła i tak jest jednym wierszem tłumaczenia, a przy jednym akapicie — całość.
+    /// </summary>
+    public static string ToParagraphs(string wrapped, ReflowPlan plan)
+    {
+        var lines = wrapped.Replace("\r\n", "\n").Split('\n')
+            .Select(static line => line.Trim())
+            .Where(static line => line.Length > 0)
+            .ToList();
+        var counts = plan.ParagraphLineCounts;
+        if (counts.Count <= 1) return string.Join(' ', lines);
+        if (lines.Count != counts.Sum()) return string.Join('\n', lines);
+
+        var paragraphs = new List<string>(counts.Count);
+        var index = 0;
+        foreach (var count in counts)
+        {
+            paragraphs.Add(string.Join(' ', lines.Skip(index).Take(count)));
+            index += count;
+        }
+        return string.Join('\n', paragraphs);
+    }
+
+    /// <summary>
     /// Dzieli tekst na najwyżej <paramref name="lineCount"/> wierszy o możliwie równej długości
     /// (minimalizacja sumy kwadratów odchyleń; wyrazy nigdy nie są dzielone).
     /// </summary>

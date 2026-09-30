@@ -148,6 +148,7 @@ public sealed class TranslationOrchestrator(
                 CacheOnlyMode = settings.CacheOnlyMode,
                 GameProfile = ActiveProfile?.Id ?? string.Empty,
                 GameName = ActiveProfile?.Name,
+                PlayerGender = PlayerGenders.Parse(settings.PlayerGender),
             },
             loggerFactory.CreateLogger<TranslationPipeline>(),
             cacheWriteCancellationToken: _pipelineEpoch.Token);
@@ -300,6 +301,8 @@ public sealed class TranslationOrchestrator(
             correctedText.Trim(),
             "manual",
             ActiveProfile?.Id ?? string.Empty);
+        // Pamięć dialogu (tylko w RAM) ma się trzymać poprawionej formy w kolejnych liniach.
+        Volatile.Read(ref _pipelineState)?.Pipeline.RememberManualCorrection(entry.NormalizedText, entry.TranslatedText);
         return CurrentCache.SaveManualCorrectionAsync(entry, cancellationToken);
     }
 

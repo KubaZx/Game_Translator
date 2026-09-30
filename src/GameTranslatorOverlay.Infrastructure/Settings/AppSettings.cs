@@ -58,6 +58,12 @@ public sealed class AppSettings
 
     /// <summary>0 = automatyczny dobór powiększenia obrazu przed OCR.</summary>
     public double OcrUpscale { get; set; }
+
+    /// <summary>
+    /// Płeć postaci gracza: unknown | male | female. Tylko dostawcy LLM (Claude, zgodny z OpenAI)
+    /// odmieniają według niej zwroty do gracza; brak pola w starym pliku = unknown.
+    /// </summary>
+    public string PlayerGender { get; set; } = Core.Translation.PlayerGenders.UnknownSetting;
 }
 
 public sealed class JsonSettingsStore(AppPaths paths)

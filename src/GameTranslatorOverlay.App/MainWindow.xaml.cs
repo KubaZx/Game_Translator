@@ -10,6 +10,7 @@ using GameTranslatorOverlay.App.Ocr;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.App.Ui;
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Infrastructure.Caching;
 using GameTranslatorOverlay.Infrastructure.Content;
 using GameTranslatorOverlay.Infrastructure.Providers;
@@ -145,6 +146,10 @@ public partial class MainWindow : Window
         CmbFont.ItemsSource = new[] { "Segoe UI", "Georgia", "Palatino Linotype", "Cambria", "Book Antiqua", "Times New Roman" };
         CmbFont.SelectedItem = _settings.OverlayFontFamily;
         if (CmbFont.SelectedItem is null) CmbFont.SelectedIndex = 0;
+
+        // Kolejność pozycji = PlayerGender (Unknown, Male, Female) — indeks to wartość wyliczenia.
+        CmbPlayerGender.ItemsSource = new[] { "nieznana", "mężczyzna", "kobieta" };
+        CmbPlayerGender.SelectedIndex = (int)PlayerGenders.Parse(_settings.PlayerGender);
 
         TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         ChkCacheOnly.IsChecked = _settings.CacheOnlyMode;
@@ -729,6 +734,12 @@ public partial class MainWindow : Window
         }
 
         _settings.OverlayFontFamily = CmbFont.SelectedItem as string ?? "Segoe UI";
+        _settings.PlayerGender = PlayerGenders.ToSetting(CmbPlayerGender.SelectedIndex switch
+        {
+            1 => PlayerGender.Male,
+            2 => PlayerGender.Female,
+            _ => PlayerGender.Unknown,
+        });
 
         UpdateProviderPanel();
         var snapshot = SettingsSnapshot();

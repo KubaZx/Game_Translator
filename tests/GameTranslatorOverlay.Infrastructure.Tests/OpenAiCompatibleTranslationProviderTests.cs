@@ -104,6 +104,32 @@ public class OpenAiCompatibleTranslationProviderTests
     }
 
     [Fact]
+    public async Task Pamiec_dialogu_i_plec_gracza_trafiaja_do_zapytania()
+    {
+        var handler = new FakeHttpHandler(static (request, _) => Task.FromResult(EchoTranslations(request)));
+        var provider = CreateProvider(handler);
+        var context = new TranslationContext(null, [])
+        {
+            RecentTexts = ["Did you find it?"],
+            RecentExchanges = [new RecentExchange("Did you find it?", "Znalazłeś to?")],
+            PlayerGender = PlayerGender.Male,
+        };
+
+        var result = await provider.TranslateWithContextAsync(["Well done."], "en", "pl", context);
+
+        Assert.Equal(["PL:Well done."], result);
+        using var body = JsonDocument.Parse(handler.Requests[0].Body);
+        var messages = body.RootElement.GetProperty("messages");
+        Assert.Contains("player character is male", messages[0].GetProperty("content").GetString());
+        var user = messages[1].GetProperty("content").GetString()!;
+        using var payload = JsonDocument.Parse(user[(user.IndexOf('\n') + 1)..]);
+        var previous = Assert.Single(payload.RootElement.GetProperty("previous").EnumerateArray());
+        Assert.Equal("Did you find it?", previous.GetProperty("source").GetString());
+        Assert.Equal("Znalazłeś to?", previous.GetProperty("translation").GetString());
+        Assert.False(payload.RootElement.TryGetProperty("previous_lines", out _));
+    }
+
+    [Fact]
     public async Task Zla_liczba_tlumaczen_w_partii_konczy_sie_tlumaczeniem_pojedynczym()
     {
         var handler = new FakeHttpHandler(static (request, attempt) => Task.FromResult(attempt == 0

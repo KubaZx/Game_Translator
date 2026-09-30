@@ -3,6 +3,12 @@ using GameTranslatorOverlay.Core.Glossary;
 namespace GameTranslatorOverlay.Core.Translation;
 
 /// <summary>
+/// Wcześniejsza linia i tłumaczenie, które zwrócił dla niej ten sam dostawca w tej sesji
+/// (surowy wynik — jeden akapit na akapit źródła, przed przywróceniem podziału wierszy).
+/// </summary>
+public sealed record RecentExchange(string Source, string Translation);
+
+/// <summary>
 /// Wskazówki dla dostawców, którzy potrafią je wykorzystać: nazwa gry z aktywnego profilu,
 /// terminy słownika występujące w tłumaczonych tekstach oraz ostatnie linie wysłane
 /// wcześniej do tego samego dostawcy. Nie zawiera obrazów ani tekstu, który nie opuścił
@@ -16,7 +22,23 @@ public sealed record TranslationContext(string? GameName, IReadOnlyList<Glossary
     /// Wcześniejsze teksty (od najstarszego), już przetłumaczone przez tego dostawcę w tej
     /// sesji — np. poprzednie kwestie dialogu. Tylko kontekst: nie są tłumaczone ponownie.
     /// </summary>
+    /// <remarks>
+    /// Pipeline wypełnia to pole źródłami z <see cref="RecentExchanges"/> — dla dostawców,
+    /// którzy przyjmują tylko kontekst w języku źródłowym (DeepL).
+    /// </remarks>
     public IReadOnlyList<string> RecentTexts { get; init; } = [];
+
+    /// <summary>
+    /// Wcześniejsze pary źródło → tłumaczenie (od najstarszej) — model językowy widzi, co sam
+    /// już napisał („gotowy” czy „gotowa”), i może trzymać się tych samych form i nazw.
+    /// </summary>
+    public IReadOnlyList<RecentExchange> RecentExchanges { get; init; } = [];
+
+    /// <summary>
+    /// Płeć postaci gracza z ustawień; wykorzystują ją tylko dostawcy
+    /// <see cref="IGenderAwareTranslationProvider"/> (modele językowe).
+    /// </summary>
+    public PlayerGender PlayerGender { get; init; }
 
     /// <summary>
     /// Aktywny słownik bez terminów z trybu prywatnego — dla dostawców z własnymi,
@@ -26,7 +48,8 @@ public sealed record TranslationContext(string? GameName, IReadOnlyList<Glossary
     /// </summary>
     public IReadOnlyList<GlossaryTerm> GlossaryTerms { get; init; } = [];
 
-    public bool IsEmpty => string.IsNullOrWhiteSpace(GameName) && Terms.Count == 0 && RecentTexts.Count == 0;
+    public bool IsEmpty => string.IsNullOrWhiteSpace(GameName) && Terms.Count == 0 && RecentTexts.Count == 0
+        && RecentExchanges.Count == 0 && PlayerGender == PlayerGender.Unknown;
 }
 
 /// <summary>

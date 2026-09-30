@@ -24,6 +24,15 @@ public sealed class TranslationPipelineOptions
 
     /// <summary>Ile ostatnich wysłanych tekstów dołączać jako kontekst (np. poprzednie kwestie dialogu).</summary>
     public int MaxRecentContextTexts { get; set; } = 6;
+
+    /// <summary>
+    /// Łączna długość (źródło + tłumaczenie) par pamięci dialogu dołączanych jako kontekst —
+    /// długie opisy nie mogą rozdmuchać każdego zapytania do modelu.
+    /// </summary>
+    public int MaxRecentContextChars { get; set; } = 1500;
+
+    /// <summary>Płeć postaci gracza — wskazówka dla dostawców świadomych płci (modele językowe).</summary>
+    public PlayerGender PlayerGender { get; set; }
 }
 
 public enum TranslationOrigin
@@ -70,11 +79,11 @@ public sealed class TranslationPipeline(
     private readonly ILogger _logger = logger ?? NullLogger<TranslationPipeline>.Instance;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _inFlight = new();
 
-    // Ostatnie teksty wysłane do dostawcy tego pipeline'u (od najstarszego). Pipeline jest
-    // budowany od nowa przy zmianie dostawcy, więc kontekst nigdy nie trafia do innego
-    // dostawcy niż ten, który już widział te teksty.
-    private readonly Lock _recentGate = new();
-    private readonly LinkedList<string> _recentSent = new();
+    // Ostatnie teksty wysłane do dostawcy tego pipeline'u razem z jego tłumaczeniami (od
+    // najstarszego). Pipeline jest budowany od nowa przy zmianie dostawcy, więc kontekst
+    // nigdy nie trafia do innego dostawcy niż ten, który już widział te teksty.
+    private readonly DialogMemory _dialog = new(
+        Math.Max(0, options.MaxRecentContextTexts), Math.Max(0, options.MaxRecentContextChars));
 
     // Tłumaczenia wieloliniowe w starym formacie (sprzed sklejania wierszy), pominięte, żeby
     // przetłumaczyć je lepiej. Gdy dostawca zawiedzie (sieć, limit, błąd), gracz dostaje
@@ -107,6 +116,28 @@ public sealed class TranslationPipeline(
 
     public ITranslationProvider Provider => provider;
     public TranslationPipelineOptions Options => options;
+
+    /// <summary>
+    /// Płeć gracza, która wpływa na wynik tego dostawcy: ustawienie dla dostawcy świadomego
+    /// płci, Unknown dla pozostałych (ich tłumaczenia od niej nie zależą, więc nie może ona
+    /// ani trafiać do znacznika cache, ani unieważniać wpisów).
+    /// </summary>
+    private PlayerGender EffectiveGender =>
+        provider is IGenderAwareTranslationProvider ? options.PlayerGender : PlayerGender.Unknown;
+
+    /// <summary>
+    /// Ręczna korekta gracza zastępuje w pamięci dialogu tłumaczenie tej linii, jeśli tam jest —
+    /// kolejne linie mają się trzymać poprawionej formy (np. „gotowa” zamiast „gotowy”), a nie
+    /// błędu, który gracz właśnie poprawił. Zwraca false, gdy linii nie ma w pamięci.
+    /// </summary>
+    public bool RememberManualCorrection(string normalizedText, string correctedText)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedText) || string.IsNullOrWhiteSpace(correctedText)) return false;
+        var (source, plan) = TextReflow.Unwrap(normalizedText);
+        if (source.Length == 0) return false;
+        var translation = TextReflow.ToParagraphs(correctedText, plan);
+        return translation.Length > 0 && _dialog.ReplaceTranslation(source, translation);
+    }
 
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
         IReadOnlyList<string> texts,
@@ -221,10 +252,12 @@ public sealed class TranslationPipeline(
         // tłumaczone kawałkami (gramatyka rozbita na granicach wierszy) — tłumaczymy je
         // ponownie raz, w nowym formacie; stary wynik zostaje jako zapasowy. W Cache-only
         // nic nie wychodzi do sieci, więc stary wynik jest nadal najlepszym dostępnym.
-        // Tak samo raz ponawiamy wynik oznaczony przez kontrolę jakości (np. zmienione liczby).
+        // Tak samo raz ponawiamy wynik oznaczony przez kontrolę jakości (np. zmienione liczby)
+        // oraz — u dostawcy świadomego płci — tekst zwracający się do gracza, przetłumaczony
+        // z inną płcią gracza niż obecna („gotowy” po przełączeniu na postać kobiecą).
         // Ręczne korekty zawsze zostają.
         if (!options.CacheOnlyMode && cached is { IsManual: false }
-            && TranslationCacheContext.IsStale(cached.Context, normalized))
+            && TranslationCacheContext.IsStale(cached.Context, normalized, EffectiveGender))
         {
             _staleFallbacks[normalized] = new StaleEntry(
                 cached.TranslatedText, cached.GameProfile, TranslationCacheContext.Parse(cached.Context));
@@ -374,13 +407,16 @@ public sealed class TranslationPipeline(
     {
         var terms = glossary.FindTermsIn(texts, options.MaxContextTerms);
         var gameName = string.IsNullOrWhiteSpace(options.GameName) ? null : options.GameName.Trim();
-        var recent = RecentTextsExcluding(texts);
-        return gameName is null && terms.Count == 0 && recent.Count == 0
+        var recent = _dialog.Excluding(texts);
+        return gameName is null && terms.Count == 0 && recent.Count == 0 && options.PlayerGender == PlayerGender.Unknown
             ? TranslationContext.Empty
             : new TranslationContext(gameName, terms)
             {
-                RecentTexts = recent,
+                // DeepL przyjmuje wyłącznie kontekst w języku źródłowym — dostaje same źródła.
+                RecentTexts = recent.Select(static pair => pair.Source).ToList(),
+                RecentExchanges = recent,
                 GlossaryTerms = GlossaryTermsFor(terms),
+                PlayerGender = options.PlayerGender,
             };
     }
 
@@ -401,30 +437,12 @@ public sealed class TranslationPipeline(
         return foundTerms.Any(persistableSet.Contains) ? persistable : [];
     }
 
-    private IReadOnlyList<string> RecentTextsExcluding(IReadOnlyList<string> texts)
-    {
-        lock (_recentGate)
-        {
-            if (_recentSent.Count == 0) return [];
-            var current = texts.ToHashSet(StringComparer.Ordinal);
-            return _recentSent.Where(text => !current.Contains(text)).ToList();
-        }
-    }
-
-    private void RememberSent(IEnumerable<string> texts)
-    {
-        var limit = Math.Max(0, options.MaxRecentContextTexts);
-        if (limit == 0) return;
-        lock (_recentGate)
-        {
-            foreach (var text in texts)
-            {
-                _recentSent.Remove(text);
-                _recentSent.AddLast(text);
-            }
-            while (_recentSent.Count > limit) _recentSent.RemoveFirst();
-        }
-    }
+    // Wynik pusty, nieprzetłumaczony (echo oryginału) albo „rozgadany” nie jest przykładem,
+    // którego model ma się trzymać — pokazany jako jego własne wcześniejsze tłumaczenie
+    // utrwalałby błąd w kolejnych liniach. Zmienione liczby (częsty fałszywy alarm, np.
+    // „10:30 PM” → „22:30”) nie psują form gramatycznych, więc taka linia zostaje w pamięci.
+    private const TranslationQualityFlags NotRememberedIssues =
+        TranslationQualityFlags.Empty | TranslationQualityFlags.Untranslated | TranslationQualityFlags.Runaway;
 
     private async Task TranslateChunkAsync(
         (string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)[] chunk,
@@ -498,13 +516,16 @@ public sealed class TranslationPipeline(
         // Tylko udane odpowiedzi: błąd lub timeout zafałszowałby typowy czas dostawcy.
         usage.Latency.Record(LatencyStage.Provider,
             Stopwatch.GetElapsedTime(providerStarted).TotalMilliseconds);
-        RememberSent(textsToSend);
 
+        // Surowe wyniki (przed przywróceniem wierszy) trafiają do pamięci dialogu: model dostał
+        // sklejony tekst, więc jako swoje wcześniejsze tłumaczenie widzi też sklejony wynik.
+        var raw = new string[chunk.Length];
         var results = new string[chunk.Length];
         var issues = new TranslationQualityFlags[chunk.Length];
         for (var i = 0; i < chunk.Length; i++)
         {
-            results[i] = TextReflow.Rewrap(translations[i] ?? string.Empty, reflowed[i].Plan);
+            raw[i] = translations[i] ?? string.Empty;
+            results[i] = TextReflow.Rewrap(raw[i], reflowed[i].Plan);
             issues[i] = TranslationQualityGate.Check(textsToSend[i], results[i]);
         }
         // Ponowne tłumaczenie wpisu już oznaczonego przez kontrolę jakości to samo w sobie
@@ -512,9 +533,13 @@ public sealed class TranslationPipeline(
         // (np. fałszywy alarm „10:30 PM” → „22:30”) kosztuje wtedy najwyżej 3 zapytania:
         // pierwsze + ponowienie przy pierwszym wystąpieniu i jedno przy drugim.
         var skipRetry = staleEntries.Select(static s => s?.Context.NeedsQualityRetry == true).ToArray();
-        await RetryFlaggedAsync(textsToSend, reflowed, results, issues, skipRetry, context, sourceLanguage, targetLanguage,
+        await RetryFlaggedAsync(textsToSend, reflowed, raw, results, issues, skipRetry, context, sourceLanguage, targetLanguage,
                 cancellationToken)
             .ConfigureAwait(false);
+
+        _dialog.Remember(Enumerable.Range(0, chunk.Length)
+            .Where(i => (issues[i] & NotRememberedIssues) == TranslationQualityFlags.None)
+            .Select(i => new RecentExchange(textsToSend[i], raw[i].Trim())));
 
         for (var i = 0; i < chunk.Length; i++)
         {
@@ -546,7 +571,8 @@ public sealed class TranslationPipeline(
                 {
                     await TryStoreAsync(new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage,
                         stale.TranslatedText, provider.Name, GameProfile: profile,
-                        Context: TranslationCacheContext.Build(stale.Context.QualityIssues, final: true))).ConfigureAwait(false);
+                        Context: TranslationCacheContext.Build(stale.Context.QualityIssues, final: true,
+                            playerGender: stale.Context.PlayerGender))).ConfigureAwait(false);
                 }
                 continue;
             }
@@ -561,7 +587,8 @@ public sealed class TranslationPipeline(
             // Wynik z problemem jakości jest oznaczany, żeby następnym razem przetłumaczyć go
             // ponownie — ale tylko raz: gdy zastępujemy już oznaczony wpis, a problem nadal
             // jest, znacznik jest ostateczny (bez pętli płatnych zapytań).
-            var cacheContext = TranslationCacheContext.Build(quality, final: stale?.Context.NeedsQualityRetry == true);
+            var cacheContext = TranslationCacheContext.Build(
+                quality, final: stale?.Context.NeedsQualityRetry == true, playerGender: EffectiveGender);
 
             if (IsCacheDegraded) RememberDegraded(normalized, sourceLanguage, targetLanguage, translated);
             if (!await TryStoreAsync(new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage, translated,
@@ -601,6 +628,7 @@ public sealed class TranslationPipeline(
     private async Task RetryFlaggedAsync(
         List<string> textsToSend,
         List<(string Text, ReflowPlan Plan)> reflowed,
+        string[] raw,
         string[] results,
         TranslationQualityFlags[] issues,
         bool[] skipRetry,
@@ -650,10 +678,12 @@ public sealed class TranslationPipeline(
         for (var k = 0; k < flagged.Count; k++)
         {
             var i = flagged[k];
-            var candidate = TextReflow.Rewrap(retried[k] ?? string.Empty, reflowed[i].Plan);
+            var candidateRaw = retried[k] ?? string.Empty;
+            var candidate = TextReflow.Rewrap(candidateRaw, reflowed[i].Plan);
             var candidateIssues = TranslationQualityGate.Check(textsToSend[i], candidate);
             if (TranslationQualityGate.Severity(candidateIssues) < TranslationQualityGate.Severity(issues[i]))
             {
+                raw[i] = candidateRaw;
                 results[i] = candidate;
                 issues[i] = candidateIssues;
             }
