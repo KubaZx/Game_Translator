@@ -98,6 +98,13 @@ public class DeepLGlossaryBackgroundTests
     private static DeepLTranslationProvider Provider(SlowDeepL fake, DeepLOptions options) =>
         new(new HttpClient(fake.Handler), static () => "key:fx", options);
 
+    /// <summary>
+    /// Czeka, aż zapytanie o listę dotrze do atrapy. Bez tego test zależałby od tego, czy
+    /// zadanie w tle zdąży wysłać listę w oknie budżetu — na obciążonym CI nie zawsze zdąży.
+    /// </summary>
+    private static Task WaitForListRequests(SlowDeepL fake, int count) =>
+        WaitUntil(() => fake.Requests(HttpMethod.Get, "/v2/glossaries").Count >= count);
+
     private static async Task WaitUntil(Func<bool> condition)
     {
         for (var i = 0; i < 500 && !condition(); i++) await Task.Delay(10);
@@ -190,6 +197,7 @@ public class DeepLGlossaryBackgroundTests
             .ToArray();
         // Lista wciąż wisi, a wszystkie tłumaczenia są gotowe — nikt nie stoi w kolejce.
         var results = await Task.WhenAll(calls).WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitForListRequests(fake, 1);
 
         Assert.Equal(8, results.Length);
         Assert.Single(fake.Requests(HttpMethod.Get, "/v2/glossaries"));
@@ -223,6 +231,9 @@ public class DeepLGlossaryBackgroundTests
         var provider = Provider(fake, options);
 
         await provider.TranslateWithContextAsync(["Find a Waystone"], "en", "pl", WithTerms(Terms));
+        // Pierwsza lista musi już wisieć w atrapie, zanim słownik się zmieni — inaczej anulowane
+        // zostałoby zadanie, które jeszcze nic nie wysłało, a bramka zablokowałaby drugą listę.
+        await WaitForListRequests(fake, 1);
         options.GlossaryWaitBudget = TimeSpan.FromSeconds(10);
         await provider.TranslateWithContextAsync(["Find a Waystone"], "en", "pl",
             WithTerms([.. Terms, new GlossaryTerm("Rune", "Runa")]));
@@ -233,5 +244,31 @@ public class DeepLGlossaryBackgroundTests
         var create = Assert.Single(fake.Requests(HttpMethod.Post, "/v2/glossaries"));
         Assert.Contains("Rune", create.Body);
         Assert.Equal("new-id", SlowDeepL.GlossaryIdOf(fake.Requests(HttpMethod.Post, "/v2/translate")[^1]));
+    }
+
+    [Fact]
+    public async Task Kolejna_partia_nie_czeka_ponownie_calego_budzetu_na_trwajace_przygotowanie()
+    {
+        var fake = new SlowDeepL { BlockList = true };
+        var options = new DeepLOptions { GlossaryWaitBudget = TimeSpan.FromMilliseconds(50) };
+        var provider = Provider(fake, options);
+
+        await provider.TranslateWithContextAsync(["Find a Waystone"], "en", "pl", WithTerms(Terms));
+        await WaitForListRequests(fake, 1);
+        // Gdyby dołączający czekał własny budżet, ta partia wisiałaby 10 s na zablokowanej liście.
+        options.GlossaryWaitBudget = TimeSpan.FromSeconds(10);
+
+        var stopwatch = Stopwatch.StartNew();
+        var result = await provider.TranslateWithContextAsync(["Energy Shield"], "en", "pl", WithTerms(Terms));
+        stopwatch.Stop();
+
+        Assert.Equal(["PL:Energy Shield"], result);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Tłumaczenie trwało {stopwatch.Elapsed}.");
+        Assert.All(fake.Requests(HttpMethod.Post, "/v2/translate"), static t => Assert.Null(SlowDeepL.GlossaryIdOf(t)));
+        // Nadal jedno przygotowanie — dołączenie nie uruchamia nowej listy.
+        Assert.Single(fake.Requests(HttpMethod.Get, "/v2/glossaries"));
+
+        fake.ReleaseList();
+        await WaitUntil(() => fake.Requests(HttpMethod.Post, "/v2/glossaries").Count == 1);
     }
 }

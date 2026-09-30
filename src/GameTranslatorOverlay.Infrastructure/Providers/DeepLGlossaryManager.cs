@@ -44,9 +44,13 @@ internal sealed class DeepLGlossaryManager(
 
     private sealed record Ready(string Key, string GlossaryId);
 
-    private sealed class Preparation(string key)
+    private sealed class Preparation(string key, DateTimeOffset waitDeadline)
     {
         public string Key { get; } = key;
+        // Wspólny termin oczekiwania: czeka tylko pierwsza partia (ta, która zaczęła
+        // przygotowanie), a dołączające później dostają resztę tego samego okna — inaczej
+        // przy wolnym API każda partia w trybie na żywo traciłaby cały budżet od nowa.
+        public DateTimeOffset WaitDeadline { get; } = waitDeadline;
         public CancellationTokenSource Cancellation { get; } = new();
         public Task<string?> Task { get; set; } = System.Threading.Tasks.Task.FromResult<string?>(null);
     }
@@ -59,6 +63,8 @@ internal sealed class DeepLGlossaryManager(
     /// chwilowo niedostępny albo jeszcze w przygotowaniu). Gotowy glosariusz wraca od razu;
     /// nowy jest przygotowywany w tle, a wywołujący czeka na niego najwyżej
     /// <see cref="DeepLOptions.GlossaryWaitBudget"/> — potem ta partia idzie bez glosariusza.
+    /// Budżet liczy się od startu przygotowania, a nie od każdego wywołania: partie dołączające
+    /// do trwającego przygotowania czekają tylko na resztę tego okna (po nim — wcale).
     /// </summary>
     public async Task<string?> GetGlossaryIdAsync(
         IReadOnlyList<GlossaryTerm> terms,
@@ -82,6 +88,7 @@ internal sealed class DeepLGlossaryManager(
         if (IsCoolingDown()) return null;
 
         Task<string?> preparation;
+        DateTimeOffset deadline;
         lock (_state)
         {
             if (_ready is { } again && again.Key == key) return again.GlossaryId;
@@ -89,13 +96,14 @@ internal sealed class DeepLGlossaryManager(
             if (_pending is { } pending && pending.Key == key && !pending.Task.IsCompleted)
             {
                 preparation = pending.Task;
+                deadline = pending.WaitDeadline;
             }
             else
             {
                 // Zmiana słownika, konta albo pary języków — stare przygotowanie jest już
                 // niepotrzebne; przerywamy jego zapytania, żeby nie zajmowało kolejki.
                 _pending?.Cancellation.Cancel();
-                var job = new Preparation(key);
+                var job = new Preparation(key, _time.GetUtcNow() + NonNegative(options.GlossaryWaitBudget));
                 var request = new PreparationRequest(
                     key, apiKey, baseUrl, source, target, NamePrefix + contentHash, tsv, entries.Count);
                 // Zadanie startuje wewnątrz blokady, a jego „finally” też ją bierze — więc
@@ -103,17 +111,21 @@ internal sealed class DeepLGlossaryManager(
                 job.Task = Task.Run(() => PrepareAsync(job, request), CancellationToken.None);
                 _pending = job;
                 preparation = job.Task;
+                deadline = job.WaitDeadline;
             }
         }
 
-        return await WaitWithinBudgetAsync(preparation, cancellationToken).ConfigureAwait(false);
+        return await WaitUntilDeadlineAsync(preparation, deadline, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<string?> WaitWithinBudgetAsync(Task<string?> preparation, CancellationToken cancellationToken)
+    private static TimeSpan NonNegative(TimeSpan value) => value > TimeSpan.Zero ? value : TimeSpan.Zero;
+
+    private async Task<string?> WaitUntilDeadlineAsync(
+        Task<string?> preparation, DateTimeOffset deadline, CancellationToken cancellationToken)
     {
         if (preparation.IsCompleted) return await preparation.ConfigureAwait(false);
 
-        var budget = options.GlossaryWaitBudget;
+        var budget = deadline - _time.GetUtcNow();
         if (budget <= TimeSpan.Zero) return null;
 
         try
