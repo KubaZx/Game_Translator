@@ -51,12 +51,12 @@ Pliki tymczasowe (baza SQLite w pomiarze cache) powstają wyłącznie w
 
 | Klasa / metoda | Co w aplikacji |
 |---|---|
-| `CacheHitFrameBenchmarks.SqliteRozgrzanaPamiec` | Klatka live, w której wszystkie teksty (20 lub 100) są już w cache SQLite i w pamięci trafień — typowa sytuacja po kilku sekundach gry w tej samej scenie. Cały `TranslationPipeline.TranslateAsync`: normalizacja, słownik, cache. Liczniki użycia zapisywane zbiorczo w tle są częścią pomiaru, tak jak w aplikacji. |
+| `CacheHitFrameBenchmarks.SqliteRozgrzanaPamiec` | Klatka live, w której wszystkie teksty (20 lub 100) są już w cache SQLite i w pamięci trafień — typowa sytuacja po kilku sekundach gry w tej samej scenie. Cały `TranslationPipeline.TranslateAsync`: normalizacja, słownik, cache. Zbiorczy zapis liczników użycia jest wyzwalany tak jak w aplikacji, ale wykonuje się na innym wątku (`Task.Run`): do `Mean` wchodzi tylko jego zaplanowanie i ewentualna rywalizacja o zasoby, a jego alokacje są liczone przez `MemoryDiagnoser` (który mierzy cały proces). Różnica między tym wariantem a `PamiecTrybPrywatny` **nie** jest więc kosztem zapisu do SQLite. |
 | `CacheHitFrameBenchmarks.SqliteZimnaPamiec` | Pierwsza klatka po starcie aplikacji: nowa instancja `SqliteTranslationCache` na tym samym pliku (pusta pamięć trafień), każdy odczyt idzie do bazy. Instancja tworzona w `IterationSetup`, więc jedno wywołanie na iterację. Pula połączeń SQLite i pamięć podręczna plików systemu są już ciepłe — to nie jest „zimny dysk”. |
 | `CacheHitFrameBenchmarks.PamiecTrybPrywatny` | To samo na `InMemoryTranslationCache` — cache trybu prywatnego (nic nie trafia na dysk). |
 | `ChangeDetectionBenchmarks.SiatkaLuminancji` | `LuminanceGrid.FromBgra32` na pełnej klatce 1920×1080 lub 3840×2160 (siatka 48×27, 9 próbek na komórkę). |
 | `ChangeDetectionBenchmarks.AnalizaZmian` | `NoiseAwareChangeDetector.Analyze` dwóch siatek (odsiew szumu, region zmian). |
-| `ChangeDetectionBenchmarks.KlatkaPelna` | Oba kroki razem — decyzja „czy klatka się zmieniła” wykonywana dla każdej przechwyconej klatki przed ewentualnym OCR. Klatki syntetyczne: zaszumione ciemne tło + jasny prostokąt przesuwający się między klatkami. |
+| `ChangeDetectionBenchmarks.KlatkaPelna` | Oba kroki razem — decyzja „czy klatka się zmieniła” wykonywana dla każdej przechwyconej klatki przed ewentualnym OCR. Klatki syntetyczne: ciemne tło z ziarnem pikseli (poniżej progu komórki — uśrednione, niewidoczne dla detektora), pas „mgły” w górnych 40% ekranu, który co klatkę zmienia luminancję o 14 (ponad próg komórki 10, poniżej progu mocnej zmiany 25 — po rozgrzaniu odsiewany jako szum), oraz jasny prostokąt przesuwający się między klatkami (zmiana mocna). `GlobalSetup` sprawdza, że obie ścieżki detektora pracują. |
 | `FingerprintBenchmarks.OdciskRegionu` | `TextRegionFingerprint.FromBitmap` (budowniczy wiersz po wierszu: SHA-256 z RGB + test kontrastu) dla regionu 64×16 (etykieta), 512×64 (wiersz napisów) i 512×512 (największy dopuszczalny region). |
 | `TextBenchmarks.GrupowanieFiltrNormalizacja` | 40 syntetycznych wierszy OCR (dialog, menu, dziennik zadań, podpowiedź przedmiotu, śmieci HUD): `TextBlockGrouper.Group`, potem dla każdego bloku `TextNormalizer.Normalize` i `JunkFilter.IsMeaningful`. |
 | `TextBenchmarks.SklejanieWierszy` | `TextReflow.Unwrap` na 6-wierszowym dialogu (sklejanie miękkich zawinięć przed wysłaniem do dostawcy). |
@@ -102,12 +102,17 @@ ustawienia zadania, więc BenchmarkDotNet nie liczy dla niego proporcji).
 
 | Method           | Resolution | Mean      | Error     | StdDev    | Allocated |
 |----------------- |----------- |----------:|----------:|----------:|----------:|
-| SiatkaLuminancji | 1920x1080  | 54.179 μs | 1.0834 μs | 1.1593 μs |    5240 B |
-| AnalizaZmian     | 1920x1080  |  4.309 μs | 0.0862 μs | 0.0806 μs |      64 B |
-| KlatkaPelna      | 1920x1080  | 59.561 μs | 1.1367 μs | 1.0633 μs |    5304 B |
-| SiatkaLuminancji | 3840x2160  | 68.530 μs | 1.3387 μs | 2.3796 μs |    5240 B |
-| AnalizaZmian     | 3840x2160  |  4.386 μs | 0.0871 μs | 0.1036 μs |      64 B |
-| KlatkaPelna      | 3840x2160  | 70.554 μs | 0.9409 μs | 0.8341 μs |    5304 B |
+| SiatkaLuminancji | 1920x1080  | 54.192 μs | 1.0288 μs | 0.9623 μs |    5240 B |
+| AnalizaZmian     | 1920x1080  |  4.872 μs | 0.0879 μs | 0.1608 μs |      64 B |
+| KlatkaPelna      | 1920x1080  | 59.647 μs | 1.0994 μs | 1.4677 μs |    5304 B |
+| SiatkaLuminancji | 3840x2160  | 66.111 μs | 1.0863 μs | 0.9630 μs |    5240 B |
+| AnalizaZmian     | 3840x2160  |  4.572 μs | 0.0901 μs | 0.0885 μs |      64 B |
+| KlatkaPelna      | 3840x2160  | 71.438 μs | 1.3900 μs | 2.1641 μs |    5304 B |
+
+Tabela z ponownego pełnego przebiegu tej klasy (ta sama maszyna i środowisko co wyżej) po
+dodaniu migoczącego pasa „mgły” — w pierwszej wersji klatek szum pikseli nigdy nie przekraczał
+progu komórki, więc ścieżka odsiewu szumu praktycznie nie pracowała. Czasy prawie się nie
+zmieniły (analiza jest liniowa w liczbie komórek, niezależnie od tego, ile z nich się zmienia).
 
 Siatka próbkuje stałą liczbę punktów (48×27 komórek × 9 próbek), więc 4K kosztuje niewiele
 więcej niż 1080p (różnica to najpewniej rozrzut próbek po 4× większym buforze; tego nie
@@ -151,9 +156,12 @@ ma błąd większy niż sama średnia:
 | SqliteRozgrzanaPamiec, 100 tekstów | 304.31 μs | 285.98 μs |
 | PamiecTrybPrywatny, 100 tekstów | 232.13 μs | 258.20 μs |
 | SqliteZimnaPamiec, 100 tekstów | 13,205.63 μs | 12,338.36 μs |
-| KlatkaPelna 1920x1080 | 61.578 μs | 59.561 μs |
-| KlatkaPelna 3840x2160 | 73.245 μs | 70.554 μs |
+| KlatkaPelna 1920x1080 ¹ | 61.578 μs | 59.561 μs |
+| KlatkaPelna 3840x2160 ¹ | 73.245 μs | 70.554 μs |
 | OdciskRegionu 512x512 | 1,042.493 μs | 1,039.045 μs |
+
+¹ Oba przebiegi na pierwszej wersji klatek (bez pasa „mgły”); aktualny pełny wynik w tabeli
+„Detekcja zmian klatki” wyżej.
 
 Do decyzji (np. „czy zmiana przyspieszyła cache”) używaj pełnego przebiegu przed i po zmianie
 na tej samej maszynie; szybki wystarcza do wyłapania regresji rzędu wielokrotności.

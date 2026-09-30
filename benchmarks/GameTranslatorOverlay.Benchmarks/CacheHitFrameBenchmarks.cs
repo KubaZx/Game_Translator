@@ -67,11 +67,21 @@ public class CacheHitFrameBenchmarks
 
         _inMemory = CreatePipeline(memory);
         EnsureAllCached(_inMemory.TranslateAsync(_frameTexts, SourceLanguage, TargetLanguage).GetAwaiter().GetResult());
+
+        // Wariant zimny też musi trafiać w cache: gdyby świeża instancja chybiała (np. po zmianie
+        // klucza wyszukiwania), dostawca rzuciłby, pipeline obsłużyłby błąd, a benchmark po cichu
+        // mierzyłby ścieżkę błędu zamiast odczytu z pliku.
+        var coldProbe = new SqliteTranslationCache(_databasePath);
+        EnsureAllCached(CreatePipeline(coldProbe).TranslateAsync(_frameTexts, SourceLanguage, TargetLanguage).GetAwaiter().GetResult());
+        coldProbe.FlushUsageStatistics();
     }
 
     [IterationSetup(Target = nameof(SqliteZimnaPamiec))]
     public void CreateColdSqliteInstance()
     {
+        // Poprzednia instancja zapisuje swoje liczniki tu, poza pomiarem — inaczej jej zapis
+        // w tle mógłby jeszcze trzymać plik przy sprzątaniu katalogu.
+        FlushQuietly(_sqliteColdCache);
         // Nowa instancja = pusta pamięć trafień; każdy odczyt idzie do pliku bazy.
         _sqliteColdCache = new SqliteTranslationCache(_databasePath);
         _sqliteCold = CreatePipeline(_sqliteColdCache);
@@ -93,17 +103,29 @@ public class CacheHitFrameBenchmarks
     public void GlobalCleanup()
     {
         // Liczniki użycia zapisywane w tle muszą skończyć, zanim pula połączeń zwolni plik.
-        try { _sqliteWarmCache.FlushUsageStatistics(); } catch (SqliteException) { }
-        try { _sqliteColdCache?.FlushUsageStatistics(); } catch (SqliteException) { }
+        FlushQuietly(_sqliteWarmCache);
+        FlushQuietly(_sqliteColdCache);
         SqliteConnection.ClearAllPools();
-        try
+        // Na Windows plik trzymany jeszcze przez zapis w tle albo skanowany przez antywirusa
+        // daje UnauthorizedAccessException zamiast IOException — jedna ponowna próba po chwili,
+        // potem odpuszczamy: to katalog tymczasowy, a błąd sprzątania nie może unieważnić pomiaru.
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            Directory.Delete(_directory, recursive: true);
+            try
+            {
+                Directory.Delete(_directory, recursive: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == 0) Thread.Sleep(200);
+            }
         }
-        catch (IOException)
-        {
-            // Plik mógł być jeszcze chwilowo trzymany przez zapis w tle — to katalog tymczasowy.
-        }
+    }
+
+    private static void FlushQuietly(SqliteTranslationCache? cache)
+    {
+        try { cache?.FlushUsageStatistics(); } catch (SqliteException) { }
     }
 
     private TranslationPipeline CreatePipeline(ITranslationCache cache) =>
