@@ -182,9 +182,63 @@ public sealed class TranslationPipeline(
             .ToList();
     }
 
+    /// <summary>
+    /// Tylko lokalna część <see cref="TranslateAsync"/>: korekta ręczna → słownik → cache,
+    /// z tymi samymi regułami (filtr atrapy Mock, nieaktualne wpisy, awaryjna pamięć przy
+    /// uszkodzonej bazie). Nie woła dostawcy i nie rezerwuje budżetu znaków, więc tryb live
+    /// może pokazać w pełni znaną klatkę bez czekania na wolne miejsce w kolejce tłumaczeń.
+    /// Element null = tekstu nie da się przetłumaczyć lokalnie. Nieaktualny wpis (stary
+    /// format, oznaczony przez kontrolę jakości) NIE jest tu lokalny — TranslateAsync spróbuje
+    /// go odświeżyć — i nie zostawia wpisu zapasowego. Trafienia liczymy tylko, gdy lokalna
+    /// jest cała partia: w przeciwnym razie wołający i tak przejdzie przez TranslateAsync,
+    /// który policzy te same trafienia, a podwójne liczenie zawyżałoby statystyki.
+    /// </summary>
+    public async Task<IReadOnlyList<TranslationOutcome?>> TranslateLocalAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken = default)
+    {
+        if (texts.Count == 0) return [];
+
+        var outcomes = new Dictionary<string, TranslationOutcome?>(StringComparer.Ordinal);
+        var normalizedInputs = texts
+            .Select(static text => (Source: text, Normalized: TextNormalizer.Normalize(text)))
+            .ToList();
+        var allLocal = true;
+        foreach (var (source, normalized) in normalizedInputs)
+        {
+            if (outcomes.ContainsKey(normalized)) continue;
+            var local = normalized.Length == 0
+                // Ten sam wynik co w TranslateAsync — też bez dostawcy.
+                ? new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, "Pusty tekst.")
+                : await TryTranslateLocallyAsync(source, normalized, sourceLanguage, targetLanguage,
+                    cancellationToken, probeOnly: true).ConfigureAwait(false);
+            outcomes[normalized] = local;
+            allLocal &= local is not null;
+        }
+
+        if (allLocal)
+        {
+            foreach (var outcome in outcomes.Values)
+            {
+                if (outcome is { Origin: TranslationOrigin.Glossary }) usage.RecordGlossaryHit();
+                else if (outcome is { Origin: TranslationOrigin.Cache }) usage.RecordCacheHit();
+            }
+        }
+
+        return normalizedInputs
+            .Select(input => outcomes[input.Normalized] is { } outcome ? outcome with { SourceText = input.Source } : null)
+            .ToList();
+    }
+
+    /// <param name="probeOnly">
+    /// Sprawdzenie bez skutków ubocznych: bez liczenia trafień i bez zapamiętywania wpisów
+    /// zapasowych (te są potrzebne tylko ścieżce, która naprawdę zapyta dostawcę).
+    /// </param>
     private async Task<TranslationOutcome?> TryTranslateLocallyAsync(
         string source, string normalized, string sourceLanguage, string targetLanguage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool probeOnly = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         CachedTranslation? cached;
@@ -212,7 +266,7 @@ public sealed class TranslationPipeline(
             && cached.Provider.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase)
             && !provider.Name.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase))
         {
-            if (!options.CacheOnlyMode && cached.GameProfile.Length > 0)
+            if (!probeOnly && !options.CacheOnlyMode && cached.GameProfile.Length > 0)
                 _staleFallbacks[normalized] = new StaleEntry(null, cached.GameProfile, default);
             cached = null;
         }
@@ -226,25 +280,26 @@ public sealed class TranslationPipeline(
         if (!options.CacheOnlyMode && cached is { IsManual: false }
             && TranslationCacheContext.IsStale(cached.Context, normalized))
         {
-            _staleFallbacks[normalized] = new StaleEntry(
-                cached.TranslatedText, cached.GameProfile, TranslationCacheContext.Parse(cached.Context));
+            if (!probeOnly)
+                _staleFallbacks[normalized] = new StaleEntry(
+                    cached.TranslatedText, cached.GameProfile, TranslationCacheContext.Parse(cached.Context));
             cached = null;
         }
 
         // Manual corrections retain precedence over the glossary on both lookups.
         if (cached is { IsManual: true })
         {
-            usage.RecordCacheHit();
+            if (!probeOnly) usage.RecordCacheHit();
             return new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache);
         }
         if (glossary.TryTranslateExact(normalized, out var translation))
         {
-            usage.RecordGlossaryHit();
+            if (!probeOnly) usage.RecordGlossaryHit();
             return new TranslationOutcome(source, normalized, translation, TranslationOrigin.Glossary);
         }
         if (cached is not null)
         {
-            usage.RecordCacheHit();
+            if (!probeOnly) usage.RecordCacheHit();
             return new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache)
             {
                 QualityWarning = TranslationQualityGate.Describe(TranslationCacheContext.Parse(cached.Context).QualityIssues),
@@ -252,7 +307,7 @@ public sealed class TranslationPipeline(
         }
         if (degradedHit is not null)
         {
-            usage.RecordCacheHit();
+            if (!probeOnly) usage.RecordCacheHit();
             return new TranslationOutcome(source, normalized, degradedHit, TranslationOrigin.Cache);
         }
         return null;

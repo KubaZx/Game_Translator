@@ -400,5 +400,33 @@ public sealed class TranslationOrchestrator(
         }
     }
 
+    /// <summary>
+    /// Tylko lokalna część <see cref="TranslateTextsAsync"/> (korekty, słownik, cache) —
+    /// bez dostawcy i bez rezerwacji budżetu. Null = tekstu nie ma lokalnie. Ta sama
+    /// obsługa epoki co w <see cref="TranslateTextsAsync"/>: wynik starego pipeline'u
+    /// (np. sprzed włączenia trybu prywatnego) nigdy nie wraca do wołającego.
+    /// </summary>
+    public async Task<IReadOnlyList<TranslationOutcome?>> TranslateLocalAsync(
+        IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+    {
+        while (true)
+        {
+            var state = Volatile.Read(ref _pipelineState)
+                ?? throw new InvalidOperationException("Pipeline tłumaczenia nie został zbudowany.");
+
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, state.EpochToken);
+            if (!ReferenceEquals(state, Volatile.Read(ref _pipelineState)))
+            {
+                continue;
+            }
+
+            var outcomes = await state.Pipeline
+                .TranslateLocalAsync(texts, settings.SourceLanguage, settings.TargetLanguage, linked.Token)
+                .ConfigureAwait(false);
+            linked.Token.ThrowIfCancellationRequested();
+            return outcomes;
+        }
+    }
+
     public string SourceLanguage => settings.SourceLanguage;
 }

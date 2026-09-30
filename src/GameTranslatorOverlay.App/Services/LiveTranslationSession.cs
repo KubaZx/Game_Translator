@@ -201,6 +201,16 @@ public sealed class LiveTranslationSession(
     private bool _pendingTextGone;
     private byte[]? _presenceRowBuffer;
 
+    // Chwila ostatniej zmiany obrazu zauważonej od startu bieżącego przetworzenia (także
+    // przez kontrole sceny w trakcie OCR/tłumaczenia). Odświeżenie po zajętym przebiegu
+    // liczy okno stabilności od niej, a nie od końca oczekiwania — ForceDirty kazałby
+    // napisowi, który pojawił się w trakcie długiego tłumaczenia, czekać drugi raz.
+    private TimeSpan? _lastObservedChangeAt;
+
+    // Pomiar „zmiana → napis”: początek zmiany objętej bieżącym przetworzeniem.
+    private readonly ChangeToTextTracker _changeToText = new();
+    private TimeSpan? _processingChangeOrigin;
+
     public bool IsRunning => _loop is { IsCompleted: false };
 
     /// <summary>Pozwala narzedziom dev zaczekac na zakonczenie przed usunieciem ich danych.</summary>
@@ -305,6 +315,8 @@ public sealed class LiveTranslationSession(
                         _readingRetryRequested = false;
                         _invalidatedTranslations.Clear();
                         stabilizer.Reset();
+                        _changeToText.Reset();
+                        _lastObservedChangeAt = null;
                         _displayed.Clear();
                         _blockFingerprints.Clear();
                         Emit(new LiveUpdate("Gra zminimalizowana — nakładka ukryta, czekam na powrót.",
@@ -409,6 +421,7 @@ public sealed class LiveTranslationSession(
         long captureMs;
 
         var captureStartedTimestamp = Stopwatch.GetTimestamp();
+        var sampledAt = clock.Elapsed;
         var captureWatch = Stopwatch.StartNew();
         var (bitmap, usedScreenFallback) = ScreenCapture.CaptureWindowEx(gameWindowHandle);
         using (bitmap)
@@ -432,7 +445,7 @@ public sealed class LiveTranslationSession(
             bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
             var frameRect = new RectPx(0, 0, bitmap.Width, bitmap.Height);
             capturedFrameRect = frameRect;
-            var analysis = ObserveCapturedFrame(bitmap, frameRect, usedScreenFallback, cancellationToken);
+            var analysis = ObserveCapturedFrame(bitmap, frameRect, usedScreenFallback, sampledAt, cancellationToken);
             changedFraction = analysis.ChangedFraction;
             strongFraction = analysis.StrongChangedFraction;
             significantFraction = analysis.SignificantFraction;
@@ -556,6 +569,10 @@ public sealed class LiveTranslationSession(
             _lastProcessedAt = clock.Elapsed;
             _motionDeadline.OnProcessingStarted(_lastProcessedAt);
             _cycleTime = clock.Elapsed;
+            // Ta klatka obejmuje wszystkie zmiany zauważone do teraz; liczą się już
+            // tylko te, które przyjdą w trakcie jej OCR i tłumaczenia.
+            _lastObservedChangeAt = null;
+            _processingChangeOrigin = _changeToText.BeginProcessing();
             try
             {
                 await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, capturedFrameRect, captureMs, peakChanged,
@@ -566,14 +583,31 @@ public sealed class LiveTranslationSession(
             {
                 _pendingTextAreas.Clear();
                 _pendingTextGone = false;
+                var changeOrigin = _processingChangeOrigin;
+                _processingChangeOrigin = null;
                 // Busy samples also advance the detector when OCR/provider fails
                 // or settings cancel its epoch. Do not lose their pending change.
                 if (_whiffRetryRequested || _refreshAfterBusyChanges || _readingRetryRequested)
                 {
+                    var retryNow = clock.Elapsed;
+                    if (_whiffRetryRequested || _readingRetryRequested)
+                    {
+                        // Celowe drugie czytanie: pełne okno stabilności PO tym przebiegu
+                        // (patrz ChangeStabilizerPollingTests) — tego nie skracamy.
+                        stabilizer.ForceDirty(retryNow);
+                    }
+                    else
+                    {
+                        // Samo odświeżenie po zmianach widzianych w trakcie pracy: okno
+                        // stabilności liczy się od zauważonej zmiany, nie od końca czekania.
+                        stabilizer.MarkDirty(_lastObservedChangeAt ?? retryNow, retryNow);
+                    }
                     _readingRetryRequested = false;
                     _whiffRetryRequested = false;
                     _refreshAfterBusyChanges = false;
-                    stabilizer.ForceDirty(clock.Elapsed);
+                    // Napis dla zmiany jeszcze się nie pojawił, a pętla zaraz ponowi odczyt —
+                    // pomiar „zmiana → napis” biegnie dalej od pierwotnej zmiany.
+                    _changeToText.CarryOver(changeOrigin);
                 }
             }
             return (changedFraction, strongFraction, significantFraction, true);
@@ -600,7 +634,8 @@ public sealed class LiveTranslationSession(
     /// All calls run on the same session loop: no concurrent access to scene state.
     /// </summary>
     private NoiseAwareAnalysis ObserveCapturedFrame(
-        System.Drawing.Bitmap bitmap, RectPx frameRect, bool usedScreenFallback, CancellationToken cancellationToken)
+        System.Drawing.Bitmap bitmap, RectPx frameRect, bool usedScreenFallback, TimeSpan sampledAt,
+        CancellationToken cancellationToken)
     {
         var grid = ScreenCapture.ComputeLuminanceGrid(bitmap, ref _gridBuffer);
         var hasPrevious = _previousGrid is not null;
@@ -610,7 +645,15 @@ public sealed class LiveTranslationSession(
         _previousGrid = grid;
         _peakChangedFraction = Math.Max(_peakChangedFraction, analysis.ChangedFraction);
 
-        if (_sceneValidity.Observe(analysis, hasPrevious))
+        var sceneCut = _sceneValidity.Observe(analysis, hasPrevious);
+        var significant = analysis.SignificantFraction > options.ChangeThreshold;
+        if (sceneCut || significant)
+        {
+            // Czas próbki, nie jej przetworzenia: od niej gracz widzi nowy obraz.
+            _lastObservedChangeAt = sampledAt;
+            _changeToText.ObserveChange(sampledAt);
+        }
+        if (sceneCut)
         {
             // The generation still changes, so pending old OCR/provider work is
             // discarded. Only already displayed regions with exact native RGB
@@ -618,8 +661,7 @@ public sealed class LiveTranslationSession(
             InvalidateScene(cancellationToken, usedScreenFallback ? null : bitmap);
             _pendingDirtyRegion = frameRect;
         }
-        if (analysis.SignificantFraction > options.ChangeThreshold
-            && analysis.SignificantRegion is { } changed)
+        if (significant && analysis.SignificantRegion is { } changed)
             _pendingDirtyRegion = _pendingDirtyRegion?.Union(changed) ?? changed;
         return analysis;
     }
@@ -746,6 +788,30 @@ public sealed class LiveTranslationSession(
         }
     }
 
+    /// <summary>
+    /// Lokalne sprawdzenie klatki (bez dostawcy) z tymi samymi kontrolami sceny co
+    /// tłumaczenie: przy wolnej bazie nieaktualna klatka też jest porzucana.
+    /// </summary>
+    private async Task<IReadOnlyList<TranslationOutcome?>> TranslateLocalWithSceneChecksAsync(
+        IReadOnlyList<string> texts, long generation, Stopwatch clock, CancellationToken cancellationToken)
+    {
+        var lookup = orchestrator.TranslateLocalAsync(texts, cancellationToken);
+        try
+        {
+            return await AwaitWithSceneChecksAsync(lookup, clock, cancellationToken, generation).ConfigureAwait(false);
+        }
+        catch (SceneSupersededException)
+        {
+            // W odróżnieniu od tłumaczeń nie ma tu właściciela (BoundedTranslationWork),
+            // który by je obserwował — porzucone sprawdzenie nie może zostawić
+            // nieobserwowanego wyjątku (np. anulowanej epoki pipeline'u).
+            _ = lookup.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            throw;
+        }
+    }
+
     private void InvalidateUnavailableScene(CancellationToken cancellationToken)
     {
         _sceneValidity.Reset();
@@ -785,6 +851,7 @@ public sealed class LiveTranslationSession(
             InvalidateUnavailableScene(cancellationToken);
             return;
         }
+        var sampledAt = clock.Elapsed;
         var (bitmap, usedScreenFallback) = ScreenCapture.CaptureWindowEx(gameWindowHandle);
         using (bitmap)
         {
@@ -802,7 +869,7 @@ public sealed class LiveTranslationSession(
                     cancellationToken);
             }
             var frameRect = new RectPx(0, 0, bitmap.Width, bitmap.Height);
-            var analysis = ObserveCapturedFrame(bitmap, frameRect, usedScreenFallback, cancellationToken);
+            var analysis = ObserveCapturedFrame(bitmap, frameRect, usedScreenFallback, sampledAt, cancellationToken);
             // These samples advance _previousGrid. Tell the normal stabilizer about
             // changes seen only while busy, or a small new dialog could wait for the
             // four-second rescan even though we already observed its appearance.
@@ -817,6 +884,8 @@ public sealed class LiveTranslationSession(
                 {
                     _pendingTextGone = true;
                     _refreshAfterBusyChanges = true;
+                    // Zniknięcie tekstu to zmiana obrazu z chwili tej próbki.
+                    _lastObservedChangeAt = sampledAt;
                     // The whole unpublished frame is discarded. Retry all its candidate
                     // areas, including unchanged menu text that has not appeared yet.
                     foreach (var area in _pendingTextAreas)
@@ -1127,19 +1196,32 @@ public sealed class LiveTranslationSession(
                     if (_pendingTextGone || !_sceneValidity.IsCurrent(generation))
                         throw new SceneSupersededException();
                 }
-                Task<IReadOnlyList<TranslationOutcome>>? translation;
-                while (!_translationWork.TryStart(
-                           () => orchestrator.TranslateTextsAsync(
-                               keyed.Select(static k => k.Block.Text).ToList(), cancellationToken),
-                           out translation))
+                var texts = keyed.Select(static k => k.Block.Text).ToList();
+                var local = await TranslateLocalWithSceneChecksAsync(texts, generation, clock, cancellationToken)
+                    .ConfigureAwait(false);
+                if (local.All(static o => o is not null))
                 {
-                    // No FIFO of old frames. If both slots are occupied, watch the scene
-                    // while waiting; a superseded frame is discarded before sending text.
-                    await AwaitWithSceneChecksAsync(_translationWork.WaitForCapacityAsync(),
+                    // Cała klatka jest znana (korekty, słownik, cache): bez miejsca w kolejce
+                    // tłumaczeń, więc wolne zapytanie do dostawcy ze starszej klatki nie
+                    // wstrzymuje napisów, które mamy już lokalnie. Częściowo znanej klatki
+                    // nie publikujemy dwuetapowo — idzie zwykłą ścieżką poniżej.
+                    outcomes = local.Select(static o => o!).ToList();
+                }
+                else
+                {
+                    Task<IReadOnlyList<TranslationOutcome>>? translation;
+                    while (!_translationWork.TryStart(
+                               () => orchestrator.TranslateTextsAsync(texts, cancellationToken),
+                               out translation))
+                    {
+                        // No FIFO of old frames. If both slots are occupied, watch the scene
+                        // while waiting; a superseded frame is discarded before sending text.
+                        await AwaitWithSceneChecksAsync(_translationWork.WaitForCapacityAsync(),
+                            clock, cancellationToken, generation).ConfigureAwait(false);
+                    }
+                    outcomes = await AwaitWithSceneChecksAsync(translation,
                         clock, cancellationToken, generation).ConfigureAwait(false);
                 }
-                outcomes = await AwaitWithSceneChecksAsync(translation,
-                    clock, cancellationToken, generation).ConfigureAwait(false);
             }
         }
         catch (SceneSupersededException)
@@ -1389,6 +1471,14 @@ public sealed class LiveTranslationSession(
                 TranslationSceneCheckMs = _diagnosticSceneCheckMs - translationCheckMsBefore,
             }
             : null;
+        // Zmiana → napis: tylko gdy pokazujemy przetłumaczone bloki. Odczyt czekający
+        // na potwierdzenie nie jest jeszcze napisem dla tej zmiany — mierzymy po powtórce.
+        if (outcomes.Any(static o => o.IsTranslated) && !_readingRetryRequested
+            && ChangeToTextTracker.Measure(_processingChangeOrigin, clock.Elapsed) is { } changeToTextMs)
+        {
+            orchestrator.Latency.Record(LatencyStage.ChangeToText, changeToTextMs);
+            _processingChangeOrigin = null;
+        }
         Emit(new LiveUpdate(status, displayList, subtitle, bounds, Diagnostics: diagnostics), cancellationToken);
     }
 }
