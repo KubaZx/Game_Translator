@@ -116,10 +116,12 @@ public sealed class TranslationOrchestrator(
         glossaryService.LoadDocument(userGlossaryStore.Load(settings.SourceLanguage, settings.TargetLanguage));
 
         // Terminy dodane w trybie prywatnym żyją tylko w pamięci — muszą przetrwać
-        // każdą przebudowę pipeline'u do końca sesji aplikacji.
+        // każdą przebudowę pipeline'u do końca sesji aplikacji. Oznaczone jako sesyjne,
+        // żeby także po wyłączeniu trybu prywatnego nie trafiły do glosariusza DeepL
+        // (trwałego, na koncie użytkownika).
         foreach (var term in _privateSessionTerms)
         {
-            glossaryService.AddTerm(term);
+            glossaryService.AddTerm(term, sessionOnly: true);
         }
 
         if (settings.PrivateMode)
@@ -308,16 +310,17 @@ public sealed class TranslationOrchestrator(
             target.Trim().Replace('\n', ' '),
             Priority: 100);
 
-        glossaryService.AddTerm(term);
-
-        // Tryb prywatny obiecuje brak zapisu treści z ekranu na dysk — termin działa
-        // tylko w pamięci, ale musi przetrwać przebudowy pipeline'u do końca sesji.
+        // Tryb prywatny obiecuje brak zapisu treści z ekranu na dysk i niczego trwałego
+        // w chmurze — termin działa tylko w pamięci (bez glosariusza DeepL), ale musi
+        // przetrwać przebudowy pipeline'u do końca sesji.
         if (settings.PrivateMode)
         {
+            glossaryService.AddTerm(term, sessionOnly: true);
             _privateSessionTerms.Add(term);
             return Task.CompletedTask;
         }
 
+        glossaryService.AddTerm(term);
         return Task.Run(() => userGlossaryStore.AddTerm(term, settings.SourceLanguage, settings.TargetLanguage));
     }
 

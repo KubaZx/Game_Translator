@@ -23,6 +23,19 @@ public sealed class DeepLOptions : HttpProviderOptions
     /// Glosariusz jest przechowywany na koncie DeepL użytkownika (patrz PRIVACY.md).
     /// </summary>
     public bool UseGlossary { get; set; } = true;
+
+    /// <summary>
+    /// Ile najwyżej tłumaczenie czeka na przygotowanie glosariusza (lista + utworzenie na
+    /// koncie DeepL). Przygotowanie trwa w tle — po tym czasie ta partia idzie bez glosariusza,
+    /// a kolejne już go użyją. Gracz nie czeka sekund na napis przez glosariusz.
+    /// </summary>
+    public TimeSpan GlossaryWaitBudget { get; set; } = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>
+    /// Limit czasu pojedynczego zapytania o glosariusze (lista, utworzenie, usunięcie). Bez
+    /// ponawiania: błąd oznacza przerwę w używaniu glosariusza, a nie kolejne próby.
+    /// </summary>
+    public TimeSpan GlossaryRequestTimeout { get; set; } = TimeSpan.FromSeconds(5);
 }
 
 /// <summary>

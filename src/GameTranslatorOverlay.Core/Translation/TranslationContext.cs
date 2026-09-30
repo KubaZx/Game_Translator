@@ -19,9 +19,10 @@ public sealed record TranslationContext(string? GameName, IReadOnlyList<Glossary
     public IReadOnlyList<string> RecentTexts { get; init; } = [];
 
     /// <summary>
-    /// Cały aktywny słownik — dla dostawców z własnymi glosariuszami (DeepL). Wypełniany
-    /// tylko wtedy, gdy partia zawiera co najmniej jeden termin (<see cref="Terms"/>),
-    /// żeby glosariusz nie powstawał dla tekstów, w których nic z niego nie występuje.
+    /// Aktywny słownik bez terminów z trybu prywatnego — dla dostawców z własnymi,
+    /// trwałymi glosariuszami (DeepL). Wypełniany tylko wtedy, gdy partia zawiera co
+    /// najmniej jeden taki termin (<see cref="Terms"/>), żeby glosariusz nie powstawał
+    /// dla tekstów, w których nic z niego nie występuje.
     /// </summary>
     public IReadOnlyList<GlossaryTerm> GlossaryTerms { get; init; } = [];
 
