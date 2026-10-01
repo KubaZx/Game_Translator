@@ -4,22 +4,112 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
+Brak zmian po wydaniu 0.4.0.
+
+## [0.4.0] — 2026-10-01
+
+Duże wydanie: szybszy tryb live, komunikaty w grze, start live jednym skrótem, pamięć dialogu
+dla modeli językowych, kontrola jakości tłumaczeń, lepszy słownik, glosariusze DeepL, panel
+„Szybkość” oraz poprawki błędów cache i prywatności. Nowe funkcje były sprawdzane na Linuksie
+(1114 testów xUnit, kompilacja aplikacji WPF); w oknie na Windows i z prawdziwymi dostawcami
+czekają na scenariusze M27–M35 ([MANUAL_TESTING.md](docs/MANUAL_TESTING.md)).
+
+### Tryb live
+
+- **Start i stop live jednym skrótem: `Ctrl+Shift+L`** na grze, która jest na pierwszym planie,
+  bez przełączania się do okna tłumacza. Gdy aktywne jest okno systemowe (pulpit, pasek zadań)
+  albo sam tłumacz, wybierana jest ostatnio tłumaczona gra, a potem gra z profilem. Gdy wybrano
+  „brak profilu”, profil pasujący do gry włącza się przed startem. Pozycja
+  „▶ Start live na aktywnej grze” / „⏹ Stop live” w zasobniku. Ostatnia gra jest zaznaczana
+  na liście po starcie aplikacji i po „Odśwież” (live nie startuje sam, profil się nie zmienia).
+  Skrót zmienisz polem `liveToggleHotkey` w `settings.json`.
+- **Komunikaty w nakładce:** brak lub odrzucony klucz, wyczerpany limit, ograniczanie zapytań,
+  brak sieci, pusty wynik, braki w Cache-only, niedziałający cache oraz start/stop live widać
+  w grze jako krótki pasek przy górnej krawędzi okna (znika po 3–5 s, ten sam komunikat
+  najwyżej raz na 30 s). Przy nakładce schowanej skrótem przechodzą tylko błędy krytyczne.
+  Ręczne tłumaczenie (`Ctrl+Shift+T`) w trybie „Nakładka na ekranie” zawsze daje odpowiedź
+  (np. „ℹ Nie rozpoznano tekstu w zaznaczeniu”). Komunikaty wyłączysz polem
+  „Komunikaty w nakładce”.
+- **Szybsza reakcja na nową linię:** okno stabilności 250 ms liczy się od zauważonej zmiany,
+  a nie od końca poprzedniego OCR/tłumaczenia (do ~250 ms mniej czekania — wyliczone
+  z harmonogramu, nie zmierzone w grze). Obraz, który dalej się zmienia (pisany tekst), czeka
+  jak dotąd. Celowe drugie czytanie przy niepewnym OCR bez zmian.
+- **Znany ekran nie czeka w kolejce:** klatka, której cały tekst jest w cache lub słowniku,
+  pokazuje się od razu, bez czekania na wolne tłumaczenie starszej klatki.
+- **Panel „Szybkość”** w oknie aplikacji: mediana i p90 z tej sesji dla **„Zmiana → napis”**
+  (od zauważonej zmiany obrazu do gotowych napisów, czyli czas, który widzi gracz), nowego
+  tekstu, znanego tekstu (cache/słownik), odpowiedzi dostawcy, OCR i przechwycenia klatki.
+  **Kopiuj raport** kopiuje szczegóły (mediana, p90, maksimum, liczba pomiarów) — bez tekstu
+  z gry. Czasy są tylko w pamięci.
+- Zmiana samego wyglądu (czcionka, tło, styl, tryb wyniku, skróty, komunikaty) nie przebudowuje
+  już pipeline'u: nie anuluje tłumaczeń w locie i nie czyści pamięci dialogu
+  (status „Wygląd zapisany.”).
+
 ### Jakość tłumaczeń
 
+- **Pamięć dialogu EN→PL dla modeli językowych** (Claude, serwer zgodny z OpenAI): model
+  dostaje do 6 ostatnich linii (ok. 1500 znaków) razem z tłumaczeniami, które sam już zwrócił,
+  więc trzyma się tych samych form („gotowy”/„gotowa”), formy zwracania się i pisowni imion.
+  Ręczna poprawka linii zastępuje ją w tej pamięci. DeepL nadal dostaje tylko angielskie linie.
+- **Postać gracza** (nieznana / mężczyzna / kobieta) dla modeli językowych: zwroty do gracza
+  w odpowiedniej formie („zrobiłaś”/„zrobiłeś”). Po zmianie ustawienia linie z „you” z cache
+  są raz tłumaczone ponownie (ręczne poprawki zostają).
+- **Kontrola jakości wyniku:** pusty wynik nie jest już zapisywany w cache (zostaje oryginał
+  i komunikat); zmienione liczby, wynik identyczny z angielskim i „rozgadany” wynik są
+  oznaczane w cache. Modele językowe dostają jedno ponowienie dla oznaczonego tekstu (dodatkowe,
+  płatne zapytanie w limicie znaków sesji). Tekst z trwałym problemem kosztuje najwyżej
+  3 zapytania u modeli językowych i 2 u DeepL/Azure/Google. Ostrzeżenie jakości nie jest
+  jeszcze pokazywane w oknie ani nakładce.
 - **Glosariusze DeepL ze słownika:** gdy tłumaczony tekst zawiera termin ze słownika, DeepL
-  dostaje glosariusz zbudowany z całego aktywnego słownika. Nazwy przedmiotów, postaci i miejsc
-  są tłumaczone spójnie także w środku zdań, z polską odmianą. Glosariusz powstaje raz dla danej
-  zawartości słownika (po restarcie jest ponownie używany), a po zmianie słownika stare wersje
-  tej aplikacji są usuwane z konta DeepL w tle. Błąd glosariusza nie blokuje tłumaczenia:
-  aplikacja tłumaczy bez niego i próbuje ponownie po 10 minutach. W trybie prywatnym glosariusz
-  nie jest tworzony.
+  dostaje glosariusz zbudowany z aktywnego słownika. Nazwy przedmiotów, postaci i miejsc są
+  tłumaczone spójnie także w środku zdań, z polską odmianą. Glosariusz powstaje raz dla danej
+  zawartości słownika (po restarcie jest ponownie używany), a stare wersje tej aplikacji są
+  usuwane z konta DeepL w tle. Przygotowanie działa w tle: nowy glosariusz opóźnia najwyżej
+  jedną partię o najwyżej 300 ms (kolejne idą bez niego, dopóki nie będzie gotowy), zapytania
+  o glosariusz mają limit 5 s i nie są ponawiane. Błąd nie blokuje tłumaczenia; kolejna próba
+  po 10 minutach. W trybie prywatnym glosariusz nie jest tworzony.
+- **Słownik w zdaniach:** rozpoznaje angielską liczbę mnogą i dopełniacz („Waystones”,
+  „Exalted Orbs”, „Waystone's”), terminy rozbite na dwa wiersze („Energy\nShield”) i etykiety
+  z dwukropkiem („Rarity:” → „Rzadkość:”).
+- **Zakres terminu „Etykieta”** (`"scope": "label"`, kolumna w edytorze słownika): termin działa
+  tylko jako cały napis przycisku/nagłówka, nie jest wciskany w zdania ani do glosariusza DeepL.
+  W słowniku ogólnym tak oznaczono Save, Chest, Key, Trade, Attack i Upgrade, w PoE2 — Staff.
+- Prompt modeli językowych: termin słownika jest odmieniany zgodnie z polską gramatyką, a słowo
+  w zwykłym znaczeniu tłumaczone normalnie.
+- DeepL i tłumaczenie lokalne wybierają ten sam wariant terminu przy konflikcie (wyższy
+  priorytet → termin z rozróżnianiem wielkości liter → termin wczytany później).
 
-### Szybkość
+### Poprawki błędów
 
-- **Panel „Szybkość”** w oknie aplikacji: mediana i p90 z tej sesji dla nowego tekstu
-  (klatka → gotowy napis), znanego tekstu (cache/słownik), odpowiedzi dostawcy, OCR
-  i przechwycenia klatki. Przycisk **Kopiuj raport** kopiuje szczegóły (mediana, p90, maksimum,
-  liczba pomiarów) — bez tekstu z gry. Czasy są tylko w pamięci.
+- **Pętla płatnych tłumaczeń:** stare wieloliniowe wpisy cache przypisane do profilu gry
+  (ze starej bazy albo z importu JSON) oraz wpisy atrapy Mock z profilem były wysyłane do
+  dostawcy przy każdym wystąpieniu. Teraz są tłumaczone ponownie jeden raz.
+- **Prywatność:** terminy dodane w trybie prywatnym nie trafiają do glosariusza na koncie
+  DeepL — także po wyłączeniu trybu prywatnego w tej samej sesji.
+- Błąd zapisu liczników użycia (pełny dysk, zablokowana baza) nie przerywa już odczytu z cache
+  i trybu live. Niedziałająca baza jest traktowana jak brak wpisu; wyniki są wtedy pamiętane
+  w pamięci programu (do 2000 tekstów), żeby nie płacić drugi raz, a w grze pojawia się
+  komunikat „⚠ Cache niedostępny — tłumaczenia nie są zapisywane”.
+- Klatka, w której część tekstów jest znana, nie odczytuje ich z bazy drugi raz — licznik
+  użyć wpisów (`use_count`, także w eksporcie) nie jest już zawyżany.
+- Eksport/import cache zachowuje znacznik formatu i jakości (`context`); stare pliki działają.
+- Przy braku sieci stary wynik nieaktualnego wpisu trafia do wszystkich równoległych tłumaczeń
+  tego samego tekstu, nie tylko do jednego.
+
+### Dla deweloperów
+
+- **ProviderEval** (`tools/GameTranslatorOverlay.ProviderEval`): porównanie dostawców i wariantów
+  promptu na korpusie EN→PL — chrF (zgodny z sacreBLEU), mediana/p90 czasu (pierwsze zapytanie
+  osobno), kontrole liczb, formy „ty”, rodzaju mówiącego i terminów. Przykładowy korpus
+  `eval/en-pl.sample.jsonl` (42 linie napisane na potrzeby projektu). Smoke test z Mockiem w CI.
+- **Benchmarki BenchmarkDotNet** (`benchmarks/`, [docs/BENCHMARKS.md](docs/BENCHMARKS.md)): cache
+  w klatce live, detekcja zmian, odcisk regionu, obróbka tekstu, słownik; ręczny workflow
+  „Benchmarks” z wynikami jako artefakt.
+- CI: raport pokrycia kodu z progiem (Core ≥ 91%, Infrastructure ≥ 80%), testy tylko dla
+  Windows oznaczane `[WindowsFact]` (Skipped na Linuksie), anulowanie starszych przebiegów
+  tego samego PR-a, token tylko do odczytu poza jobem publikacji, Dependabot dla NuGet
+  i GitHub Actions, OcrLab, ProviderEval i benchmarki w rozwiązaniu.
+- Testy: 1114 (880 Core + 234 Infrastructure; na Linuksie 3 testy DPAPI są pomijane).
 
 ## [0.3.1] — 2026-09-29
 

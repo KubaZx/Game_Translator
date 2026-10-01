@@ -24,6 +24,8 @@ znajdują się na stronach projektów.
 | xunit / xunit.runner.visualstudio | Apache-2.0 |
 | Microsoft.NET.Test.Sdk | MIT |
 | coverlet.collector | MIT |
+| BenchmarkDotNet (tylko projekt `benchmarks/`) | MIT |
+| ReportGenerator (`dotnet-reportgenerator-globaltool`, lokalne narzędzie do raportu pokrycia) | Apache-2.0 |
 
 Usługi zewnętrzne: tłumaczenia wykonuje wybrany przez użytkownika dostawca — **DeepL API**
 (https://www.deepl.com/pro-license), **Azure AI Translator**, **Google Cloud Translation**,

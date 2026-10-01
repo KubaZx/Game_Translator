@@ -1,5 +1,7 @@
 # GameTranslatorOverlay
 
+[![CI](https://github.com/KubaZx/Game_Translator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/KubaZx/Game_Translator/actions/workflows/ci.yml)
+
 Tłumacz EN→PL dla gier na Windows. Czyta tekst z ekranu (Windows OCR), tłumaczy go
 i pokazuje polską wersję w przezroczystej nakładce nad grą. Klikanie przez nakładkę działa normalnie.
 
@@ -7,20 +9,23 @@ i pokazuje polską wersję w przezroczystej nakładce nad grą. Klikanie przez n
 [Instrukcja](docs/USER_GUIDE.md) · [Zmiany](CHANGELOG.md) ·
 [CI](https://github.com/KubaZx/Game_Translator/actions/workflows/ci.yml)
 
-**Wersja: 0.3.1** · Windows 10 2004+ / 11 · portable, bez instalacji
+**Wersja: 0.4.0** · Windows 10 2004+ / 11 · portable, bez instalacji
 
 ## Funkcje
 
 | Funkcja | Jak |
 |---|---|
 | Tłumaczenie fragmentu | `Ctrl+Shift+T` → zaznacz obszar |
-| Tryb live | wybierz okno gry → **▶ Start live** |
+| Tryb live | `Ctrl+Shift+L` w grze (start/stop) albo wybierz okno gry → **▶ Start live** |
 | Ukrycie nakładki | `Ctrl+Shift+H` |
+| Komunikaty w grze | brak klucza, limit, brak sieci, Cache-only, start/stop live — krótki pasek u góry okna gry |
 | Wygląd | bloki przy oryginale (opcjonalnie zakrywające tekst) albo napisy na dole |
 | Dostawcy | DeepL, Azure AI Translator, Google, Claude, serwer zgodny z OpenAI (także lokalna Ollama / LM Studio), Mock |
-| Słownik | własne terminy i poprawki, import/eksport; w DeepL jako glosariusz (terminy odmieniane także w środku zdań) |
+| Słownik | własne terminy i poprawki, import/eksport; w DeepL jako glosariusz (terminy odmieniane także w środku zdań); liczba mnoga („Waystones”); zakres „Etykieta” dla przycisków i nagłówków |
 | Kontekst | do 6 poprzednich linii dialogu + nazwa gry + terminy słownika |
-| Cache | SQLite z pamięcią w RAM; ten sam tekst nie idzie drugi raz do API |
+| Pamięć dialogu (LLM) | Claude i serwer zgodny z OpenAI widzą swoje poprzednie tłumaczenia; **Postać gracza** (kobieta/mężczyzna) dla form „zrobiłaś”/„zrobiłeś” |
+| Kontrola jakości | pusty wynik nie trafia do cache; zgubione liczby, brak tłumaczenia i „rozgadany” wynik są oznaczane, modele językowe dostają jedno ponowienie |
+| Cache | SQLite z pamięcią w RAM; ten sam tekst nie idzie drugi raz do API; błąd bazy nie zatrzymuje tłumaczenia |
 | Offline | Cache-only (bez API), lokalny model LLM, Mock (test bez klucza) |
 
 Kolejność wyboru tłumaczenia: **ręczna poprawka → słownik → cache → dostawca**.
@@ -45,8 +50,14 @@ prawdziwego dostawcy). Mierzą moment gotowości napisu w aplikacji, nie rysowan
 Czas odpowiedzi DeepL i innych dostawców nie był jeszcze mierzony. Zależy od sieci i długości tekstu.
 Szczegóły: [ROADMAP.md](docs/ROADMAP.md).
 
-Własne czasy z gry pokazuje panel **Szybkość** w oknie aplikacji: mediana i p90 dla nowego
-i znanego tekstu, odpowiedzi dostawcy, OCR i przechwycenia. **Kopiuj raport** kopiuje je do schowka.
+Własne czasy z gry pokazuje panel **Szybkość** w oknie aplikacji: mediana i p90 dla
+**Zmiana → napis** (od zauważonej zmiany obrazu do gotowych napisów — czas, który widzi gracz),
+nowego i znanego tekstu, odpowiedzi dostawcy, OCR i przechwycenia. **Kopiuj raport** kopiuje je
+do schowka.
+
+W 0.4.0 okno stabilności liczy się od zauważonej zmiany (do ~250 ms mniej czekania), a znany
+ekran nie czeka w kolejce za wolnym tłumaczeniem starszej klatki. Zysk wynika z logiki
+harmonogramu i testów; w grze nie był jeszcze mierzony, a tabela wyżej pochodzi sprzed tych zmian.
 
 ## Szybki start
 
@@ -70,7 +81,8 @@ w `%LOCALAPPDATA%\GameTranslatorOverlay`, więc zostają.
 
 ## Prywatność
 
-- OCR działa lokalnie. Do dostawcy trafia **tylko tekst**, nigdy obraz.
+- OCR działa lokalnie. Do dostawcy trafia **tylko tekst**, nigdy obraz. Komunikaty w nakładce
+  nie zawierają tekstu z ekranu.
 - Klucze API są szyfrowane DPAPI i wysyłane tylko do wybranego dostawcy.
 - Z lokalnym LLM tekst nie wychodzi z komputera.
 - Aplikacja nie modyfikuje gry, nie czyta jej pamięci i nie wysyła do niej klawiszy.
@@ -85,6 +97,10 @@ Więcej: [PRIVACY.md](docs/PRIVACY.md), [SECURITY.md](docs/SECURITY.md).
 - Przechwytywanie przez PrintWindow/GDI; czasem potrzebny jest zrzut ekranu i wtedy
   okna nad grą mogą trafić do odczytu (aplikacja ostrzega).
 - Zaznaczanie regionu działa na monitorze z kursorem.
+- `Ctrl+Shift+L` uruchamia live na **dowolnym** aktywnym oknie (także przeglądarce) — to jawna
+  akcja użytkownika. Gry UWP / Microsoft Store / Game Pass nie są wybierane jako aktywne okno:
+  wybierz je raz na liście i kliknij **▶ Start live**.
+- Ostrzeżenie kontroli jakości nie jest jeszcze pokazywane w oknie ani nakładce.
 
 ## Budowanie
 
@@ -99,7 +115,12 @@ dotnet run --project src/GameTranslatorOverlay.App
 - Linux: dodaj `-p:EnableWindowsTargeting=true` (testy DPAPI i OCR wymagają Windows).
 - Paczka portable: `./tools/package.ps1` → `dist/`.
 - Wydanie: tag `v*` → CI buduje zip i dodaje go do Releases.
-- Testy: 562 (402 Core + 160 Infrastructure), bez kluczy API i bez gry. Szczegóły: [TESTING.md](docs/TESTING.md).
+- Testy: 1114 (880 Core + 234 Infrastructure; na Linuksie 3 testy DPAPI są pomijane), bez kluczy
+  API i bez gry. CI sprawdza pokrycie kodu (Core ≥ 91%, Infrastructure ≥ 80%).
+  Szczegóły: [TESTING.md](docs/TESTING.md).
+- Porównanie dostawców i promptów: `tools/GameTranslatorOverlay.ProviderEval` (chrF, czasy,
+  kontrole EN→PL) — [README narzędzia](tools/GameTranslatorOverlay.ProviderEval/README.md).
+- Benchmarki BenchmarkDotNet: `benchmarks/` — [BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## Struktura
 
@@ -109,9 +130,12 @@ dotnet run --project src/GameTranslatorOverlay.App
 | `src/GameTranslatorOverlay.Infrastructure` | dostawcy API, SQLite, DPAPI |
 | `src/GameTranslatorOverlay.App` | WPF, przechwytywanie, OCR, nakładka |
 | `tests/` | testy xUnit |
-| `tools/` | LiveDiag, SceneReplay, OcrLab, SmokeTest |
+| `tools/` | LiveDiag, SceneReplay, OcrLab, SmokeTest, ProviderEval |
+| `benchmarks/` | benchmarki BenchmarkDotNet (poza `dotnet test`) |
+| `eval/` | korpus EN→PL do ProviderEval |
 | `profiles/`, `glossaries/` | profile gier i słowniki |
 
 Dokumenty: [Instrukcja](docs/USER_GUIDE.md) · [Dostawcy API](docs/API_PROVIDERS.md) ·
 [Architektura](docs/ARCHITECTURE.md) · [Decyzje](docs/TECHNOLOGY_DECISIONS.md) ·
-[Plan](docs/ROADMAP.md) · [Testy ręczne](docs/MANUAL_TESTING.md)
+[Plan](docs/ROADMAP.md) · [Testy ręczne](docs/MANUAL_TESTING.md) ·
+[Testy](docs/TESTING.md) · [Benchmarki](docs/BENCHMARKS.md)
