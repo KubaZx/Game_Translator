@@ -43,10 +43,10 @@ public class LlmTranslationPromptTests
     [Fact]
     public void Poprzednie_linie_trafiaja_do_wiadomosci_jako_osobne_pole()
     {
-        var message = LlmTranslationPrompt.BuildUserMessage(["I'm ready."], ["Are you coming?"]);
+        var message = LlmTranslationPrompt.BuildUserMessage(["I'm ready."], [new RecentExchange("Are you coming?", "Idziesz?")]);
 
         using var document = JsonDocument.Parse(message[(message.IndexOf('\n') + 1)..]);
-        Assert.Equal("Are you coming?", document.RootElement.GetProperty("previous_lines")[0].GetString());
+        Assert.Equal("Are you coming?", document.RootElement.GetProperty("previous")[0].GetProperty("source").GetString());
         Assert.Equal("I'm ready.", document.RootElement.GetProperty("texts")[0].GetString());
         Assert.StartsWith("Translate these 1 strings:", message);
     }

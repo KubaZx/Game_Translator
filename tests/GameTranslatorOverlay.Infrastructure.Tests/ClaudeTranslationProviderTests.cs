@@ -90,6 +90,33 @@ public class ClaudeTranslationProviderTests
     }
 
     [Fact]
+    public async Task Pamiec_dialogu_i_plec_gracza_trafiaja_do_zapytania()
+    {
+        var handler = new FakeHttpHandler(static (request, _) => Task.FromResult(Echo(request)));
+        var provider = CreateProvider(handler);
+        var context = new TranslationContext(null, [])
+        {
+            RecentTexts = ["Are you ready?"],
+            RecentExchanges = [new RecentExchange("Are you ready?", "Jesteś gotowa?")],
+            PlayerGender = PlayerGender.Female,
+        };
+
+        var result = await provider.TranslateWithContextAsync(["Let's go."], "en", "pl", context);
+
+        Assert.Equal(["PL:Let's go."], result);
+        using var body = JsonDocument.Parse(handler.Requests[0].Body);
+        var system = body.RootElement.GetProperty("system");
+        var systemText = system.ValueKind == JsonValueKind.String ? system.GetString() : system[0].GetProperty("text").GetString();
+        Assert.Contains("player character is female", systemText);
+        var user = body.RootElement.GetProperty("messages")[0].GetProperty("content");
+        var userText = user.ValueKind == JsonValueKind.String ? user.GetString()! : user[0].GetProperty("text").GetString()!;
+        using var payload = JsonDocument.Parse(userText[(userText.IndexOf('\n') + 1)..]);
+        var previous = Assert.Single(payload.RootElement.GetProperty("previous").EnumerateArray());
+        Assert.Equal("Are you ready?", previous.GetProperty("source").GetString());
+        Assert.Equal("Jesteś gotowa?", previous.GetProperty("translation").GetString());
+    }
+
+    [Fact]
     public async Task Kolejne_zapytania_dzialaja_na_tym_samym_kliencie()
     {
         var handler = new FakeHttpHandler(static (request, _) => Task.FromResult(Echo(request)));

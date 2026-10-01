@@ -1,11 +1,17 @@
 using System.Diagnostics;
 using System.Text;
+using GameTranslatorOverlay.Core.Windows;
 
 namespace GameTranslatorOverlay.App.Interop;
 
 public sealed record TargetWindow(IntPtr Handle, string Title, string ProcessName, int ProcessId)
 {
     public string DisplayName => $"{Title}  ({ProcessName})";
+
+    /// <summary>Powierzchnia okna w px² w chwili wyliczenia — gra ma zwykle największe okno procesu.</summary>
+    public long Area { get; init; }
+
+    public WindowCandidate ToCandidate() => new(Handle, Title, ProcessName, Area);
 }
 
 /// <summary>
@@ -54,12 +60,29 @@ public static class WindowEnumerator
                 return true;
             }
 
-            windows.Add(new TargetWindow(hwnd, title, processName, (int)processId));
+            windows.Add(new TargetWindow(hwnd, title, processName, (int)processId) { Area = GetArea(hwnd) });
             return true;
         }, IntPtr.Zero);
 
         return windows
             .OrderBy(static w => w.Title, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>Okno pierwszoplanowe (najwyższego poziomu) — odczyt bez żadnej ingerencji w grę.</summary>
+    public static IntPtr GetForegroundRootWindow()
+    {
+        var foreground = NativeMethods.GetForegroundWindow();
+        if (foreground == IntPtr.Zero) return IntPtr.Zero;
+        var root = NativeMethods.GetAncestor(foreground, NativeMethods.GA_ROOT);
+        return root != IntPtr.Zero ? root : foreground;
+    }
+
+    private static long GetArea(IntPtr hwnd)
+    {
+        if (!NativeMethods.GetWindowRect(hwnd, out var rect)) return 0;
+        var width = Math.Max(0L, (long)rect.Right - rect.Left);
+        var height = Math.Max(0L, (long)rect.Bottom - rect.Top);
+        return width * height;
     }
 }

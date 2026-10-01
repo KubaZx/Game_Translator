@@ -91,6 +91,43 @@ public static class TextReflow
     }
 
     /// <summary>
+    /// Odwrotność <see cref="Rewrap"/> dla tekstu pisanego przez gracza (ręczna korekta): wiersze
+    /// ułożone jak na ekranie skleja z powrotem w akapity planu, żeby w pamięci dialogu leżała
+    /// ta sama postać co surowy wynik dostawcy. Przy jednym akapicie źródła całość jest jednym
+    /// akapitem. Gdy gracz ułożył korektę w inną liczbę wierszy niż plan, wiersze dzielimy między
+    /// akapity proporcjonalnie do planu (każdy akapit dostaje co najmniej jeden wiersz) — w pamięci
+    /// nigdy nie ląduje więcej akapitów niż w źródle, bo model widziałby źle dopasowany przykład.
+    /// Mniej wierszy niż akapitów nie da się dopasować — wtedy całość to jeden akapit.
+    /// </summary>
+    public static string ToParagraphs(string wrapped, ReflowPlan plan)
+    {
+        var lines = wrapped.Replace("\r\n", "\n").Split('\n')
+            .Select(static line => line.Trim())
+            .Where(static line => line.Length > 0)
+            .ToList();
+        var counts = plan.ParagraphLineCounts;
+        if (counts.Count <= 1) return string.Join(' ', lines);
+        if (lines.Count < counts.Count) return string.Join(' ', lines);
+
+        // Przy zgodnej liczbie wierszy granice wypadają dokładnie na granicach planu.
+        var planned = counts.Sum();
+        var paragraphs = new List<string>(counts.Count);
+        var start = 0;
+        var cumulative = 0;
+        for (var i = 0; i < counts.Count; i++)
+        {
+            cumulative += counts[i];
+            var end = i == counts.Count - 1
+                ? lines.Count
+                : (int)Math.Round((double)cumulative * lines.Count / planned, MidpointRounding.AwayFromZero);
+            end = Math.Clamp(end, start + 1, lines.Count - (counts.Count - 1 - i));
+            paragraphs.Add(string.Join(' ', lines.Skip(start).Take(end - start)));
+            start = end;
+        }
+        return string.Join('\n', paragraphs);
+    }
+
+    /// <summary>
     /// Dzieli tekst na najwyżej <paramref name="lineCount"/> wierszy o możliwie równej długości
     /// (minimalizacja sumy kwadratów odchyleń; wyrazy nigdy nie są dzielone).
     /// </summary>

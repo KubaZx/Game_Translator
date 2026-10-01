@@ -10,6 +10,7 @@ using GameTranslatorOverlay.App.Ocr;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.App.Ui;
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Infrastructure.Caching;
 using GameTranslatorOverlay.Infrastructure.Content;
 using GameTranslatorOverlay.Infrastructure.Providers;
@@ -17,6 +18,7 @@ using GameTranslatorOverlay.Infrastructure.Secrets;
 using GameTranslatorOverlay.Infrastructure.Settings;
 using GameTranslatorOverlay.Infrastructure.Storage;
 using GameTranslatorOverlay.Core.Usage;
+using GameTranslatorOverlay.Core.Windows;
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 
@@ -55,6 +57,18 @@ public partial class MainWindow : Window
     private bool _loadingUi;
     private bool _selectingRegion;
     private int _statusTicks;
+
+    private MenuItem? _trayLiveItem;
+    private bool _liveHotkeyRegistered;
+    private bool _liveHotkeyBusy;
+
+    // Programowe zaznaczenie zapamiętanej gry po odświeżeniu listy NIE jest wyborem użytkownika:
+    // nie może przełączać profilu (zapis settings.json + przebudowa pipeline'u bez kliknięcia).
+    private bool _preselectingRememberedGame;
+
+    // Gra zapamiętana w trybie prywatnym — tylko w pamięci, nigdy w settings.json.
+    private string? _privateGameProcess;
+    private string? _privateGameTitle;
 
     public MainWindow(
         TranslationOrchestrator orchestrator,
@@ -151,6 +165,10 @@ public partial class MainWindow : Window
         CmbFont.SelectedItem = _settings.OverlayFontFamily;
         if (CmbFont.SelectedItem is null) CmbFont.SelectedIndex = 0;
 
+        // Kolejność pozycji = PlayerGender (Unknown, Male, Female) — indeks to wartość wyliczenia.
+        CmbPlayerGender.ItemsSource = new[] { "nieznana", "mężczyzna", "kobieta" };
+        CmbPlayerGender.SelectedIndex = (int)PlayerGenders.Parse(_settings.PlayerGender);
+
         TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         ChkCacheOnly.IsChecked = _settings.CacheOnlyMode;
         ChkPrivate.IsChecked = _settings.PrivateMode;
@@ -171,6 +189,12 @@ public partial class MainWindow : Window
         {
             SetStatus(overlayHotkeyError);
         }
+        _liveHotkeyRegistered = _hotkeys.TryRegister(
+            _settings.LiveToggleHotkey, () => _ = ToggleLiveFromHotkeyAsync(), out var liveHotkeyError);
+        if (!_liveHotkeyRegistered)
+        {
+            SetStatus(liveHotkeyError);
+        }
 
         foreach (var warning in _orchestrator.ContentWarnings)
         {
@@ -178,6 +202,7 @@ public partial class MainWindow : Window
         }
 
         InitializeTrayIcon();
+        UpdateLiveControls();
         _statusTimer.Start();
 
         // Obowiązkowe zastrzeżenie (SECURITY.md): raz przy pierwszym uruchomieniu,
@@ -221,6 +246,8 @@ public partial class MainWindow : Window
         {
             var menu = new ContextMenu();
             menu.Items.Add(CreateMenuItem("Pokaż okno", RestoreFromTray));
+            _trayLiveItem = CreateMenuItem(LiveMenuHeader(), () => _ = ToggleLiveFromHotkeyAsync());
+            menu.Items.Add(_trayLiveItem);
             menu.Items.Add(CreateMenuItem("Przetłumacz region  (Ctrl+Shift+T)", () => _ = TranslateRegionInteractiveAsync()));
             menu.Items.Add(CreateMenuItem("Ukryj / pokaż nakładkę  (Ctrl+Shift+H)", _overlay.ToggleVisibility));
             menu.Items.Add(new Separator());
@@ -300,7 +327,26 @@ public partial class MainWindow : Window
     {
         var windows = await Task.Run(WindowEnumerator.GetOpenWindows);
         WindowsList.ItemsSource = windows;
-        SetStatus($"Znaleziono {windows.Count} okien. Wybierz okno gry albo od razu użyj Ctrl+Shift+T.");
+        var liveHotkey = _liveHotkeyRegistered ? _settings.LiveToggleHotkey : null;
+        SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: false, liveHotkey));
+
+        // Zapamiętana gra jest tylko zaznaczana — start live zostaje decyzją użytkownika.
+        // Bez autodetekcji profilu: świadomy wybór „brak profilu” ma przetrwać restart
+        // i Odśwież; profil dobierze się dopiero przy kliknięciu okna albo tuż przed startem skrótem.
+        if (FindRememberedGame(windows) is { } remembered)
+        {
+            _preselectingRememberedGame = true;
+            try
+            {
+                WindowsList.SelectedItem = remembered;
+            }
+            finally
+            {
+                _preselectingRememberedGame = false;
+            }
+            WindowsList.ScrollIntoView(remembered);
+            SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: true, liveHotkey));
+        }
 
         // Diagnostyka dev: GTO_AUTOLIVE="fragment tytułu" od razu startuje tryb live na
         // wskazanym oknie — bez klikania, żeby dało się zautomatyzować zrzuty nakładki.
@@ -786,6 +832,12 @@ public partial class MainWindow : Window
         }
 
         _settings.OverlayFontFamily = CmbFont.SelectedItem as string ?? "Segoe UI";
+        _settings.PlayerGender = PlayerGenders.ToSetting(CmbPlayerGender.SelectedIndex switch
+        {
+            1 => PlayerGender.Male,
+            2 => PlayerGender.Female,
+            _ => PlayerGender.Unknown,
+        });
 
         UpdateProviderPanel();
         var snapshot = SettingsSnapshot();
@@ -870,18 +922,168 @@ public partial class MainWindow : Window
 
     private void OnWindowSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_loadingUi || WindowsList.SelectedItem is not TargetWindow window) return;
+        if (_loadingUi || _preselectingRememberedGame || WindowsList.SelectedItem is not TargetWindow window) return;
+        ApplyProfileAutoSelection(window);
+    }
 
-        // Autodetekcja profilu po nazwie procesu — tylko gdy użytkownik nie wybrał
-        // żadnego profilu ręcznie (nie nadpisujemy jego decyzji).
+    /// <summary>
+    /// Autodetekcja profilu po nazwie procesu — tylko gdy użytkownik nie wybrał żadnego
+    /// profilu ręcznie (nie nadpisujemy jego decyzji). Zmiana profilu przebudowuje pipeline,
+    /// więc przy działającej sesji live nic nie robimy: przebudowa anulowałaby jej tłumaczenia.
+    /// Skrót live wywołuje to PRZED startem sesji.
+    /// </summary>
+    private void ApplyProfileAutoSelection(TargetWindow window)
+    {
+        if (_liveSession is not null) return;
         if (CmbProfile.SelectedItem as string != NoProfileLabel) return;
 
         var match = _orchestrator.Profiles.FirstOrDefault(p =>
-            p.ProcessNames.Any(name => name.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase)));
+            p.ProcessNames.Any(name => LiveTargetResolver.SameProcess(name, window.ProcessName)));
         if (match is not null)
         {
             CmbProfile.SelectedItem = match.Name;
             SetStatus($"Wykryto grę „{match.Name}” — profil włączony automatycznie.");
+        }
+    }
+
+    private string? RememberedGameProcess => _privateGameProcess ?? _settings.LastGameProcess;
+
+    private string? RememberedGameTitle => _privateGameProcess is not null ? _privateGameTitle : _settings.LastGameTitle;
+
+    /// <summary>Okno zapamiętanej gry na liście (ten sam tytuł, inaczej największe okno procesu).</summary>
+    private TargetWindow? FindRememberedGame(IReadOnlyList<TargetWindow> windows)
+    {
+        if (string.IsNullOrWhiteSpace(RememberedGameProcess)) return null;
+        var resolution = LiveTargetResolver.Resolve(
+            windows.Select(static w => w.ToCandidate()).ToList(), foreground: 0,
+            RememberedGameProcess, RememberedGameTitle, profileProcessNames: null, OwnProcessName);
+        return resolution.Reason == LiveTargetReason.RememberedProcess
+            ? windows.FirstOrDefault(w => w.Handle == resolution.Window!.Handle)
+            : null;
+    }
+
+    private static string? OwnProcessName => Path.GetFileName(Environment.ProcessPath);
+
+    /// <summary>
+    /// Skrót live (i pozycja w zasobniku): działająca sesja → stop jak przyciskiem Stop;
+    /// inaczej start na aktywnej grze bez Alt+Tab do okna tłumacza.
+    /// </summary>
+    private async Task ToggleLiveFromHotkeyAsync()
+    {
+        if (_liveSession is not null)
+        {
+            // Zadanie ze skrótu/zasobnika jest odrzucane (`_ =`), więc wyjątek z zamykania sesji
+            // przepadłby bez śladu — łapiemy go i logujemy jak przy starcie.
+            try
+            {
+                OnStopLiveClick(this, new RoutedEventArgs());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Błąd zatrzymywania trybu live skrótem");
+                SetStatus("Nie udało się zatrzymać trybu live — szczegóły w logu diagnostycznym.");
+            }
+            return;
+        }
+        if (_liveHotkeyBusy) return;
+
+        // Okno pierwszoplanowe czytamy synchronicznie, ZANIM cokolwiek odda sterowanie —
+        // po await fokus mógłby już przejść gdzie indziej (np. na okno tłumacza).
+        var foreground = WindowEnumerator.GetForegroundRootWindow();
+        _liveHotkeyBusy = true;
+        try
+        {
+            var windows = await Task.Run(WindowEnumerator.GetOpenWindows);
+            // W międzyczasie użytkownik mógł kliknąć Start — nie uruchamiamy drugiej sesji.
+            if (_liveSession is not null) return;
+
+            var resolution = LiveTargetResolver.Resolve(
+                windows.Select(static w => w.ToCandidate()).ToList(),
+                foreground,
+                RememberedGameProcess,
+                RememberedGameTitle,
+                _orchestrator.Profiles.SelectMany(static p => p.ProcessNames),
+                OwnProcessName);
+
+            var target = resolution.Window is { } candidate
+                ? windows.FirstOrDefault(w => w.Handle == candidate.Handle)
+                : null;
+            if (target is null)
+            {
+                var message = resolution.Message ?? LiveTargetResolver.NoTargetMessage;
+                SetStatus(message);
+                TxtLiveStatus.Text = message;
+                ShowTrayNotification(message);
+                return;
+            }
+
+            // Listę podmieniamy dopiero, gdy jest cel — inaczej skrót wciśnięty z pulpitu
+            // skasowałby ręczne zaznaczenie gry na liście.
+            WindowsList.ItemsSource = windows;
+
+            // Zaznaczenie na liście uruchamia autodetekcję profilu; wywołanie wprost jest
+            // idempotentne i gwarantuje, że ewentualna przebudowa pipeline'u nastąpi PRZED startem.
+            WindowsList.SelectedItem = target;
+            WindowsList.ScrollIntoView(target);
+            ApplyProfileAutoSelection(target);
+            StartLive(target);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Błąd uruchamiania trybu live skrótem");
+            SetStatus("Nie udało się uruchomić trybu live — szczegóły w logu diagnostycznym.");
+        }
+        finally
+        {
+            _liveHotkeyBusy = false;
+        }
+    }
+
+    private void ShowTrayNotification(string message)
+    {
+        if (_trayIcon is null) return;
+        try
+        {
+            // Stały tekst komunikatu — bez tytułów okien ani treści z ekranu.
+            _trayIcon.ShowNotification("GameTranslatorOverlay", message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Nie udało się pokazać powiadomienia w zasobniku");
+        }
+    }
+
+    /// <summary>
+    /// Zapamiętuje grę dla skrótu i odświeżania listy. Nie przebudowuje pipeline'u (nazwa gry nie
+    /// wpływa na tłumaczenie). W trybie prywatnym nic nie trafia na dysk — tylko do pamięci.
+    /// </summary>
+    private void RememberGame(TargetWindow window)
+    {
+        if (_settings.PrivateMode)
+        {
+            _privateGameProcess = window.ProcessName;
+            _privateGameTitle = window.Title;
+            return;
+        }
+
+        _privateGameProcess = null;
+        _privateGameTitle = null;
+        if (_settings.LastGameProcess == window.ProcessName && _settings.LastGameTitle == window.Title) return;
+
+        // Migawkę „zastosowanych” ustawień przesuwamy tylko wtedy, gdy była aktualna —
+        // inaczej zgubilibyśmy oczekującą zmianę, która wymaga przebudowy pipeline'u.
+        var wasApplied = SettingsSnapshot() == _appliedSettingsJson;
+        _settings.LastGameProcess = window.ProcessName;
+        _settings.LastGameTitle = window.Title;
+        try
+        {
+            _settingsStore.Save(_settings);
+            if (wasApplied) _appliedSettingsJson = SettingsSnapshot();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Brak zapamiętanej gry nie może blokować trybu live.
+            _logger.LogWarning(ex, "Nie udało się zapisać ostatniej gry w ustawieniach");
         }
     }
 
@@ -893,6 +1095,12 @@ public partial class MainWindow : Window
             SetStatus("Najpierw wybierz okno gry z listy po lewej.");
             return;
         }
+        StartLive(window);
+    }
+
+    private void StartLive(TargetWindow window)
+    {
+        if (_liveSession is not null) return;
 
         var profile = _orchestrator.ActiveProfile;
         var upscale = OcrScaling.ResolvePreference(profile?.Ocr?.Upscale, _settings.OcrUpscale);
@@ -931,10 +1139,31 @@ public partial class MainWindow : Window
         _liveWindowHandle = window.Handle;
         session.Start();
 
-        BtnStartLive.IsEnabled = false;
-        BtnStopLive.IsEnabled = true;
+        UpdateLiveControls();
         SetLiveIndicator(LiveIndicatorState.Active);
         SetStatus($"Tryb live uruchomiony dla „{window.Title}” ({options.Fps:0.#} analiz/s).");
+        RememberGame(window);
+    }
+
+    private string LiveMenuHeader() => _liveSession is not null
+        ? $"⏹ Stop live{HotkeySuffix()}"
+        : $"▶ Start live na aktywnej grze{HotkeySuffix()}";
+
+    private string HotkeySuffix() => _liveHotkeyRegistered ? $"  ({_settings.LiveToggleHotkey})" : string.Empty;
+
+    /// <summary>Przyciski, pozycja w zasobniku i podpowiedź ikony zgodne ze stanem trybu live.</summary>
+    private void UpdateLiveControls()
+    {
+        var running = _liveSession is not null;
+        BtnStartLive.IsEnabled = !running;
+        BtnStopLive.IsEnabled = running;
+        BtnStartLive.Content = $"▶ Start live{HotkeySuffix()}";
+        if (_trayLiveItem is not null) _trayLiveItem.Header = LiveMenuHeader();
+        if (_trayIcon is not null)
+        {
+            // Bez tytułu okna gry — podpowiedź ikony widać też na zrzutach i nagraniach pulpitu.
+            _trayIcon.ToolTipText = running ? "GameTranslatorOverlay — live: włączony" : "GameTranslatorOverlay — live: wyłączony";
+        }
     }
 
     private enum LiveIndicatorState { Idle, Active, Paused }
@@ -1007,8 +1236,7 @@ public partial class MainWindow : Window
         _liveSession?.Dispose();
         _liveSession = null;
         _liveWindowHandle = IntPtr.Zero;
-        BtnStartLive.IsEnabled = true;
-        BtnStopLive.IsEnabled = false;
+        UpdateLiveControls();
         SetLiveIndicator(LiveIndicatorState.Idle);
     }
 
@@ -1118,6 +1346,9 @@ public partial class MainWindow : Window
     {
         _statusTimer.Stop();
         _trayIcon?.Dispose();
+        // Zatrzymanie sesji niżej odświeża stan live — nie może dotykać zwolnionej ikony.
+        _trayIcon = null;
+        _trayLiveItem = null;
         if (_trayIconHandle != IntPtr.Zero)
         {
             NativeMethods.DestroyIcon(_trayIconHandle);

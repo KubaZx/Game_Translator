@@ -29,6 +29,22 @@ public sealed class AppSettings
     public string ClaudeModel { get; set; } = Providers.ClaudeTranslationProvider.DefaultModel;
     public string TranslateHotkey { get; set; } = "Ctrl+Shift+T";
     public string ToggleOverlayHotkey { get; set; } = "Ctrl+Shift+H";
+
+    /// <summary>
+    /// Globalny skrót start/stop trybu live na aktywnej grze — bez Alt+Tab do okna tłumacza.
+    /// Brak pola w starym pliku = Ctrl+Shift+L.
+    /// </summary>
+    public string LiveToggleHotkey { get; set; } = "Ctrl+Shift+L";
+
+    /// <summary>
+    /// Proces gry (np. „witcher3.exe”) z ostatniego startu live — skrót wybiera go, gdy na
+    /// pierwszym planie jest okno tłumacza, a lista okien zaznacza go po odświeżeniu.
+    /// Nie jest zapisywany w trybie prywatnym.
+    /// </summary>
+    public string? LastGameProcess { get; set; }
+
+    /// <summary>Tytuł okna z ostatniego startu live — rozstrzyga, gdy gra ma kilka okien.</summary>
+    public string? LastGameTitle { get; set; }
     public bool CacheOnlyMode { get; set; }
     public bool PrivateMode { get; set; }
 
@@ -65,6 +81,12 @@ public sealed class AppSettings
     /// więc bez nich błędy są niewidoczne. Brak pola w starym pliku = włączone.
     /// </summary>
     public bool ShowOverlayNotices { get; set; } = true;
+
+    /// <summary>
+    /// Płeć postaci gracza: unknown | male | female. Tylko dostawcy LLM (Claude, zgodny z OpenAI)
+    /// odmieniają według niej zwroty do gracza; brak pola w starym pliku = unknown.
+    /// </summary>
+    public string PlayerGender { get; set; } = Core.Translation.PlayerGenders.UnknownSetting;
 }
 
 public sealed class JsonSettingsStore(AppPaths paths)
