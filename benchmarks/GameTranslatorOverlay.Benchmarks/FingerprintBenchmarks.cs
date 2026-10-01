@@ -5,7 +5,7 @@ using GameTranslatorOverlay.Core.Vision;
 namespace GameTranslatorOverlay.Benchmarks;
 
 /// <summary>
-/// Odcisk regionu tekstu (SHA-256 z RGB + test kontrastu) liczony przez
+/// Odcisk regionu tekstu (skrót RGB + test kontrastu) liczony przez
 /// <see cref="TextRegionFingerprint.Builder"/> wiersz po wierszu z pełnej klatki.
 /// Rozmiary: pojedyncze słowo/etykieta (64×16), wiersz napisów (512×64) i największy
 /// dopuszczalny region (512×512 = <see cref="TextRegionFingerprint.MaximumPixels"/>).
@@ -20,6 +20,7 @@ public class FingerprintBenchmarks
     public string Region { get; set; } = "64x16";
 
     private OcrBitmap _frame = null!;
+    private OcrBitmap _emptyFrame = null!;
     private RectPx _box;
 
     [GlobalSetup]
@@ -48,8 +49,30 @@ public class FingerprintBenchmarks
 
         if (TextRegionFingerprint.FromBitmap(_frame, _box) is null)
             throw new InvalidOperationException("Syntetyczny region nie dał odcisku — pomiar byłby fałszywy.");
+
+        // Klatka po zniknięciu tekstu: jednolite tło z drobnym szumem (do 8 poziomów, poniżej
+        // progu 16) — test kontrastu musi obejrzeć każdy piksel, zanim uzna region za pusty.
+        var empty = new byte[FrameWidth * FrameHeight * 4];
+        for (var i = 0; i < empty.Length; i += 4)
+        {
+            var value = (byte)(30 + (i / 4 * 7) % 9);
+            empty[i] = value;
+            empty[i + 1] = value;
+            empty[i + 2] = value;
+            empty[i + 3] = 255;
+        }
+        _emptyFrame = new OcrBitmap(empty, FrameWidth, FrameHeight, FrameWidth * 4);
+        if (!TextPresenceProbe.IsClearlyEmpty(_emptyFrame, _box, 0xEBEBEB, 0x1E1E1E))
+            throw new InvalidOperationException("Jednolity region nie został uznany za pusty — pomiar byłby fałszywy.");
     }
 
     [Benchmark]
     public TextRegionFingerprint? OdciskRegionu() => TextRegionFingerprint.FromBitmap(_frame, _box);
+
+    /// <summary>
+    /// <see cref="TextPresenceProbe.IsClearlyEmpty"/> na jednolitym regionie (tekst zniknął):
+    /// najgorszy przypadek testu kontrastu — bez wczesnego wyjścia, każdy piksel RGB.
+    /// </summary>
+    [Benchmark]
+    public bool PustyRegion() => TextPresenceProbe.IsClearlyEmpty(_emptyFrame, _box, 0xEBEBEB, 0x1E1E1E);
 }

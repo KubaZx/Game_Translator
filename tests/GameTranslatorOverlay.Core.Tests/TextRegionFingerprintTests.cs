@@ -152,4 +152,29 @@ public class TextRegionFingerprintTests
         disposed.AppendBgra32(Image().PixelsBgra32);
         Assert.Null(disposed.Finish());
     }
+
+    [Fact]
+    public void Kazda_z_wielu_losowych_zmian_jednego_kanalu_jednego_piksela_uniewaznia_odcisk()
+    {
+        // Odcisk musi wyłapać każdą pojedynczą zmianę RGB, także w środku dużego regionu
+        // i o jeden poziom — na tym opiera się trzymanie statycznego menu przy ruchu kamery.
+        var random = new Random(20261001);
+        const int Width = 512, Height = 64;
+        var pixels = new byte[Width * Height * 4];
+        random.NextBytes(pixels);
+        var frame = new OcrBitmap(pixels, Width, Height, Width * 4);
+        var box = new RectPx(0, 0, Width, Height);
+        var reference = Assert.IsType<TextRegionFingerprint>(TextRegionFingerprint.FromBitmap(frame, box));
+        for (var change = 0; change < 2000; change++)
+        {
+            var offset = random.Next(Width * Height) * 4 + random.Next(3);
+            var original = pixels[offset];
+            pixels[offset] = (byte)(original + (random.Next(2) == 0 ? 1 : random.Next(1, 256)));
+            Assert.False(reference.Matches(TextRegionFingerprint.FromBitmap(frame, box)), $"bajt {offset}");
+            pixels[offset] = original;
+        }
+        // Po cofnięciu zmian obraz znowu pasuje, a sama zmiana alfy nigdy nie unieważnia odcisku.
+        for (var i = 3; i < pixels.Length; i += 4) pixels[i] = (byte)random.Next(256);
+        Assert.True(reference.Matches(TextRegionFingerprint.FromBitmap(frame, box)));
+    }
 }

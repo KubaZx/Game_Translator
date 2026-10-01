@@ -29,6 +29,13 @@ public sealed record NewCacheEntry(
     bool IsManual = false,
     bool IsApproved = false);
 
+/// <summary>
+/// Wynik jednego odczytu z <see cref="ITranslationCache.LookupManyAsync"/>: wpis (null = brak)
+/// albo błąd tego jednego odczytu (<paramref name="Error"/>), dokładnie ten, który rzuciłby
+/// <see cref="ITranslationCache.LookupAsync"/> dla tego tekstu.
+/// </summary>
+public readonly record struct CacheLookupResult(CachedTranslation? Translation, Exception? Error = null);
+
 public sealed record CacheStats(long TotalEntries, long ManualEntries, long DatabaseSizeBytes);
 
 public interface ITranslationCache
@@ -40,6 +47,35 @@ public interface ITranslationCache
     Task<CachedTranslation?> LookupAsync(
         string normalizedText, string sourceLanguage, string targetLanguage,
         string gameProfile, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Odczyt wielu tekstów jednej klatki naraz — wynik i skutki uboczne (liczniki użycia,
+    /// pamięć trafień) takie jak przy <see cref="LookupAsync"/> wołanym po kolei dla każdego
+    /// tekstu, w tej samej kolejności. Błąd jednego odczytu nie przerywa pozostałych — trafia
+    /// do <see cref="CacheLookupResult.Error"/>; anulowanie przerywa całość wyjątkiem.
+    /// Implementacja domyślna woła <see cref="LookupAsync"/> po kolei; cache trwały może zrobić
+    /// to taniej (jedno połączenie i jedno przygotowane zapytanie na całą partię).
+    /// </summary>
+    async Task<IReadOnlyList<CacheLookupResult>> LookupManyAsync(
+        IReadOnlyList<string> normalizedTexts, string sourceLanguage, string targetLanguage,
+        string gameProfile, CancellationToken cancellationToken = default)
+    {
+        var results = new CacheLookupResult[normalizedTexts.Count];
+        for (var i = 0; i < results.Length; i++)
+        {
+            try
+            {
+                results[i] = new CacheLookupResult(await LookupAsync(
+                        normalizedTexts[i], sourceLanguage, targetLanguage, gameProfile, cancellationToken)
+                    .ConfigureAwait(false));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                results[i] = new CacheLookupResult(null, ex);
+            }
+        }
+        return results;
+    }
 
     Task StoreAsync(NewCacheEntry entry, CancellationToken cancellationToken = default);
 

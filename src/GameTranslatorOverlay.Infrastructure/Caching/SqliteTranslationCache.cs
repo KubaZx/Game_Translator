@@ -39,7 +39,12 @@ public sealed class SqliteTranslationCache : ITranslationCache
 
     private readonly record struct PendingUsage(long Uses, DateTimeOffset LastUsed);
 
-    private readonly ConcurrentDictionary<string, MemoEntry> _memory = new(StringComparer.Ordinal);
+    // Klucz pamięci trafień to sam znormalizowany tekst, nie jego SHA-256: ten sam tekst ⇔ ten sam
+    // skrót, a trafienie w pamięci nie musi wtedy liczyć skrótu ani składać napisu klucza.
+    // Skrót (format kolumny text_hash) liczymy tylko przy odczycie z bazy.
+    private readonly record struct MemoKey(string NormalizedText, string SourceLanguage, string TargetLanguage, string GameProfile);
+
+    private readonly ConcurrentDictionary<MemoKey, MemoEntry> _memory = new();
     private readonly ConcurrentDictionary<long, PendingUsage> _pendingUsage = new();
     private readonly Lock _flushGate = new();
     // Wersja pamięci: odczyt z bazy trwający w czasie zapisu nie może wstawić starej wartości.
@@ -143,16 +148,23 @@ public sealed class SqliteTranslationCache : ITranslationCache
         }
     }
 
-    private static string MemoryPrefix(string hash, string sourceLanguage, string targetLanguage) =>
-        $"{hash}\u001f{sourceLanguage}\u001f{targetLanguage}\u001f";
+    private const string LookupSql = """
+        SELECT id, source_text, normalized_text, translated_text, provider, game_profile,
+               is_manual, is_approved, created_at, last_used_at, use_count, context
+        FROM translations
+        WHERE text_hash = $hash AND source_lang = $src AND target_lang = $tgt
+          AND game_profile IN ($profile, '')
+        ORDER BY is_manual DESC, is_approved DESC,
+                 CASE WHEN game_profile = $profile THEN 0 ELSE 1 END
+        LIMIT 1;
+        """;
 
     public Task<CachedTranslation?> LookupAsync(
         string normalizedText, string sourceLanguage, string targetLanguage,
         string gameProfile, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var hash = TextHasher.Sha256Hex(normalizedText);
-        var memoryKey = MemoryPrefix(hash, sourceLanguage, targetLanguage) + gameProfile;
+        var memoryKey = new MemoKey(normalizedText, sourceLanguage, targetLanguage, gameProfile);
 
         // Trafienie w pamięci: bez wątku tła, połączenia i zapisu na dysk.
         if (_memory.TryGetValue(memoryKey, out var remembered))
@@ -165,29 +177,122 @@ public sealed class SqliteTranslationCache : ITranslationCache
         return Task.Run<CachedTranslation?>(() =>
         {
             Initialize();
-            var version = Interlocked.Read(ref _memoryVersion);
-
             using var connection = OpenConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT id, source_text, normalized_text, translated_text, provider, game_profile,
-                       is_manual, is_approved, created_at, last_used_at, use_count, context
-                FROM translations
-                WHERE text_hash = $hash AND source_lang = $src AND target_lang = $tgt
-                  AND game_profile IN ($profile, '')
-                ORDER BY is_manual DESC, is_approved DESC,
-                         CASE WHEN game_profile = $profile THEN 0 ELSE 1 END
-                LIMIT 1;
-                """;
-            command.Parameters.AddWithValue("$hash", hash);
-            command.Parameters.AddWithValue("$src", sourceLanguage);
-            command.Parameters.AddWithValue("$tgt", targetLanguage);
-            command.Parameters.AddWithValue("$profile", gameProfile);
+            using var command = CreateLookupCommand(connection);
+            var hit = LookupInDatabase(command, memoryKey);
+            // Odczyt nigdy nie zapisuje synchronicznie: zapis liczników może czekać do 30 s na
+            // blokadę albo paść (pełny dysk, plik tylko do odczytu) — a to tylko statystyka.
+            FlushUsageInBackgroundIfDue();
+            return hit;
+        }, cancellationToken);
+    }
 
-            using var reader = command.ExecuteReader();
+    /// <summary>
+    /// Cała klatka naraz: trafienia w pamięci bez wątku tła, a teksty spoza pamięci jednym
+    /// zadaniem w tle, na jednym połączeniu i jednym przygotowanym zapytaniu (zamiast zadania,
+    /// połączenia i kompilacji zapytania na każdy tekst). Kolejność, priorytety wpisów, liczniki
+    /// i wersjonowanie pamięci — jak przy <see cref="LookupAsync"/> wołanym po kolei.
+    /// </summary>
+    public Task<IReadOnlyList<CacheLookupResult>> LookupManyAsync(
+        IReadOnlyList<string> normalizedTexts, string sourceLanguage, string targetLanguage,
+        string gameProfile, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var results = new CacheLookupResult[normalizedTexts.Count];
+        var index = 0;
+        for (; index < results.Length; index++)
+        {
+            if (!_memory.TryGetValue(
+                    new MemoKey(normalizedTexts[index], sourceLanguage, targetLanguage, gameProfile), out var remembered))
+                break;
+            results[index] = new CacheLookupResult(RecordUse(remembered));
+        }
+
+        if (index == results.Length)
+        {
+            FlushUsageInBackgroundIfDue();
+            return Task.FromResult<IReadOnlyList<CacheLookupResult>>(results);
+        }
+
+        var firstMiss = index;
+        return Task.Run<IReadOnlyList<CacheLookupResult>>(() =>
+        {
+            SqliteConnection? connection = null;
+            SqliteCommand? command = null;
+            try
+            {
+                for (var i = firstMiss; i < results.Length; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var memoryKey = new MemoKey(normalizedTexts[i], sourceLanguage, targetLanguage, gameProfile);
+                    // Tekst mógł trafić do pamięci w międzyczasie (powtórzony w partii albo
+                    // odczytany przez równoległy odczyt) — wtedy jak LookupAsync: bez bazy.
+                    if (_memory.TryGetValue(memoryKey, out var remembered))
+                    {
+                        results[i] = new CacheLookupResult(RecordUse(remembered));
+                        continue;
+                    }
+                    try
+                    {
+                        Initialize();
+                        if (command is null)
+                        {
+                            connection = OpenConnection();
+                            command = CreateLookupCommand(connection);
+                        }
+                        results[i] = new CacheLookupResult(LookupInDatabase(command, memoryKey));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // Błąd jednego odczytu nie przerywa partii; następny tekst otwiera połączenie
+                        // od nowa — tak jak zrobiłby osobny LookupAsync.
+                        results[i] = new CacheLookupResult(null, ex);
+                        command?.Dispose();
+                        connection?.Dispose();
+                        command = null;
+                        connection = null;
+                    }
+                }
+            }
+            finally
+            {
+                command?.Dispose();
+                connection?.Dispose();
+            }
+            FlushUsageInBackgroundIfDue();
+            return results;
+        }, cancellationToken);
+    }
+
+    private static SqliteCommand CreateLookupCommand(SqliteConnection connection)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = LookupSql;
+        command.Parameters.Add("$hash", SqliteType.Text);
+        command.Parameters.Add("$src", SqliteType.Text);
+        command.Parameters.Add("$tgt", SqliteType.Text);
+        command.Parameters.Add("$profile", SqliteType.Text);
+        return command;
+    }
+
+    /// <summary>
+    /// Jeden odczyt z bazy przygotowanym poleceniem: wynik trafia do pamięci (o ile w międzyczasie
+    /// nic jej nie unieważniło) i liczy się jako użycie. Null = brak wpisu.
+    /// </summary>
+    private CachedTranslation? LookupInDatabase(SqliteCommand command, MemoKey memoryKey)
+    {
+        var version = Interlocked.Read(ref _memoryVersion);
+        command.Parameters["$hash"].Value = TextHasher.Sha256Hex(memoryKey.NormalizedText);
+        command.Parameters["$src"].Value = memoryKey.SourceLanguage;
+        command.Parameters["$tgt"].Value = memoryKey.TargetLanguage;
+        command.Parameters["$profile"].Value = memoryKey.GameProfile;
+
+        CachedTranslation result;
+        using (var reader = command.ExecuteReader())
+        {
             if (!reader.Read()) return null;
 
-            var result = new CachedTranslation(
+            result = new CachedTranslation(
                 Id: reader.GetInt64(0),
                 SourceText: reader.GetString(1),
                 NormalizedText: reader.GetString(2),
@@ -202,25 +307,20 @@ public sealed class SqliteTranslationCache : ITranslationCache
             {
                 Context = reader.IsDBNull(11) ? null : reader.GetString(11),
             };
-            reader.Close();
+        }
 
-            // Liczniki niezapisane jeszcze w bazie wliczamy do zwracanej wartości.
-            var pendingUses = _pendingUsage.TryGetValue(result.Id, out var pending) ? pending.Uses : 0;
-            var entry = new MemoEntry(result with { UseCount = result.UseCount + pendingUses });
-            lock (_memoryGate)
+        // Liczniki niezapisane jeszcze w bazie wliczamy do zwracanej wartości.
+        var pendingUses = _pendingUsage.TryGetValue(result.Id, out var pending) ? pending.Uses : 0;
+        var entry = new MemoEntry(result with { UseCount = result.UseCount + pendingUses });
+        lock (_memoryGate)
+        {
+            if (Interlocked.Read(ref _memoryVersion) == version)
             {
-                if (Interlocked.Read(ref _memoryVersion) == version)
-                {
-                    if (_memory.Count >= MaxMemoryEntries) _memory.Clear();
-                    entry = _memory.GetOrAdd(memoryKey, entry);
-                }
+                if (_memory.Count >= MaxMemoryEntries) _memory.Clear();
+                entry = _memory.GetOrAdd(memoryKey, entry);
             }
-            var hit = RecordUse(entry);
-            // Odczyt nigdy nie zapisuje synchronicznie: zapis liczników może czekać do 30 s na
-            // blokadę albo paść (pełny dysk, plik tylko do odczytu) — a to tylko statystyka.
-            FlushUsageInBackgroundIfDue();
-            return hit;
-        }, cancellationToken);
+        }
+        return RecordUse(entry);
     }
 
     private CachedTranslation RecordUse(MemoEntry entry)
@@ -343,13 +443,15 @@ public sealed class SqliteTranslationCache : ITranslationCache
     /// <summary>Zapis zmienia wynik odczytu dla tego tekstu we wszystkich profilach.</summary>
     private void ForgetMemory(NewCacheEntry entry)
     {
-        var prefix = MemoryPrefix(TextHasher.Sha256Hex(entry.NormalizedText), entry.SourceLanguage, entry.TargetLanguage);
         lock (_memoryGate)
         {
             Interlocked.Increment(ref _memoryVersion);
             foreach (var key in _memory.Keys)
             {
-                if (key.StartsWith(prefix, StringComparison.Ordinal)) _memory.TryRemove(key, out _);
+                if (string.Equals(key.NormalizedText, entry.NormalizedText, StringComparison.Ordinal)
+                    && string.Equals(key.SourceLanguage, entry.SourceLanguage, StringComparison.Ordinal)
+                    && string.Equals(key.TargetLanguage, entry.TargetLanguage, StringComparison.Ordinal))
+                    _memory.TryRemove(key, out _);
             }
         }
     }
