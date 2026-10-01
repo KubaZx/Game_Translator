@@ -26,6 +26,16 @@ public sealed record OverlayNotice(string DedupeKey, NoticeSeverity Severity, st
     /// wyczerpany limit) — pokazywany także wtedy, gdy gracz sam schował nakładkę.
     /// </summary>
     public bool IsCritical { get; init; }
+
+    /// <summary>
+    /// Odpowiedź na wyraźne żądanie gracza (ręczne tłumaczenie regionu: brak tekstu, błąd
+    /// dostawcy, pudło Cache-only) — też przechodzi przez ukrycie nakładki skrótem, bo gracz
+    /// właśnie poprosił o wynik i cisza wyglądałaby na zawieszenie programu.
+    /// </summary>
+    public bool IsExplicitRequest { get; init; }
+
+    /// <summary>Czy komunikat ma się pokazać, gdy gracz sam schował nakładkę skrótem.</summary>
+    public bool ShowsWhenHiddenByUser => IsCritical || IsExplicitRequest;
 }
 
 /// <summary>

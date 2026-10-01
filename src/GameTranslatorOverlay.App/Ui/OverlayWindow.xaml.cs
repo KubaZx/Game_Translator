@@ -704,11 +704,12 @@ public partial class OverlayWindow : Window
     /// Krótki komunikat (~13 px, półprzezroczyste tło) wyśrodkowany przy górnej krawędzi
     /// okna gry, z płynnym pojawieniem i wygaszeniem. Nie przyjmuje kliknięć i nie znika
     /// przy czyszczeniu bloków. Gdy gracz schował nakładkę, przechodzą tylko komunikaty
-    /// krytyczne (zatrzymany live, klucz, limit). Zwraca false, gdy komunikat pominięto.
+    /// krytyczne (zatrzymany live, klucz, limit) i odpowiedzi na ręczne tłumaczenie
+    /// (<see cref="OverlayNotice.ShowsWhenHiddenByUser"/>). Zwraca false, gdy komunikat pominięto.
     /// </summary>
     public bool ShowNotice(OverlayNotice notice, RectPx gameWindowBounds)
     {
-        if (_hiddenByUser && !notice.IsCritical) return false;
+        if (_hiddenByUser && !notice.ShowsWhenHiddenByUser) return false;
 
         if (!gameWindowBounds.IsEmpty) _lastNoticeAnchor = gameWindowBounds;
         var anchor = _lastNoticeAnchor;

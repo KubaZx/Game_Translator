@@ -371,8 +371,12 @@ public partial class MainWindow : Window
         _overlay.ShowNotice(notice, anchor);
     }
 
+    // Zminimalizowane okno ma granice w okolicy (-32000,-32000) — taki punkt zaczepienia
+    // przyklejałby komunikat do rogu przypadkowego monitora. Pusty prostokąt = ostatni znany
+    // punkt zaczepienia albo monitor z kursorem.
     private RectPx LiveWindowBounds() =>
         _liveWindowHandle != IntPtr.Zero && NativeMethods.IsWindow(_liveWindowHandle)
+            && !NativeMethods.IsIconic(_liveWindowHandle)
             ? ScreenCapture.GetWindowBounds(_liveWindowHandle)
             : default;
 
@@ -559,7 +563,7 @@ public partial class MainWindow : Window
     private void ShowManualFailureNotice(RectPx? region)
     {
         if (region is { } selected && _settings.ResultDisplayMode == "overlay")
-            ShowOverlayNotice(OverlayNotices.TranslationFailed(), selected);
+            ShowOverlayNotice(OverlayNotices.ManualTranslationFailed(), selected);
     }
 
     private void DisplayResult(RegionTranslationResult result)
@@ -571,8 +575,9 @@ public partial class MainWindow : Window
 
         // Gracz patrzy na grę, nie na to okno: brak tekstu, błąd dostawcy albo pudła
         // Cache-only dostają komunikat w nakładce (przy zaznaczonym regionie). Pokazujemy go
-        // dopiero po ShowBlocks — to ono zdejmuje ukrycie skrótem, a schowana nakładka
-        // przepuszcza tylko komunikaty krytyczne.
+        // po ShowBlocks (ono zdejmuje ukrycie skrótem). Gdy nic nie przetłumaczono, ShowBlocks
+        // się nie wykonuje i nakładka zostaje schowana — ForManualResult oznacza więc komunikat
+        // jako odpowiedź na żądanie gracza, żeby przeszedł mimo ukrycia (inaczej: cisza).
         var overlayMode = _settings.ResultDisplayMode == "overlay";
         var notice = overlayMode
             ? OverlayNotices.ForManualResult(result.Blocks.Select(static b => b.Outcome).ToList(), _orchestrator.ActiveProvider.Name)

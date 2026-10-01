@@ -162,11 +162,24 @@ public static class OverlayNotices
     /// czegoś nie przetłumaczono: brak tekstu w zaznaczeniu, błąd dostawcy (limit, klucz),
     /// pudła Cache-only albo ogólna porażka. Null, gdy wszystkie bloki przetłumaczono.
     /// Ręczne tłumaczenie to jawna prośba gracza, więc wynik nie przechodzi przez okno
-    /// powtórzeń polityki — każda próba dostaje odpowiedź.
+    /// powtórzeń polityki — każda próba dostaje odpowiedź — i jest oznaczony jako
+    /// <see cref="OverlayNotice.IsExplicitRequest"/>: pokazuje się także wtedy, gdy gracz
+    /// schował nakładkę skrótem (przy braku przetłumaczonych bloków nic jej nie odkrywa).
     /// </summary>
     public static OverlayNotice? ForManualResult(IReadOnlyList<TranslationOutcome> outcomes, string? providerName)
     {
         ArgumentNullException.ThrowIfNull(outcomes);
+        return ManualResultNotice(outcomes, providerName) is { } notice ? notice with { IsExplicitRequest = true } : null;
+    }
+
+    /// <summary>
+    /// Ogólna porażka ręcznego tłumaczenia (wyjątek OCR, bazy itp.) — jak
+    /// <see cref="ForManualResult"/> przechodzi przez ukrycie nakładki skrótem.
+    /// </summary>
+    public static OverlayNotice ManualTranslationFailed() => TranslationFailed() with { IsExplicitRequest = true };
+
+    private static OverlayNotice? ManualResultNotice(IReadOnlyList<TranslationOutcome> outcomes, string? providerName)
+    {
         if (outcomes.Count == 0) return NoTextFound();
         if (FromOutcomes(outcomes, providerName) is { } failure) return failure;
         var misses = CacheOnlyMissTexts(outcomes).Distinct(StringComparer.Ordinal).Count();

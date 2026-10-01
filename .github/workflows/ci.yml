@@ -14,6 +14,10 @@ on:
 # starsze oczekujące (commit B przy szybkich pushach A, B, C nie dostałby wyniku,
 # a ręcznie uruchomiony publish mógłby zniknąć). Dzięki temu każdy commit na main
 # i każde wydanie ma własny, dokończony przebieg, równolegle jak przed zmianą.
+# Domyślnie token tylko do odczytu — zapis (wydanie) dostaje jedynie job publish.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

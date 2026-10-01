@@ -121,7 +121,10 @@ public sealed class TranslationPipeline(
     // Profil zapamiętujemy, bo nowy wynik musi nadpisać TEN wpis: wpis profilu wygrywa
     // przy odczycie z globalnym, więc zapis do globalnego zostawiałby nieaktualny wpis
     // na zawsze i każde wystąpienie tekstu szłoby do płatnego dostawcy.
-    private readonly ConcurrentDictionary<string, StaleEntry> _staleFallbacks = new(StringComparer.Ordinal);
+    // Słownik takich wpisów jest osobny dla każdego wywołania TranslateAsync (nie wspólny dla
+    // pipeline'u): dwa równoległe wywołania z tym samym nieaktualnym tekstem (właściciel
+    // zapytania i czekający na nie) muszą oba dostać stary wynik, gdy dostawca zawiedzie —
+    // przy wspólnym słowniku kluczowanym samym tekstem pierwsze zabierało go drugiemu.
 
     // Teksty, które już raz poszły do dostawcy z powodu innej płci gracza we wpisie cache.
     // Znacznik qa-final nie zatrzymuje takiej ponownej próby (płeć nadal się różni), a gdy
@@ -212,6 +215,7 @@ public sealed class TranslationPipeline(
 
         var outcomes = new Dictionary<string, TranslationOutcome>(StringComparer.Ordinal);
         var pending = new List<(string Source, string Normalized)>();
+        var staleFallbacks = new Dictionary<string, StaleEntry>(StringComparer.Ordinal);
 
         for (var index = 0; index < normalizedInputs.Count; index++)
         {
@@ -232,7 +236,8 @@ public sealed class TranslationPipeline(
                 continue;
             }
 
-            var local = await TryTranslateLocallyAsync(source, normalized, sourceLanguage, targetLanguage, cancellationToken)
+            var local = await TryTranslateLocallyAsync(source, normalized, sourceLanguage, targetLanguage, cancellationToken,
+                    staleFallbacks)
                 .ConfigureAwait(false);
             if (local is not null)
             {
@@ -257,13 +262,14 @@ public sealed class TranslationPipeline(
             }
             else
             {
-                await TranslatePendingAsync(pending, sourceLanguage, targetLanguage, outcomes, cancellationToken).ConfigureAwait(false);
+                await TranslatePendingAsync(pending, sourceLanguage, targetLanguage, outcomes, staleFallbacks, cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
 
         foreach (var (_, normalized) in normalizedInputs)
         {
-            if (!_staleFallbacks.TryRemove(normalized, out var stale)) continue;
+            if (!staleFallbacks.TryGetValue(normalized, out var stale)) continue;
             if (stale.TranslatedText is not null
                 && outcomes.TryGetValue(normalized, out var failed) && failed.TranslatedText is null)
             {
@@ -317,7 +323,7 @@ public sealed class TranslationPipeline(
                 // Ten sam wynik co w TranslateAsync — też bez dostawcy.
                 ? new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, "Pusty tekst.")
                 : await TryTranslateLocallyAsync(source, normalized, sourceLanguage, targetLanguage,
-                    cancellationToken, probeOnly: true).ConfigureAwait(false);
+                    cancellationToken, staleFallbacks: null).ConfigureAwait(false);
             outcomes[normalized] = local;
             allLocal &= local is not null;
         }
@@ -336,15 +342,17 @@ public sealed class TranslationPipeline(
             .ToList();
     }
 
-    /// <param name="probeOnly">
-    /// Sprawdzenie bez skutków ubocznych: bez liczenia trafień i bez zapamiętywania wpisów
-    /// zapasowych (te są potrzebne tylko ścieżce, która naprawdę zapyta dostawcę).
+    /// <param name="staleFallbacks">
+    /// Wpisy zastępowane (zapasowe) tego wywołania TranslateAsync. null = sprawdzenie bez
+    /// skutków ubocznych: bez liczenia trafień i bez zapamiętywania wpisów zapasowych (te są
+    /// potrzebne tylko ścieżce, która naprawdę zapyta dostawcę).
     /// </param>
     private async Task<TranslationOutcome?> TryTranslateLocallyAsync(
         string source, string normalized, string sourceLanguage, string targetLanguage,
-        CancellationToken cancellationToken, bool probeOnly = false)
+        CancellationToken cancellationToken, Dictionary<string, StaleEntry>? staleFallbacks)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var probeOnly = staleFallbacks is null;
         CachedTranslation? cached;
         string? degradedHit = null;
         try
@@ -361,7 +369,6 @@ public sealed class TranslationPipeline(
                 _logger.LogWarning(ex, "Odczyt cache tłumaczeń nie powiódł się — traktuję to jako brak wpisu (kolejne takie błędy nie będą logowane)");
             cached = null;
             Volatile.Write(ref _cacheDegraded, 1);
-            _degradedResults.TryGetValue(DegradedKey(normalized, sourceLanguage, targetLanguage), out degradedHit);
         }
         // Mock cache entries must never impersonate translations from a real provider.
         // Profil zapamiętujemy jak przy nieaktualnych wpisach: prawdziwy wynik musi nadpisać
@@ -370,8 +377,8 @@ public sealed class TranslationPipeline(
             && cached.Provider.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase)
             && !provider.Name.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase))
         {
-            if (!probeOnly && !options.CacheOnlyMode && cached.GameProfile.Length > 0)
-                _staleFallbacks[normalized] = new StaleEntry(null, cached.GameProfile, default);
+            if (staleFallbacks is not null && !options.CacheOnlyMode && cached.GameProfile.Length > 0)
+                staleFallbacks[normalized] = new StaleEntry(null, cached.GameProfile, default);
             cached = null;
         }
 
@@ -389,12 +396,19 @@ public sealed class TranslationPipeline(
         if (!options.CacheOnlyMode && cached is { IsManual: false }
             && TranslationCacheContext.IsStale(cached.Context, normalized, gender))
         {
-            if (!probeOnly)
-                _staleFallbacks[normalized] = new StaleEntry(
+            if (staleFallbacks is not null)
+                staleFallbacks[normalized] = new StaleEntry(
                     cached.TranslatedText, cached.GameProfile, TranslationCacheContext.Parse(cached.Context),
                     TranslationCacheContext.IsStaleForPlayerGender(cached.Context, normalized, gender));
             cached = null;
         }
+
+        // Awaryjna pamięć wyników działa nie tylko przy błędzie odczytu: przy pełnym dysku albo
+        // bazie tylko do odczytu SELECT nadal działa (zwraca brak wpisu albo wpis nieaktualny),
+        // a zawodzi tylko INSERT — bez tego każde wystąpienie tekstu szłoby znowu do płatnego
+        // dostawcy. Pierwszeństwo nadal mają ręczne korekty, słownik i aktualny wpis bazy.
+        if (cached is null && IsCacheDegraded)
+            _degradedResults.TryGetValue(DegradedKey(normalized, sourceLanguage, targetLanguage), out degradedHit);
 
         // Manual corrections retain precedence over the glossary on both lookups.
         if (cached is { IsManual: true })
@@ -439,6 +453,7 @@ public sealed class TranslationPipeline(
         string sourceLanguage,
         string targetLanguage,
         Dictionary<string, TranslationOutcome> outcomes,
+        Dictionary<string, StaleEntry> staleFallbacks,
         CancellationToken cancellationToken)
     {
         var mine = new List<(string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)>();
@@ -470,7 +485,8 @@ public sealed class TranslationPipeline(
                     // A previous owner may have filled the cache after our first miss
                     // and removed its in-flight entry before we registered ours.
                     var local = await TryTranslateLocallyAsync(
-                        item.Source, item.Normalized, sourceLanguage, targetLanguage, cancellationToken).ConfigureAwait(false);
+                        item.Source, item.Normalized, sourceLanguage, targetLanguage, cancellationToken, staleFallbacks)
+                        .ConfigureAwait(false);
                     if (local is not null)
                     {
                         outcomes[item.Normalized] = local;
@@ -482,7 +498,8 @@ public sealed class TranslationPipeline(
                     }
                 }
                 if (toSend.Count > 0)
-                    await TranslateChunkAsync(toSend.ToArray(), sourceLanguage, targetLanguage, outcomes, cancellationToken)
+                    await TranslateChunkAsync(toSend.ToArray(), sourceLanguage, targetLanguage, outcomes, staleFallbacks,
+                            cancellationToken)
                         .ConfigureAwait(false);
             }
         }
@@ -603,15 +620,13 @@ public sealed class TranslationPipeline(
         string sourceLanguage,
         string targetLanguage,
         Dictionary<string, TranslationOutcome> outcomes,
+        Dictionary<string, StaleEntry> staleFallbacks,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        // Migawka zastępowanych wpisów PRZED zwolnieniem czekających (TrySetResult): słownik
-        // jest wspólny dla równoległych wywołań i kluczowany samym tekstem, więc czekający
-        // na ten sam tekst może usunąć wpis, zanim właściciel zdąży z niego skorzystać —
-        // wynik trafiłby wtedy do globalnego cache, a wpis profilu zostałby nieaktualny.
+        // Zastępowane wpisy tego wywołania (profil do nadpisania, kontekst kontroli jakości).
         var staleEntries = chunk
-            .Select(c => _staleFallbacks.TryGetValue(c.Normalized, out var s) ? s : null)
+            .Select(c => staleFallbacks.TryGetValue(c.Normalized, out var s) ? s : null)
             .ToArray();
         // Wiersze jednego zdania sklejamy przed wysłaniem (tłumacz nie rozbija gramatyki
         // na granicach wierszy), a po tłumaczeniu przywracamy tę samą liczbę wierszy.
@@ -706,7 +721,11 @@ public sealed class TranslationPipeline(
         // „ponowienie” — bez dodatkowej próby w tej samej partii. Tekst z trwałym problemem
         // (np. fałszywy alarm „10:30 PM” → „22:30”) kosztuje wtedy najwyżej 3 zapytania:
         // pierwsze + ponowienie przy pierwszym wystąpieniu i jedno przy drugim.
-        var skipRetry = staleEntries.Select(static s => s?.Context.NeedsQualityRetry == true).ToArray();
+        // Wpis już ostateczny (qa-final), ponawiany tylko z powodu innej płci gracza, też nie
+        // dostaje ponowienia w partii — jego problem jakości został już raz sprawdzony.
+        var skipRetry = staleEntries
+            .Select(static s => s is not null && (s.Context.NeedsQualityRetry || s.Context.QualityFinal))
+            .ToArray();
         await RetryFlaggedAsync(textsToSend, reflowed, raw, results, issues, skipRetry, context, sourceLanguage, targetLanguage,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -747,10 +766,15 @@ public sealed class TranslationPipeline(
                 // wystąpienie byłoby kolejnym płatnym zapytaniem z pustą odpowiedzią.
                 if (stale is { TranslatedText: not null, Context.NeedsQualityRetry: true })
                 {
-                    await TryStoreAsync(new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage,
-                        stale.TranslatedText, provider.Name, GameProfile: profile,
-                        Context: TranslationCacheContext.Build(stale.Context.QualityIssues, final: true,
-                            playerGender: stale.Context.PlayerGender))).ConfigureAwait(false);
+                    if (!await TryStoreAsync(new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage,
+                            stale.TranslatedText, provider.Name, GameProfile: profile,
+                            Context: TranslationCacheContext.Build(stale.Context.QualityIssues, final: true,
+                                playerGender: stale.Context.PlayerGender))).ConfigureAwait(false))
+                    {
+                        // Zapis się nie udał (np. pełny dysk) — ostateczny wynik pamiętamy
+                        // awaryjnie, żeby nie pytać dostawcy przy każdym wystąpieniu.
+                        RememberDegraded(normalized, sourceLanguage, targetLanguage, stale.TranslatedText);
+                    }
                 }
                 continue;
             }
@@ -765,8 +789,13 @@ public sealed class TranslationPipeline(
             // Wynik z problemem jakości jest oznaczany, żeby następnym razem przetłumaczyć go
             // ponownie — ale tylko raz: gdy zastępujemy już oznaczony wpis, a problem nadal
             // jest, znacznik jest ostateczny (bez pętli płatnych zapytań).
-            var cacheContext = TranslationCacheContext.Build(
-                quality, final: stale?.Context.NeedsQualityRetry == true, playerGender: EffectiveGender);
+            // Ostateczność przechodzi też na nowy wynik wpisu qa-final tłumaczonego ponownie tylko
+            // z powodu płci — inaczej ten sam fałszywy alarm zaczynałby cykl ponowień od nowa
+            // przy każdej zmianie płci.
+            var final = stale is not null
+                && (stale.Context.NeedsQualityRetry
+                    || (stale.Context.QualityFinal && quality != TranslationQualityFlags.None));
+            var cacheContext = TranslationCacheContext.Build(quality, final: final, playerGender: EffectiveGender);
 
             if (IsCacheDegraded) RememberDegraded(normalized, sourceLanguage, targetLanguage, translated);
             if (!await TryStoreAsync(new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage, translated,
