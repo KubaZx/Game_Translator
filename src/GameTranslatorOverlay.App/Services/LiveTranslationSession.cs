@@ -48,6 +48,12 @@ public sealed record LiveUpdate(
 {
     public bool ClearSubtitle { get; init; }
     public bool PreserveSubtitleLifetime { get; init; }
+
+    /// <summary>
+    /// Komunikat dla gracza w nakładce (błąd dostawcy, Cache-only, start/stop live) —
+    /// już przepuszczony przez <see cref="OverlayNoticePolicy"/> sesji; null = brak.
+    /// </summary>
+    public OverlayNotice? Notice { get; init; }
 }
 
 public sealed class LiveSessionOptions
@@ -130,6 +136,12 @@ public sealed class LiveSessionOptions
 
     /// <summary>False, gdy profil jawnie wyłączył automatyczne powiększanie małych wycinków.</summary>
     public bool AllowAutoUpscale { get; init; } = true;
+
+    /// <summary>
+    /// Wspólny z oknem aplikacji rejestr pokazanych komunikatów nakładki. Sesja dopisuje
+    /// do niego własne komunikaty i odrzuca ich odczyty OCR (filtr anty-sprzężeniowy).
+    /// </summary>
+    public OverlayNoticeEcho? NoticeEcho { get; init; }
 }
 
 /// <summary>
@@ -220,6 +232,10 @@ public sealed class LiveTranslationSession(
     // usunięciem danych) nie może się skończyć przy otwartym zapytaniu do bazy.
     private readonly List<Task> _abandonedLocalLookups = [];
 
+    // Komunikaty dla gracza w nakładce: polityka (powtórki, waga, zbiorcze Cache-only)
+    // należy do pętli sesji i dostaje jej zegar — bez zegara systemowego.
+    private readonly OverlayNoticePolicy _notices = new();
+
     public bool IsRunning => _loop is { IsCompleted: false };
 
     /// <summary>Pozwala narzedziom dev zaczekac na zakonczenie przed usunieciem ich danych.</summary>
@@ -261,6 +277,28 @@ public sealed class LiveTranslationSession(
         _cts.Dispose();
     }
 
+    /// <summary>
+    /// Przepuszcza komunikat przez politykę sesji. Przyjęty trafia od razu do filtra
+    /// anty-sprzężeniowego — następny OCR nie może wysłać go do dostawcy jako tekstu gry.
+    /// </summary>
+    private OverlayNotice? AcceptNotice(OverlayNotice? candidate, TimeSpan now)
+    {
+        if (candidate is null || !_notices.Offer(candidate, now)) return null;
+        RememberNotice(candidate);
+        return candidate;
+    }
+
+    private void RememberNotice(OverlayNotice? notice)
+    {
+        if (notice is not null) options.NoticeEcho?.Remember(notice.Text);
+    }
+
+    private void EmitStopped(string statusLine, Stopwatch clock) =>
+        onUpdate(new LiveUpdate(statusLine, ClearOverlay: true, Stopped: true)
+        {
+            Notice = AcceptNotice(OverlayNotices.LiveStopped(), clock.Elapsed),
+        });
+
     private void Emit(LiveUpdate update, CancellationToken cancellationToken)
     {
         // Po zatrzymaniu sesji żadna aktualizacja nie może już malować po nakładce.
@@ -292,11 +330,15 @@ public sealed class LiveTranslationSession(
         {
             if (!ocrProvider.IsLanguageAvailable(orchestrator.SourceLanguage))
             {
-                onUpdate(new LiveUpdate(
-                    $"Brak pakietu OCR dla języka „{orchestrator.SourceLanguage}” — tryb live zatrzymany.",
-                    ClearOverlay: true, Stopped: true));
+                EmitStopped(
+                    $"Brak pakietu OCR dla języka „{orchestrator.SourceLanguage}” — tryb live zatrzymany.", clock);
                 return;
             }
+
+            Emit(new LiveUpdate("Live: start — czekam na pierwszą klatkę.")
+            {
+                Notice = AcceptNotice(OverlayNotices.LiveStarted(), clock.Elapsed),
+            }, cancellationToken);
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -304,8 +346,7 @@ public sealed class LiveTranslationSession(
 
                 if (!NativeMethods.IsWindow(gameWindowHandle))
                 {
-                    onUpdate(new LiveUpdate("Okno gry zostało zamknięte — tryb live zatrzymany.",
-                        ClearOverlay: true, Stopped: true));
+                    EmitStopped("Okno gry zostało zamknięte — tryb live zatrzymany.", clock);
                     return;
                 }
 
@@ -375,9 +416,7 @@ public sealed class LiveTranslationSession(
                     logger.LogWarning(ex, "Błąd cyklu live ({Count}/{Max})", _consecutiveFailures, MaxConsecutiveFailures);
                     if (_consecutiveFailures >= MaxConsecutiveFailures)
                     {
-                        onUpdate(new LiveUpdate(
-                            "Tryb live zatrzymany po serii błędów — szczegóły w logu diagnostycznym.",
-                            ClearOverlay: true, Stopped: true));
+                        EmitStopped("Tryb live zatrzymany po serii błędów — szczegóły w logu diagnostycznym.", clock);
                         return;
                     }
                     Emit(new LiveUpdate("Live: pominięto klatkę z powodu błędu (szczegóły w logu)."), cancellationToken);
@@ -400,8 +439,7 @@ public sealed class LiveTranslationSession(
         catch (Exception ex)
         {
             logger.LogError(ex, "Błąd pętli trybu live");
-            onUpdate(new LiveUpdate("Tryb live zatrzymany przez błąd — szczegóły w logu diagnostycznym.",
-                ClearOverlay: true, Stopped: true));
+            EmitStopped("Tryb live zatrzymany przez błąd — szczegóły w logu diagnostycznym.", clock);
         }
         finally
         {
@@ -1082,8 +1120,9 @@ public sealed class LiveTranslationSession(
         }
 
         // Ochrona przed pętlą sprzężenia (gdy wykluczenie nakładki z przechwytywania
-        // zawiedzie): blok, którego tekst jest naszym własnym wyświetlanym tłumaczeniem,
-        // nie wraca do tłumaczenia.
+        // zawiedzie): blok, którego tekst jest naszym własnym wyświetlanym tłumaczeniem
+        // albo komunikatem nakładki („⚠ Brak klucza DeepL”), nie wraca do tłumaczenia —
+        // komunikat wysłany do dostawcy kosztowałby znaki i wrócił jako „napis z gry”.
         var displayedTranslations = _displayed.Values
             .Select(static d => d.NormalizedTranslation)
             .Concat(_invalidatedTranslations)
@@ -1091,8 +1130,10 @@ public sealed class LiveTranslationSession(
         // Consume only entries available to this fresh OCR. Local removals later
         // in this frame must survive to protect the next capture from overlay feedback.
         _invalidatedTranslations.Clear();
+        var noticeEcho = options.NoticeEcho;
         keyed = keyed
-            .Where(k => !displayedTranslations.Contains(k.NormalizedText))
+            .Where(k => !displayedTranslations.Contains(k.NormalizedText)
+                && noticeEcho?.IsEcho(k.NormalizedText) != true)
             .ToList();
 
         // Stabilizacja odczytów: nad ruchomą/zajętą grafiką OCR czyta ten sam napis za
@@ -1518,6 +1559,11 @@ public sealed class LiveTranslationSession(
             orchestrator.Latency.Record(LatencyStage.ChangeToText, changeToTextMs);
             _processingChangeOrigin = null;
         }
-        Emit(new LiveUpdate(status, displayList, subtitle, bounds, Diagnostics: diagnostics), cancellationToken);
+        // Gracz nie widzi okna aplikacji — błąd dostawcy, pudła Cache-only i niedziałający
+        // cache trafiają do nakładki jako krótki komunikat (polityka pilnuje powtórek).
+        var notice = _notices.OfferFrame(outcomes, orchestrator.ActiveProvider.Name, orchestrator.IsCacheDegraded, clock.Elapsed);
+        RememberNotice(notice);
+        Emit(new LiveUpdate(status, displayList, subtitle, bounds, Diagnostics: diagnostics) { Notice = notice },
+            cancellationToken);
     }
 }

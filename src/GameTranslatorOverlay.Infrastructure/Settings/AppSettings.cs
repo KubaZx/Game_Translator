@@ -58,6 +58,13 @@ public sealed class AppSettings
 
     /// <summary>0 = automatyczny dobór powiększenia obrazu przed OCR.</summary>
     public double OcrUpscale { get; set; }
+
+    /// <summary>
+    /// Krótkie komunikaty w nakładce nad grą (brak klucza, limit, brak sieci, Cache-only,
+    /// start/stop live). Domyślnie włączone — w trakcie gry okno aplikacji jest schowane,
+    /// więc bez nich błędy są niewidoczne. Brak pola w starym pliku = włączone.
+    /// </summary>
+    public bool ShowOverlayNotices { get; set; } = true;
 }
 
 public sealed class JsonSettingsStore(AppPaths paths)

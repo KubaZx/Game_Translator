@@ -80,6 +80,12 @@ public sealed class TranslationOrchestrator(
     /// <summary>Czasy etapów tej sesji aplikacji (live i ręczne tłumaczenie).</summary>
     public LatencyMonitor Latency => usage.Latency;
 
+    /// <summary>
+    /// Czy bieżący pipeline zgłosił błąd trwałego cache (wyniki tylko w pamięci) — UI
+    /// pokazuje wtedy ostrzeżenie w nakładce. Nowy pipeline zaczyna bez tego stanu.
+    /// </summary>
+    public bool IsCacheDegraded => Volatile.Read(ref _pipelineState)?.Pipeline.IsCacheDegraded == true;
+
     public ITranslationCache CurrentCache => _privateCache is { } inMemory ? inMemory : persistentCache;
 
     public void Initialize()

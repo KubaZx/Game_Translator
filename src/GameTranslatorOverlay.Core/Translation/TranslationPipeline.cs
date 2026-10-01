@@ -34,6 +34,27 @@ public enum TranslationOrigin
     Unavailable,
 }
 
+/// <summary>
+/// Lokalny powód braku tłumaczenia (bez treści tekstu) — pozwala pokazać graczowi krótki
+/// komunikat w nakładce zamiast parsować <see cref="TranslationOutcome.ErrorMessage"/>.
+/// </summary>
+public enum OutcomeIssue
+{
+    None,
+
+    /// <summary>Tryb Cache-only: tekstu nie ma w lokalnej bazie, nic nie wyszło do sieci.</summary>
+    CacheOnlyMiss,
+
+    /// <summary>Wyczerpany limit znaków tej sesji (lokalna odmowa, bez zapytania).</summary>
+    SessionLimit,
+
+    /// <summary>Dostawca zgłosił błąd — rodzaj w <see cref="TranslationOutcome.FailureKind"/>.</summary>
+    Provider,
+
+    /// <summary>Dostawca odpowiedział pustym tłumaczeniem.</summary>
+    EmptyResult,
+}
+
 public sealed record TranslationOutcome(
     string SourceText,
     string NormalizedText,
@@ -48,6 +69,15 @@ public sealed record TranslationOutcome(
     /// w pokazanym tłumaczeniu, np. zmienione liczby; null, gdy wynik przeszedł kontrolę.
     /// </summary>
     public string? QualityWarning { get; init; }
+
+    /// <summary>
+    /// Rodzaj błędu dostawcy, gdy tekst nie został przetłumaczony przez jego wyjątek
+    /// (także u czekających na to samo zapytanie); null w pozostałych przypadkach.
+    /// </summary>
+    public TranslationFailureKind? FailureKind { get; init; }
+
+    /// <summary>Dlaczego zabrakło tłumaczenia (Cache-only, limit sesji, błąd dostawcy, pusty wynik).</summary>
+    public OutcomeIssue Issue { get; init; }
 }
 
 /// <summary>
@@ -178,7 +208,10 @@ public sealed class TranslationPipeline(
             {
                 foreach (var (source, normalized) in pending)
                 {
-                    outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, CacheOnlyMessage);
+                    outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, CacheOnlyMessage)
+                    {
+                        Issue = OutcomeIssue.CacheOnlyMiss,
+                    };
                 }
             }
             else
@@ -198,6 +231,8 @@ public sealed class TranslationPipeline(
                     TranslatedText = stale.TranslatedText,
                     Origin = TranslationOrigin.Cache,
                     ErrorMessage = null,
+                    FailureKind = null,
+                    Issue = OutcomeIssue.None,
                     QualityWarning = TranslationQualityGate.Describe(stale.Context.QualityIssues),
                 };
             }
@@ -422,7 +457,11 @@ public sealed class TranslationPipeline(
             }
             catch (TranslationException ex)
             {
-                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, WaiterMessage(ex));
+                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, WaiterMessage(ex))
+                {
+                    FailureKind = WaiterFailureKind(ex),
+                    Issue = WaiterIssue(ex),
+                };
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -443,6 +482,18 @@ public sealed class TranslationPipeline(
         { Kind: TranslationFailureKind.Unknown, Message: TranslationQualityGate.EmptyResultMessage } => TranslationQualityGate.EmptyResultMessage,
         _ => ex.UserFriendlyMessage,
     };
+
+    // Czekający dostaje ten sam powód co właściciel zapytania: lokalne odmowy (limit sesji,
+    // pusty wynik) nie udają błędu dostawcy, więc nie niosą też jego rodzaju błędu.
+    private static OutcomeIssue WaiterIssue(TranslationException ex) => ex switch
+    {
+        { Kind: TranslationFailureKind.QuotaExceeded, Message: SessionLimitMessage } => OutcomeIssue.SessionLimit,
+        { Kind: TranslationFailureKind.Unknown, Message: TranslationQualityGate.EmptyResultMessage } => OutcomeIssue.EmptyResult,
+        _ => OutcomeIssue.Provider,
+    };
+
+    private static TranslationFailureKind? WaiterFailureKind(TranslationException ex) =>
+        WaiterIssue(ex) == OutcomeIssue.Provider ? ex.Kind : null;
 
     private Task<IReadOnlyList<string>> SendToProviderAsync(
         IReadOnlyList<string> texts, TranslationContext context, string sourceLanguage, string targetLanguage,
@@ -538,7 +589,10 @@ public sealed class TranslationPipeline(
             {
                 tcs.TrySetException(denied);
                 outcomes[normalized] = new TranslationOutcome(
-                    source, normalized, null, TranslationOrigin.Unavailable, SessionLimitMessage);
+                    source, normalized, null, TranslationOrigin.Unavailable, SessionLimitMessage)
+                {
+                    Issue = OutcomeIssue.SessionLimit,
+                };
             }
             // A local admission denial is not a failed request to the provider.
             return;
@@ -559,7 +613,11 @@ public sealed class TranslationPipeline(
             foreach (var (source, normalized, _, tcs) in chunk)
             {
                 tcs.TrySetException(ex);
-                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, ex.UserFriendlyMessage);
+                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, ex.UserFriendlyMessage)
+                {
+                    FailureKind = ex.Kind,
+                    Issue = OutcomeIssue.Provider,
+                };
             }
             return;
         }
@@ -572,7 +630,11 @@ public sealed class TranslationPipeline(
             foreach (var (source, normalized, _, tcs) in chunk)
             {
                 tcs.TrySetException(mismatch);
-                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, mismatch.UserFriendlyMessage);
+                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, mismatch.UserFriendlyMessage)
+                {
+                    FailureKind = mismatch.Kind,
+                    Issue = OutcomeIssue.Provider,
+                };
             }
             return;
         }
@@ -621,7 +683,10 @@ public sealed class TranslationPipeline(
                 usage.RecordFailure();
                 tcs.TrySetException(new TranslationException(TranslationFailureKind.Unknown, TranslationQualityGate.EmptyResultMessage));
                 outcomes[normalized] = new TranslationOutcome(
-                    source, normalized, null, TranslationOrigin.Unavailable, TranslationQualityGate.EmptyResultMessage);
+                    source, normalized, null, TranslationOrigin.Unavailable, TranslationQualityGate.EmptyResultMessage)
+                {
+                    Issue = OutcomeIssue.EmptyResult,
+                };
                 // Pusty wynik przy ponownym tłumaczeniu wpisu z problemem jakości: stary wynik
                 // (pokazany jako zapasowy) zapisujemy jako ostateczny — inaczej każde kolejne
                 // wystąpienie byłoby kolejnym płatnym zapytaniem z pustą odpowiedzią.
