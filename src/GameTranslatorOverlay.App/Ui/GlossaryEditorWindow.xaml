@@ -51,6 +51,8 @@
         <DataGridTextColumn Header="Priorytet" Binding="{Binding Priority}" Width="70" />
         <DataGridCheckBoxColumn Header="Aa" Binding="{Binding CaseSensitive}" Width="40"
                                 ToolTipService.ToolTip="Rozróżniaj wielkość liter" />
+        <DataGridCheckBoxColumn Header="Etykieta" Binding="{Binding LabelOnly}" Width="60"
+                                ToolTipService.ToolTip="Tylko cały tekst etykiety (przycisk, nagłówek) — nie w zdaniach ani w glosariuszu DeepL" />
         <DataGridTextColumn Header="Notatka" Binding="{Binding Note}" Width="*" />
       </DataGrid.Columns>
     </DataGrid>

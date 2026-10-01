@@ -1,0 +1,42 @@
+{"id":"harbor-01","scene":"harbor","kind":"dialog","source":"I waited for you all night. You're finally here.","reference":"Czekałam na ciebie całą noc. Nareszcie jesteś.","expect_gender":"f"}
+{"id":"harbor-02","scene":"harbor","kind":"dialog","source":"I was ready to leave without you.","reference":"Byłam gotowa odejść bez ciebie.","expect_gender":"f"}
+{"id":"harbor-03","scene":"harbor","kind":"dialog","source":"I saw the Harbor Watch dragging a body to the docks.","reference":"Widziałem, jak Straż Portowa ciągnęła ciało do doków.","expect_gender":"m","terms":[{"source":"Harbor Watch","target":"Straż Portowa"}]}
+{"id":"harbor-04","scene":"harbor","kind":"dialog","source":"I never trusted the Ember Guild, and I'm not about to start now.","reference":"Nigdy nie ufałem Gildii Żaru i nie zamierzam teraz zaczynać.","expect_gender":"m","terms":[{"source":"Ember Guild","target":"Gildia Żaru"}]}
+{"id":"harbor-05","scene":"harbor","kind":"dialog","source":"Pack your things. We sail at dawn.","reference":"Spakuj się. Wypływamy o świcie."}
+{"id":"harbor-06","scene":"harbor","kind":"dialog","source":"I'm ready. Let's go.","reference":"Jestem gotowy. Ruszajmy.","expect_gender":"m"}
+{"id":"harbor-07","scene":"harbor","kind":"dialog","source":"Don't call me sir. I work for a living.","reference":"Nie mów do mnie „panie”. Ja uczciwie pracuję."}
+{"id":"harbor-08","scene":"harbor","kind":"dialog","source":"You did well, kid. Better than I expected.","reference":"Dobrze się spisałeś, młody. Lepiej, niż się spodziewałem.","expect_gender":"m"}
+{"id":"ui-01","scene":"main-menu","kind":"ui","source":"New Game","reference":"Nowa gra"}
+{"id":"ui-02","scene":"main-menu","kind":"ui","source":"Continue","reference":"Kontynuuj"}
+{"id":"ui-03","scene":"main-menu","kind":"ui","source":"Load Game","reference":"Wczytaj grę"}
+{"id":"ui-04","scene":"main-menu","kind":"ui","source":"Settings","reference":"Ustawienia"}
+{"id":"ui-05","scene":"main-menu","kind":"ui","source":"Quit to Desktop","reference":"Wyjdź do pulpitu"}
+{"id":"ui-06","scene":"main-menu","kind":"ui","source":"Are you sure you want to quit? Unsaved progress will be lost.","reference":"Na pewno chcesz wyjść? Niezapisany postęp zostanie utracony."}
+{"id":"ui-07","scene":"options","kind":"ui","source":"Subtitles: On","reference":"Napisy: wł."}
+{"id":"ui-08","scene":"options","kind":"ui","source":"Master Volume","reference":"Głośność główna"}
+{"id":"ui-09","scene":"options","kind":"ui","source":"Press any key to continue","reference":"Naciśnij dowolny klawisz, aby kontynuować"}
+{"id":"ui-10","scene":"options","kind":"ui","source":"Inventory full","reference":"Ekwipunek jest pełny"}
+{"id":"item-01","scene":"stash","kind":"item","source":"+15% increased Attack Speed","reference":"+15% zwiększonej szybkości ataku"}
+{"id":"item-02","scene":"stash","kind":"item","source":"+40 to maximum Energy Shield","reference":"+40 do maksymalnej Tarczy Energii","terms":[{"source":"Energy Shield","target":"Tarcza Energii"}]}
+{"id":"item-03","scene":"stash","kind":"item","source":"Adds 10-15 Fire Damage to Attacks","reference":"Dodaje 10–15 obrażeń od ognia do ataków"}
+{"id":"item-04","scene":"stash","kind":"item","source":"25% chance to Ignite on Hit","reference":"25% szansy na podpalenie przy trafieniu"}
+{"id":"item-05","scene":"stash","kind":"item","source":"Regenerate 1.5% of Life per second","reference":"Regeneruje 1,5% życia na sekundę"}
+{"id":"item-06","scene":"stash","kind":"item","source":"Requires Level 20, 48 Str","reference":"Wymaga: poziom 20, 48 Sił"}
+{"id":"item-07","scene":"stash","kind":"item","source":"Energy Shield Recharge starts 20% faster","reference":"Odnawianie Tarczy Energii zaczyna się o 20% szybciej","terms":[{"source":"Energy Shield","target":"Tarcza Energii"}]}
+{"id":"item-08","scene":"stash","kind":"item","source":"Sell value: 1,250 gold","reference":"Wartość sprzedaży: 1250 sztuk złota"}
+{"id":"item-09","scene":"stash","kind":"item","source":"Cannot be Frozen","reference":"Odporność na zamrożenie"}
+{"id":"item-10","scene":"stash","kind":"item","source":"Stackable Currency\nStack Size: 3/10","reference":"Waluta łączona w stosy\nRozmiar stosu: 3/10"}
+{"id":"quest-01","scene":"waystone-quest","kind":"quest","source":"You must find\nthe old Waystone.","reference":"Musisz odnaleźć\nstary Kamień Drogi.","terms":[{"source":"Waystone","target":"Kamień Drogi"}]}
+{"id":"quest-02","scene":"waystone-quest","kind":"quest","source":"Travel to the Ashen Vale and speak\nwith the hermit who lives by the lake.","reference":"Udaj się do Popielnej Doliny i porozmawiaj\nz pustelnikiem, który mieszka nad jeziorem.","terms":[{"source":"Ashen Vale","target":"Popielna Dolina"}]}
+{"id":"quest-03","scene":"waystone-quest","kind":"quest","source":"Collect 5 Ember Shards (0/5)","reference":"Zbierz 5 Odłamków Żaru (0/5)"}
+{"id":"quest-04","scene":"waystone-quest","kind":"quest","source":"The Waystone is dormant. Bring it\nthree Ember Shards to awaken it.","reference":"Kamień Drogi jest uśpiony. Przynieś mu\ntrzy Odłamki Żaru, aby go przebudzić.","terms":[{"source":"Waystone","target":"Kamień Drogi"}]}
+{"id":"quest-05","scene":"waystone-quest","kind":"quest","source":"Quest completed: The Old Waystone\nReward: 350 XP, 2 Skill Points","reference":"Zadanie ukończone: Stary Kamień Drogi\nNagroda: 350 PD, 2 punkty umiejętności","terms":[{"source":"Waystone","target":"Kamień Drogi"}]}
+{"id":"quest-06","scene":"waystone-quest","kind":"quest","source":"Optional: Defeat the Harbor Watch captain\nbefore nightfall.","reference":"Opcjonalnie: pokonaj kapitana Straży Portowej\nprzed zmrokiem.","terms":[{"source":"Harbor Watch","target":"Straż Portowa"}]}
+{"id":"hermit-01","scene":"hermit","kind":"dialog","source":"I came here thirty years ago and never left.","reference":"Przyszedłem tu trzydzieści lat temu i nigdy stąd nie odszedłem.","expect_gender":"m"}
+{"id":"hermit-02","scene":"hermit","kind":"dialog","source":"I forgot what the sun looks like.","reference":"Zapomniałem, jak wygląda słońce.","expect_gender":"m"}
+{"id":"hermit-03","scene":"hermit","kind":"dialog","source":"Take this lantern. The Ashen Vale is dark even at noon.","reference":"Weź tę latarnię. W Popielnej Dolinie jest ciemno nawet w południe.","terms":[{"source":"Ashen Vale","target":"Popielna Dolina"}]}
+{"id":"hermit-04","scene":"hermit","kind":"dialog","source":"Careful. Whatever you do, don't touch the Waystone with bare hands.","reference":"Uważaj. Cokolwiek zrobisz, nie dotykaj Kamienia Drogi gołymi rękami.","terms":[{"source":"Waystone","target":"Kamień Drogi"}]}
+{"id":"daughter-01","scene":"hermit-daughter","kind":"dialog","source":"My father told me you would come. I didn't believe him.","reference":"Ojciec mówił, że przyjdziesz. Nie wierzyłam mu.","expect_gender":"f"}
+{"id":"daughter-02","scene":"hermit-daughter","kind":"dialog","source":"I'm not ready to leave this place.","reference":"Nie jestem gotowa, żeby opuścić to miejsce.","expect_gender":"f"}
+{"id":"daughter-03","scene":"hermit-daughter","kind":"dialog","source":"If you see my brother, tell him I forgave him.","reference":"Jeśli zobaczysz mojego brata, powiedz mu, że mu wybaczyłam.","expect_gender":"f"}
+{"id":"daughter-04","scene":"hermit-daughter","kind":"dialog","source":"Remember:\nthe lake gives, and the lake takes.","reference":"Pamiętaj:\njezioro daje i jezioro zabiera."}

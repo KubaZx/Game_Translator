@@ -1,0 +1,54 @@
+name: Benchmarks
+
+# Pomiary wydajności tylko na żądanie (Actions → Benchmarks → Run workflow).
+# Nic nie blokują: wyniki na współdzielonym runnerze Linuksa są orientacyjne i służą do
+# porównań między commitami, nie do progów. Opis i interpretacja: docs/BENCHMARKS.md.
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: 'Filtr BenchmarkDotNet (np. *CacheHit* albo *)'
+        required: false
+        default: '*'
+      job:
+        description: 'Zadanie BenchmarkDotNet: short (szybko) albo default (pełny, dokładniejszy)'
+        required: false
+        default: 'short'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmarks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build benchmarks/GameTranslatorOverlay.Benchmarks -c Release
+
+      - name: Run benchmarks
+        working-directory: benchmarks/GameTranslatorOverlay.Benchmarks
+        env:
+          BENCH_FILTER: ${{ inputs.filter }}
+          BENCH_JOB: ${{ inputs.job }}
+        run: >
+          dotnet run -c Release --no-build --
+          --filter "${BENCH_FILTER:-*}"
+          --job "${BENCH_JOB:-short}"
+          --exporters json markdown
+          --artifacts "$GITHUB_WORKSPACE/BenchmarkDotNet.Artifacts"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BenchmarkDotNet.Artifacts
+          path: BenchmarkDotNet.Artifacts/
+          if-no-files-found: warn

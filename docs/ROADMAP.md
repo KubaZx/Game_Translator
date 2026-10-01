@@ -1,16 +1,19 @@
 # Roadmap — GameTranslatorOverlay
 
-## Obecny stan — 29 września 2026
+## Obecny stan — 1 października 2026
 
-Ostatnie opublikowane wydanie to **0.3.1** (29 września 2026): tłumaczenie zawiniętych zdań
-w całości, naprawa pomyłek OCR i forma „ty”. Wydanie 0.3.0 objęło poprawki
-live wprowadzone po 0.2.2: aktualność sceny i lokalnych opisów, nadzorowane tłumaczenia w toku,
-stabilizacja kolejnych odczytów oraz położenia. Kolejna lokalna poprawka zachowuje
-napisy o identycznym obrazie źródła podczas ruchu tła. Runda 29 września dodaje
-kolejnych dostawców tłumaczeń (Azure, Google, modele językowe z kontekstem gry i słownika)
-i zamyka pozycje backlogu audytu #3; kolejna runda dodaje licznik czasu i glosariusze DeepL.
-Przeszły **562 testy** i kompilacja całego
-rozwiązania; próby wizualne nowych pól okna czekają na Windows (M23–M28).
+Ostatnie wydanie to **0.4.0** (1 października 2026): szybszy tryb live (stabilność liczona od
+zauważonej zmiany, znane ekrany bez kolejki, pomiar „Zmiana → napis”), komunikaty w nakładce,
+start/stop live skrótem `Ctrl+Shift+L`, pamięć dialogu i postać gracza dla modeli językowych,
+kontrola jakości wyniku, glosariusze DeepL ze słownika (w tle), liczba mnoga i zakres „Etykieta”
+w słowniku oraz poprawki cache (pętla płatnych zapytań, odporność na błędy bazy) i prywatności
+(terminy prywatne poza glosariuszem DeepL). Dla deweloperów: ProviderEval, benchmarki
+BenchmarkDotNet, pokrycie kodu z progiem w CI. Linia 0.3 dodała wybór dostawcy tłumaczeń
+i poprawki live po 0.2.2.
+
+Przeszło **1114 testów** (880 Core + 234 Infrastructure; na Linuksie 3 testy DPAPI pominięte)
+i kompilacja całego rozwiązania. Nic z wydania 0.4.0 nie było uruchamiane w oknie na Windows
+ani z prawdziwymi dostawcami — scenariusze M23–M35 czekają na Windows.
 
 Produkt jest rozwijany dla różnych gier. Escape Academy służy do pomiarów;
 PoE2 jest jednym z obsługiwanych przypadków z dodatkowym profilem. Aktualny priorytet
@@ -23,6 +26,19 @@ produktu; status implementacji nie zastępuje testów wizualnych na kolejnych gr
 2. Śledzenie położenia napisu między kolejnymi odczytami OCR.
 3. Lepsza czytelność i zakrywanie na wzorzystym oraz animowanym tle.
 4. Dostosowywanie tempa pracy do menu, dialogu i ruchu.
+5. Pokazanie ostrzeżenia kontroli jakości (`TranslationOutcome.QualityWarning`,
+   `UsageTracker.QualityIssues`) w oknie lub nakładce — dziś jest tylko w cache i licznikach.
+6. Przerywanie przygotowania glosariusza DeepL w tle po przełączeniu na Cache-only albo tryb
+   prywatny (dziś kończy się samo po najwyżej 5 s).
+7. Klatka live anulowana przez zmianę ustawień czeka dziś na ponowne sprawdzenie co 4 s —
+   powinna być odczytana od razu po przebudowie pipeline'u.
+8. Wpisy nieaktualne po zmianie formatu (`reflow`), dla których dostawca zwraca pusty wynik,
+   są ponawiane przy każdym wystąpieniu — potrzebny znacznik ostateczności jak `qa-final`.
+9. Edytor skrótów w oknie (dziś tylko `settings.json`, m.in. `liveToggleHotkey`).
+10. Publikacja dwufazowa: najpierw bloki znane lokalnie, potem tłumaczenia dostawcy w tej
+    samej klatce.
+11. HTTP/2 i metryki połączeń (czas zestawienia, ponowne użycie) dla dostawców.
+12. Strumieniowanie odpowiedzi modeli językowych, żeby pierwsze linie pojawiały się wcześniej.
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -105,7 +121,7 @@ Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po naz
 
 **Kryterium ukończenia:** aplikacja wykrywa uruchomione PoE2 i proponuje profil; profil ustawia parametry i słownik; usunięcie profilu nie zmienia działania aplikacji dla innych gier.
 
-### Etap 12 — Dystrybucja portable (wydanie 0.3.1 opublikowane; pełna ocena ręczna według checklisty nadal osobna)
+### Etap 12 — Dystrybucja portable (wydanie 0.4.0; pełna ocena ręczna według checklisty nadal osobna)
 
 Release: `dotnet publish` win-x64, aplikacja portable. Instrukcje użytkownika, `MANUAL_TESTING.md` (testy wymagające pulpitu Windows: OCR na żywo, nakładka, skróty — wyłącznie ręczne), licencje zależności, polityka prywatności, disclaimer. Artefakt Release z CI na tag lub manualnie.
 
@@ -417,3 +433,34 @@ Weryfikacja: 531 testów (383 Core + 148 Infrastructure), kompilacja całego roz
   prawdziwym koncie DeepL (proxy środowiska blokuje DeepL) — do potwierdzenia w M27.
 
 Weryfikacja: 562 testy (402 Core + 160 Infrastructure), kompilacja całego rozwiązania.
+
+### Runda 2026-10-01 — wydanie 0.4.0
+
+Dwie fale równoległych pakietów, każdy z przeglądem, potem przegląd połączenia i wydanie.
+
+- **Fala 1:** cache i kontrola jakości (koniec pętli płatnych zapytań dla wpisów profilu
+  i Mock, odporność na błędy bazy z pamięcią awaryjną, `TranslationQualityGate` z jednym
+  ponowieniem dla LLM i znacznikami `qa=`/`qa-final`); słownik (terminy prywatne poza
+  glosariuszem DeepL, glosariusz w tle z budżetem 300 ms, `GlossaryPrecedence`, liczba mnoga,
+  łamanie wierszy, dwukropek, zakres `label`); ewaluacja (ProviderEval, chrF, korpus 42 linii);
+  benchmarki BenchmarkDotNet ([BENCHMARKS.md](BENCHMARKS.md)); CI (pokrycie z progiem,
+  `[WindowsFact]`, concurrency, Dependabot).
+- **Fala 2:** szybkość live (stabilność od zauważonej zmiany, szybka ścieżka znanych klatek,
+  pomiar „Zmiana → napis”), komunikaty w nakładce (`OverlayNoticePolicy`, filtr echa
+  komunikatu w OCR), pamięć dialogu i płeć gracza dla LLM (`DialogMemory`, `pg=f/m`), skrót
+  live `Ctrl+Shift+L` (`LiveTargetResolver`, zasobnik, pamięć ostatniej gry).
+- **Przegląd połączenia fal:** ręczne tłumaczenie zawsze daje odpowiedź przy schowanej
+  nakładce; pamięć awaryjna także przy bazie, która czyta, ale nie zapisuje; stary wynik dla
+  wszystkich równoległych tłumaczeń tego samego tekstu przy braku sieci; zmiana płci nie
+  wznawia ponowień `qa-final`; komunikat „zatrzymane” przy zminimalizowanej grze w ostatnim
+  położeniu gry; zmiana samego wyglądu nie przebudowuje pipeline'u (`PipelineSnapshot`);
+  token CI tylko do odczytu poza publikacją; smoke ProviderEval (Mock) w CI.
+
+Weryfikacja: 1114 testów (880 Core + 234 Infrastructure), na Linuksie 1111 zaliczonych
+i 3 pominięte (DPAPI), kompilacja całego rozwiązania z aplikacją WPF bez ostrzeżeń
+(`-p:EnableWindowsTargeting=true`). Pokrycie przy wprowadzeniu progu: Core 95,1%,
+Infrastructure 84,9%. Nie wykonano: uruchomienia okna na Windows, testów DPAPI, smoke testu
+OCR, SceneReplay, wywołań prawdziwych dostawców (kontener nie ma dostępu do DeepL, Anthropic
+i innych) ani pomiaru ProviderEval na prawdziwych dostawcach. Zyski szybkości live wynikają
+z logiki harmonogramu i testów, nie z pomiaru w grze. Do wykonania na Windows: M23–M35
+z [MANUAL_TESTING.md](MANUAL_TESTING.md).

@@ -26,17 +26,23 @@ nie wymaga Pythona, CUDA ani lokalnego modelu AI.
 | Funkcja | Obecne działanie |
 |---|---|
 | Ręczne tłumaczenie | Ctrl+Shift+T, zaznaczenie regionu, wynik w panelu lub nakładce |
-| Automatyczny live | obserwacja wybranego okna, OCR zmian i okresowe ponowne sprawdzanie |
+| Automatyczny live | obserwacja wybranego okna, OCR zmian i okresowe ponowne sprawdzanie; start/stop skrótem Ctrl+Shift+L na aktywnej grze |
+| Komunikaty w grze | brak klucza, limit, brak sieci, Cache-only, start/stop live — krótki pasek w nakładce, bez tekstu z ekranu |
 | Prezentacja | bloki przy oryginale lub z zakrywaniem, albo pasek napisów na dole |
 | Dostawcy tłumaczeń | DeepL, Azure AI Translator, Google, Claude, serwer LLM zgodny z OpenAI (także lokalny), Mock |
-| Własne słownictwo | edycja słownika, ręczne poprawki, import i eksport; dla modeli językowych także terminy wewnątrz zdań |
+| Własne słownictwo | edycja słownika, ręczne poprawki, import i eksport; terminy wewnątrz zdań (glosariusz DeepL, podpowiedzi dla modeli językowych), liczba mnoga, zakres „Etykieta” |
+| Spójność dialogu | kontekst poprzednich linii; modele językowe widzą swoje wcześniejsze tłumaczenia i płeć postaci gracza |
+| Jakość wyniku | lokalna kontrola (pusty wynik, liczby, brak tłumaczenia, „rozgadany” wynik), jedno ponowienie dla modeli językowych |
+| Pomiar szybkości | panel „Szybkość” z „Zmiana → napis”, mediana i p90, raport bez tekstu z gry |
 | Kontrola użycia | lokalne wyniki, deduplikacja i rezerwacje znaków przed API |
 | Prywatność | lokalny OCR, Cache-only i prywatny cache w pamięci |
 
-Ostatnie wydanie to 0.3.1 ([historia zmian](../CHANGELOG.md)); linia 0.3 dodaje wybór dostawcy
-tłumaczeń i kontekst dialogu, a z poprawek live m.in. odrzucanie starych odpowiedzi,
-lokalne usuwanie przykrytych napisów, potwierdzanie kolejnych odczytów i dokładniejsze
-pozycjonowanie. Nie oznaczają zakończenia prac nad jakością w ruchu.
+Ostatnie wydanie to 0.4.0 ([historia zmian](../CHANGELOG.md)): szybszy live, komunikaty w grze,
+skrót live, pamięć dialogu i postać gracza dla modeli językowych, kontrola jakości i lepszy
+słownik. Linia 0.3 dodała wybór dostawcy tłumaczeń i kontekst dialogu, a z poprawek live m.in.
+odrzucanie starych odpowiedzi, lokalne usuwanie przykrytych napisów, potwierdzanie kolejnych
+odczytów i dokładniejsze pozycjonowanie. Funkcje 0.4.0 nie były jeszcze sprawdzone w grze na
+Windows; nie oznaczają też zakończenia prac nad jakością w ruchu.
 
 ## Przepływ danych
 
@@ -45,7 +51,8 @@ pozycjonowanie. Nie oznaczają zakończenia prac nad jakością w ruchu.
 3. Aplikacja grupuje i normalizuje tekst. W live sprawdza również jego aktualność.
 4. Wynik wybierany jest według priorytetu: **ręczna poprawka → słownik → cache → API**.
 5. Brakujący tekst trafia do wybranego dostawcy (domyślnie DeepL), jeżeli pozwala na to
-   tryb pracy i limit użycia. Modele językowe dostają też nazwę gry i pasujące terminy słownika.
+   tryb pracy i limit użycia. Modele językowe dostają też nazwę gry, pasujące terminy słownika
+   i swoje poprzednie tłumaczenia z tej sesji; DeepL — glosariusz ze słownika.
 6. Aktualne tłumaczenie pojawia się w nakładce przepuszczającej kliknięcia.
 
 Do dostawcy trafia wyłącznie tekst, nigdy obraz. W live stary wynik może uzupełnić

@@ -19,6 +19,13 @@ public enum LatencyStage
 
     /// <summary>Od przechwycenia klatki do gotowego napisu, gdy trzeba było zapytać dostawcę.</summary>
     NewText,
+
+    /// <summary>
+    /// Tryb live: od pierwszej klatki, w której zauważono zmianę obrazu, do pokazania
+    /// przetłumaczonych napisów dla tej zmiany — z czekaniem na stabilizację i na zajęty
+    /// OCR/dostawcę. To opóźnienie, które faktycznie odczuwa gracz.
+    /// </summary>
+    ChangeToText,
 }
 
 public sealed record LatencySummary(int Count, double MedianMs, double P90Ms, double MaxMs, double LastMs);
@@ -95,12 +102,14 @@ public sealed class LatencyMonitor
 
     /// <summary>
     /// Krótki opis dla okna aplikacji, np.
-    /// „Nowy tekst: 0,82 s (p90 1,4 s) • Znany: 0,21 s • DeepL: 0,52 s (p90 0,9 s) • OCR: 95 ms • Klatka: 31 ms”.
+    /// „Zmiana → napis: 1,1 s (p90 1,9 s) • Nowy tekst: 0,82 s (p90 1,4 s) • Znany: 0,21 s • DeepL: 0,52 s (p90 0,9 s) • OCR: 95 ms • Klatka: 31 ms”.
     /// Pusty napis, gdy nic jeszcze nie zmierzono.
     /// </summary>
     public string Describe(string providerName)
     {
         var parts = new List<string>();
+        // Na początku: to czas, który gracz widzi — pozostałe etapy go tylko rozkładają.
+        Add(parts, "Zmiana → napis", Summarize(LatencyStage.ChangeToText), withP90: true);
         Add(parts, "Nowy tekst", Summarize(LatencyStage.NewText), withP90: true);
         Add(parts, "Znany", Summarize(LatencyStage.KnownText), withP90: false);
         Add(parts, providerName, Summarize(LatencyStage.Provider), withP90: true);
@@ -126,6 +135,7 @@ public sealed class LatencyMonitor
 
     private static IEnumerable<(LatencyStage Stage, string Label)> StageLabels(string providerName) =>
     [
+        (LatencyStage.ChangeToText, "Zmiana → napis (tryb live)"),
         (LatencyStage.NewText, "Nowy tekst (klatka → napis)"),
         (LatencyStage.KnownText, "Znany tekst (klatka → napis)"),
         (LatencyStage.Provider, $"Odpowiedź {providerName}"),

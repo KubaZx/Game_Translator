@@ -8,7 +8,8 @@ ingerencji w grę. Decyzje technologiczne (i ich uzasadnienia) są w
 ## 1. Podział na projekty
 
 Rozwiązanie (`GameTranslatorOverlay.slnx`) składa się z trzech projektów produkcyjnych
-i dwóch testowych; osobne projekty w `tools/` służą do lokalnej diagnostyki:
+i dwóch testowych; osobne projekty w `tools/` służą do lokalnej diagnostyki i ewaluacji,
+a `benchmarks/` do pomiarów wydajności:
 
 ```
 src/
@@ -18,6 +19,11 @@ src/
 tests/
   GameTranslatorOverlay.Core.Tests            (xUnit)
   GameTranslatorOverlay.Infrastructure.Tests  (xUnit)
+tools/
+  LiveDiag, SceneReplay, OcrLab, SmokeTest    (diagnostyka na Windows)
+  GameTranslatorOverlay.ProviderEval          (konsola net10.0: porównanie dostawców na korpusie EN→PL)
+benchmarks/
+  GameTranslatorOverlay.Benchmarks            (BenchmarkDotNet, poza dotnet test; docs/BENCHMARKS.md)
 ```
 
 Zależności płyną w jedną stronę: **App → Infrastructure → Core**. Core nie zna nikogo.
@@ -42,6 +48,22 @@ Zawartość:
 - **Priorytet źródeł tłumaczenia**: ręczna korekta > słownik > cache > API.
 - **Kontrola kosztów**: deduplikacja zapytań in-flight, debounce niestabilnego tekstu,
   limity (miesięczny, znaków na sesję), tryb Cache-only.
+- **Jakość i kontekst tłumaczeń** (`Translation/`): `TranslationQualityGate` (pusty wynik,
+  liczby, brak tłumaczenia, „rozgadany” wynik), `TranslationCacheContext` (znacznik wpisu cache:
+  `reflow-1`, `qa=…`, `qa-final`, `pg=f/m`), `DialogMemory` (ostatnie linie i pary
+  źródło → tłumaczenie, tylko w RAM), `PlayerGender` z `IGenderAwareTranslationProvider`
+  oraz `IRetryableTranslationProvider`. Szczegóły: [API_PROVIDERS.md](API_PROVIDERS.md).
+- **Słownik** (`Glossary/`): `GlossaryPrecedence` — jedna reguła pierwszeństwa dla tłumaczenia
+  lokalnego i glosariusza DeepL; `PersistableTerms` — terminy, które mogą trafić do trwałego
+  glosariusza (bez terminów prywatnych i `scope: label`).
+- **Użycie i komunikaty** (`Usage/`): `LatencyMonitor` i `ChangeToTextTracker` (pomiar
+  „Zmiana → napis”), `OverlayNoticePolicy` (deduplikacja 30 s, pierwszeństwo błędów, komunikaty
+  krytyczne przy schowanej nakładce, licznik braków Cache-only), `NoticeTexts` i
+  `OverlayNoticeEcho` (filtr OCR własnego komunikatu).
+- **Wybór okna** (`Windows/`): `LiveTargetResolver` — dla skrótu live wybiera aktywne okno,
+  zapamiętaną grę albo grę z profilem; okna powłoki Windows i sam tłumacz są pomijane.
+- **Ewaluacja** (`Evaluation/`): chrF, korpus JSONL, kontrole EN→PL i raport — używane tylko
+  przez ProviderEval i testy, nie przez aplikację.
 
 ### GameTranslatorOverlay.Infrastructure — integracje bez UI
 
@@ -60,7 +82,11 @@ Implementacje kontraktów z Core, które wymagają świata zewnętrznego, ale ni
 - **Klucze API**: Windows DPAPI (`ProtectedData`, zakres CurrentUser), osobny sekret na
   dostawcę, zapis w `%LOCALAPPDATA%\GameTranslatorOverlay`.
 - **Pliki**: odczyt/zapis profili gier i słowników (JSON, schematy w rozdz. 7),
-  `settings.json`.
+  `settings.json`. `AppSettings.PipelineSnapshot()` to ustawienia bez pól samego wyglądu
+  (czcionka, tło, tryby wyświetlania, skróty, komunikaty, ostatnia gra) — orchestrator
+  przebudowuje pipeline (i czyści pamięć dialogu) tylko, gdy zmieni się ta migawka.
+- **Glosariusz DeepL**: `DeepLGlossaryManager` przygotowuje glosariusz w tle; nowy glosariusz
+  opóźnia najwyżej jedną partię o najwyżej `GlossaryWaitBudget` (300 ms).
 - **Logowanie**: konfiguracja Serilog (plik rolling; bez treści tłumaczeń w trybie
   prywatnym, nigdy kluczy API).
 
@@ -76,7 +102,10 @@ Celowo **nie ma** osobnego assembly `Providers.DeepL` — DeepL siedzi w Infrast
   `IOcrProvider` (WinRT wymaga TFM windowsowego, więc siedzi w App, nie w Infrastructure).
 - **Nakładka**: osobne okno WPF z `WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE |
   WS_EX_TOOLWINDOW`, Topmost, click-through, bez fokusu.
-- **Skróty globalne** (np. Ctrl+Shift+T) — sterują wyłącznie tłumaczem, nigdy grą.
+- **Skróty globalne** (Ctrl+Shift+T, Ctrl+Shift+H, Ctrl+Shift+L dla start/stop live) — sterują
+  wyłącznie tłumaczem, nigdy grą. Okno dla Ctrl+Shift+L wybiera `LiveTargetResolver` (Core).
+- **Komunikaty w nakładce**: krótki pasek przy górnej krawędzi okna gry, sterowany przez
+  `OverlayNoticePolicy`; tekst komunikatu nie zawiera treści z ekranu.
 
 Reguła podziału w jednym zdaniu: **Core = co i dlaczego, Infrastructure = skąd i dokąd
 (dysk/sieć), App = ekran, piksele i klawiatura.**
@@ -148,9 +177,13 @@ Lokalny słownik terminów — działa PRZED tłumaczeniem maszynowym i bez siec
 
 - Ładuje słowniki JSON (`glossaries/<id>/en-pl.json`, schemat w rozdz. 7).
 - Dopasowanie: całe słowa/frazy (nigdy fragment słowa), dłuższe frazy przed krótszymi,
-  konflikt rozstrzyga `priority` (także między terminem z rozróżnianiem wielkości liter
-  i bez; przy remisie wygrywa dokładny). Klucze są normalizowane jak tekst z OCR.
-- `TryTranslateExact` tłumaczy lokalnie tekst będący w całości terminem;
+  angielska liczba mnoga i dopełniacz („Waystones”, „Waystone's”), fraza złamana do nowej
+  linii; konflikt rozstrzyga `GlossaryPrecedence` (wyższy `priority` → termin z rozróżnianiem
+  wielkości liter → wczytany później). Klucze są normalizowane jak tekst z OCR.
+- Terminy `scope: label` działają tylko jako cały tekst (etykieta, przycisk); nie są
+  podpowiadane w zdaniach ani wysyłane w glosariuszu DeepL.
+- `TryTranslateExact` tłumaczy lokalnie tekst będący w całości terminem (także etykietę
+  z dwukropkiem: „Rarity:” → „Rzadkość:”);
   `FindTermsIn` wskazuje terminy wewnątrz zdań dla dostawców kontekstowych.
 - Wykrywa i raportuje konflikty (ten sam `source` → różne `target`).
 - Etap 10: edycja terminów z UI, import/eksport.
@@ -182,7 +215,11 @@ zadanie dostaje `CancellationToken.Cancel()` i jego wynik nigdzie nie trafia.
 | `WindowsOcrProvider` | systemowy OCR i jego adapter | App |
 | `LiveTranslationSession` | pętla capture/OCR, aktualność sceny, stan bloków i publikacja aktualizacji | App |
 | `TranslationOrchestrator` | składanie pipeline'u, konfiguracja i jej token życia | App |
-| `TranslationPipeline`, `UsageTracker` | wyniki lokalne, deduplikacja, dostawca i rezerwacje znaków | Core |
+| `TranslationPipeline`, `UsageTracker` | wyniki lokalne, deduplikacja, dostawca i rezerwacje znaków, kontrola jakości, pamięć dialogu, pamięć awaryjna przy zepsutym cache | Core |
+| `TranslationQualityGate`, `TranslationCacheContext`, `DialogMemory` | ocena wyniku, znacznik wpisu cache, historia dialogu dla dostawców kontekstowych | Core |
+| `ChangeToTextTracker`, `LatencyMonitor` | pomiar „Zmiana → napis” i pozostałych etapów (tylko liczby, w pamięci) | Core |
+| `OverlayNoticePolicy`, `OverlayNoticeEcho` | które komunikaty pokazać i odfiltrowanie ich echa z OCR | Core |
+| `LiveTargetResolver` | wybór okna dla skrótu live | Core |
 | `BoundedTranslationWork` | ograniczona liczba nadzorowanych zadań i ich domknięcie | Core |
 | `LiveSceneValidity`, `LiveReadingStabilizer` | generacja sceny i kolejne potwierdzenia tekstu | Core |
 | `LiveBlockGeometry`, `LiveSubtitleContent` | niezależna stabilizacja położenia/rozmiaru i źródła paska napisów | Core |
@@ -247,10 +284,14 @@ rdzeń aplikacji jest uniwersalny. Konwencja pól: camelCase.
   "version": 1,
   "description": "...",
   "terms": [
-    { "source": "Energy Shield", "target": "Tarcza energetyczna", "caseSensitive": false, "priority": 10, "note": "opcjonalna uwaga" }
+    { "source": "Energy Shield", "target": "Tarcza energetyczna", "caseSensitive": false, "priority": 10, "note": "opcjonalna uwaga" },
+    { "source": "Save", "target": "Zapis", "scope": "label" }
   ]
 }
 ```
+
+`scope` jest opcjonalne: brak albo `any` — termin działa wszędzie; `label` — tylko jako cały
+tekst etykiety. Inną wartość odrzuca walidator („dozwolone: any, label”).
 
 Zasady słownika: dopasowanie **całych słów/fraz** (nigdy fragmentów słów), dłuższe frazy
 przed krótszymi, priorytety rozstrzygają konflikty; konflikty (ten sam `source` → różne
@@ -280,7 +321,15 @@ Parametry profilu mogą zmieniać część tego zachowania.
   Już wysłane zadanie może dokończyć się i uzupełnić cache. Nowa klatka korzysta
   z drugiego miejsca; przy obu zajętych sesja sprawdza scenę bez kolejki starych opisów.
 - `BoundedTranslationWork` nadzoruje najwyżej dwa zadania tłumaczeń. Stop anuluje
-  i domyka także pracę pozostawioną przez poprzednie widoki.
+  i domyka także pracę pozostawioną przez poprzednie widoki (także porzucone lokalne
+  sprawdzenia cache).
+- Klatka, której cały tekst jest znany lokalnie (korekty, słownik, cache), idzie szybką
+  ścieżką bez miejsca w kolejce tłumaczeń — nie czeka za wolnym zapytaniem starszej klatki
+  i nie rezerwuje znaków. Klatka z choć jednym nowym tekstem działa jak dotąd.
+- Okno stabilności 250 ms liczy się od pierwszej próbki, która zauważyła zmianę, a nie od
+  końca poprzedniego OCR/tłumaczenia. Obraz, który dalej się zmienia, czeka na stabilność
+  albo najwyżej 600 ms ciągłych zmian liczonych od końca oczekiwania. Ten sam moment zmiany
+  jest początkiem pomiaru „Zmiana → napis” (`ChangeToTextTracker`).
 - Zmiana konfiguracji ma osobny token, który blokuje późny zapis do poprzedniego
   cache. Zmiana sceny i zmiana konfiguracji mają różne skutki dla tego zapisu.
 

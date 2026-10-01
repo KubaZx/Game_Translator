@@ -10,6 +10,7 @@ using GameTranslatorOverlay.App.Ocr;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.App.Ui;
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Infrastructure.Caching;
 using GameTranslatorOverlay.Infrastructure.Content;
 using GameTranslatorOverlay.Infrastructure.Providers;
@@ -17,6 +18,7 @@ using GameTranslatorOverlay.Infrastructure.Secrets;
 using GameTranslatorOverlay.Infrastructure.Settings;
 using GameTranslatorOverlay.Infrastructure.Storage;
 using GameTranslatorOverlay.Core.Usage;
+using GameTranslatorOverlay.Core.Windows;
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 
@@ -38,6 +40,11 @@ public partial class MainWindow : Window
     private readonly AppPaths _paths;
     private readonly ILogger<MainWindow> _logger;
     private LiveTranslationSession? _liveSession;
+    private IntPtr _liveWindowHandle;
+
+    // Teksty pokazanych komunikatów nakładki — pętla live odrzuca ich odczyty OCR
+    // (filtr anty-sprzężeniowy, gdy wykluczenie nakładki z przechwytywania zawiedzie).
+    private readonly OverlayNoticeEcho _noticeEcho = new();
 
     private readonly OverlayWindow _overlay = new();
     private readonly ResultPanelWindow _panel = new();
@@ -50,6 +57,18 @@ public partial class MainWindow : Window
     private bool _loadingUi;
     private bool _selectingRegion;
     private int _statusTicks;
+
+    private MenuItem? _trayLiveItem;
+    private bool _liveHotkeyRegistered;
+    private bool _liveHotkeyBusy;
+
+    // Programowe zaznaczenie zapamiętanej gry po odświeżeniu listy NIE jest wyborem użytkownika:
+    // nie może przełączać profilu (zapis settings.json + przebudowa pipeline'u bez kliknięcia).
+    private bool _preselectingRememberedGame;
+
+    // Gra zapamiętana w trybie prywatnym — tylko w pamięci, nigdy w settings.json.
+    private string? _privateGameProcess;
+    private string? _privateGameTitle;
 
     public MainWindow(
         TranslationOrchestrator orchestrator,
@@ -146,9 +165,14 @@ public partial class MainWindow : Window
         CmbFont.SelectedItem = _settings.OverlayFontFamily;
         if (CmbFont.SelectedItem is null) CmbFont.SelectedIndex = 0;
 
+        // Kolejność pozycji = PlayerGender (Unknown, Male, Female) — indeks to wartość wyliczenia.
+        CmbPlayerGender.ItemsSource = new[] { "nieznana", "mężczyzna", "kobieta" };
+        CmbPlayerGender.SelectedIndex = (int)PlayerGenders.Parse(_settings.PlayerGender);
+
         TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         ChkCacheOnly.IsChecked = _settings.CacheOnlyMode;
         ChkPrivate.IsChecked = _settings.PrivateMode;
+        ChkOverlayNotices.IsChecked = _settings.ShowOverlayNotices;
 
         _loadingUi = false;
 
@@ -165,6 +189,12 @@ public partial class MainWindow : Window
         {
             SetStatus(overlayHotkeyError);
         }
+        _liveHotkeyRegistered = _hotkeys.TryRegister(
+            _settings.LiveToggleHotkey, () => _ = ToggleLiveFromHotkeyAsync(), out var liveHotkeyError);
+        if (!_liveHotkeyRegistered)
+        {
+            SetStatus(liveHotkeyError);
+        }
 
         foreach (var warning in _orchestrator.ContentWarnings)
         {
@@ -172,6 +202,7 @@ public partial class MainWindow : Window
         }
 
         InitializeTrayIcon();
+        UpdateLiveControls();
         _statusTimer.Start();
 
         // Obowiązkowe zastrzeżenie (SECURITY.md): raz przy pierwszym uruchomieniu,
@@ -182,7 +213,7 @@ public partial class MainWindow : Window
             _settings.DisclaimerAcknowledged = true;
             _settingsStore.Save(_settings);
         }
-        _appliedSettingsJson = SettingsSnapshot();
+        MarkSettingsApplied();
     }
 
     /// <summary>
@@ -192,7 +223,16 @@ public partial class MainWindow : Window
     /// </summary>
     private string? _appliedSettingsJson;
 
+    /// <summary>Część migawki istotna dla pipeline'u (bez wyglądu nakładki i skrótów).</summary>
+    private string? _appliedPipelineJson;
+
     private string SettingsSnapshot() => System.Text.Json.JsonSerializer.Serialize(_settings);
+
+    private void MarkSettingsApplied()
+    {
+        _appliedSettingsJson = SettingsSnapshot();
+        _appliedPipelineJson = _settings.PipelineSnapshot();
+    }
 
     private const string DisclaimerText =
         "Zastrzeżenie: GameTranslatorOverlay jest zewnętrzną nakładką tłumaczącą tekst widoczny " +
@@ -215,6 +255,8 @@ public partial class MainWindow : Window
         {
             var menu = new ContextMenu();
             menu.Items.Add(CreateMenuItem("Pokaż okno", RestoreFromTray));
+            _trayLiveItem = CreateMenuItem(LiveMenuHeader(), () => _ = ToggleLiveFromHotkeyAsync());
+            menu.Items.Add(_trayLiveItem);
             menu.Items.Add(CreateMenuItem("Przetłumacz region  (Ctrl+Shift+T)", () => _ = TranslateRegionInteractiveAsync()));
             menu.Items.Add(CreateMenuItem("Ukryj / pokaż nakładkę  (Ctrl+Shift+H)", _overlay.ToggleVisibility));
             menu.Items.Add(new Separator());
@@ -294,7 +336,26 @@ public partial class MainWindow : Window
     {
         var windows = await Task.Run(WindowEnumerator.GetOpenWindows);
         WindowsList.ItemsSource = windows;
-        SetStatus($"Znaleziono {windows.Count} okien. Wybierz okno gry albo od razu użyj Ctrl+Shift+T.");
+        var liveHotkey = _liveHotkeyRegistered ? _settings.LiveToggleHotkey : null;
+        SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: false, liveHotkey));
+
+        // Zapamiętana gra jest tylko zaznaczana — start live zostaje decyzją użytkownika.
+        // Bez autodetekcji profilu: świadomy wybór „brak profilu” ma przetrwać restart
+        // i Odśwież; profil dobierze się dopiero przy kliknięciu okna albo tuż przed startem skrótem.
+        if (FindRememberedGame(windows) is { } remembered)
+        {
+            _preselectingRememberedGame = true;
+            try
+            {
+                WindowsList.SelectedItem = remembered;
+            }
+            finally
+            {
+                _preselectingRememberedGame = false;
+            }
+            WindowsList.ScrollIntoView(remembered);
+            SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: true, liveHotkey));
+        }
 
         // Diagnostyka dev: GTO_AUTOLIVE="fragment tytułu" od razu startuje tryb live na
         // wskazanym oknie — bez klikania, żeby dało się zautomatyzować zrzuty nakładki.
@@ -308,6 +369,38 @@ public partial class MainWindow : Window
                 OnStartLiveClick(this, new RoutedEventArgs());
             }
         }
+    }
+
+    /// <summary>Pokazuje komunikat w nakładce, o ile gracz ich nie wyłączył.</summary>
+    private void ShowOverlayNotice(OverlayNotice? notice, RectPx anchor)
+    {
+        if (notice is null || !_settings.ShowOverlayNotices) return;
+        // Najpierw filtr, potem ekran: następna klatka OCR może już widzieć komunikat.
+        _noticeEcho.Remember(notice.Text);
+        _overlay.ShowNotice(notice, anchor);
+    }
+
+    // Zminimalizowane okno ma granice w okolicy (-32000,-32000) — taki punkt zaczepienia
+    // przyklejałby komunikat do rogu przypadkowego monitora. Pusty prostokąt = ostatni znany
+    // punkt zaczepienia albo monitor z kursorem.
+    private RectPx LiveWindowBounds() =>
+        _liveWindowHandle != IntPtr.Zero && NativeMethods.IsWindow(_liveWindowHandle)
+            && !NativeMethods.IsIconic(_liveWindowHandle)
+            ? ScreenCapture.GetWindowBounds(_liveWindowHandle)
+            : default;
+
+    /// <summary>
+    /// Włączenie/wyłączenie komunikatów nie zmienia tłumaczenia — zapis bez przebudowy
+    /// pipeline'u, żeby nie anulować tłumaczeń w locie.
+    /// </summary>
+    private void OnOverlayNoticesChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loadingUi) return;
+        _settings.ShowOverlayNotices = ChkOverlayNotices.IsChecked == true;
+        SaveSettingsWithoutRebuild();
+        SetStatus(_settings.ShowOverlayNotices
+            ? "Komunikaty w nakładce włączone."
+            : "Komunikaty w nakładce wyłączone — błędy widać tylko w tym oknie.");
     }
 
     private void OnRefreshClick(object sender, RoutedEventArgs e) => _ = RefreshWindowsAsync();
@@ -425,6 +518,7 @@ public partial class MainWindow : Window
             return;
         }
         _selectingRegion = true;
+        RectPx? manualRegion = null;
         try
         {
             // Połączenie z dostawcą zestawia się, gdy użytkownik zaznacza region — pierwsze
@@ -436,6 +530,7 @@ public partial class MainWindow : Window
                 SetStatus("Zaznaczanie anulowane.");
                 return;
             }
+            manualRegion = selected;
 
             // Chowamy własne okna, żeby nie przechwycić starego tłumaczenia.
             _overlay.Hide();
@@ -454,20 +549,30 @@ public partial class MainWindow : Window
         catch (OcrLanguageNotAvailableException ex)
         {
             SetStatus(ex.Message);
+            ShowManualFailureNotice(manualRegion);
         }
         catch (CacheStorageException ex)
         {
             SetStatus(ex.Message);
+            ShowManualFailureNotice(manualRegion);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Błąd tłumaczenia regionu");
             SetStatus("Nieoczekiwany błąd tłumaczenia — szczegóły w logu diagnostycznym.");
+            ShowManualFailureNotice(manualRegion);
         }
         finally
         {
             _selectingRegion = false;
         }
+    }
+
+    /// <summary>W trybie nakładki błąd ręcznego tłumaczenia nie może skończyć się ciszą.</summary>
+    private void ShowManualFailureNotice(RectPx? region)
+    {
+        if (region is { } selected && _settings.ResultDisplayMode == "overlay")
+            ShowOverlayNotice(OverlayNotices.ManualTranslationFailed(), selected);
     }
 
     private void DisplayResult(RegionTranslationResult result)
@@ -477,13 +582,24 @@ public partial class MainWindow : Window
             b.Outcome.TranslatedText ?? $"⚠ {b.Outcome.ErrorMessage}"));
         TxtTiming.Text = "Czasy: " + result.Timings;
 
+        // Gracz patrzy na grę, nie na to okno: brak tekstu, błąd dostawcy albo pudła
+        // Cache-only dostają komunikat w nakładce (przy zaznaczonym regionie). Pokazujemy go
+        // po ShowBlocks (ono zdejmuje ukrycie skrótem). Gdy nic nie przetłumaczono, ShowBlocks
+        // się nie wykonuje i nakładka zostaje schowana — ForManualResult oznacza więc komunikat
+        // jako odpowiedź na żądanie gracza, żeby przeszedł mimo ukrycia (inaczej: cisza).
+        var overlayMode = _settings.ResultDisplayMode == "overlay";
+        var notice = overlayMode
+            ? OverlayNotices.ForManualResult(result.Blocks.Select(static b => b.Outcome).ToList(), _orchestrator.ActiveProvider.Name)
+            : null;
+
         if (result.Blocks.Count == 0)
         {
+            ShowOverlayNotice(notice, result.Region);
             SetStatus(result.Warning ?? "OCR nie rozpoznał tekstu w zaznaczonym obszarze.");
             return;
         }
 
-        if (_settings.ResultDisplayMode == "overlay")
+        if (overlayMode)
         {
             var translated = result.Blocks
                 .Where(static b => b.Outcome.TranslatedText is not null)
@@ -493,6 +609,7 @@ public partial class MainWindow : Window
             {
                 _overlay.ShowBlocks(translated, _settings);
             }
+            ShowOverlayNotice(notice, result.Region);
         }
         else
         {
@@ -555,7 +672,7 @@ public partial class MainWindow : Window
     private void SaveSettingsWithoutRebuild()
     {
         _settingsStore.Save(_settings);
-        _appliedSettingsJson = SettingsSnapshot();
+        MarkSettingsApplied();
     }
 
     /// <summary>
@@ -729,6 +846,12 @@ public partial class MainWindow : Window
         }
 
         _settings.OverlayFontFamily = CmbFont.SelectedItem as string ?? "Segoe UI";
+        _settings.PlayerGender = PlayerGenders.ToSetting(CmbPlayerGender.SelectedIndex switch
+        {
+            1 => PlayerGender.Male,
+            2 => PlayerGender.Female,
+            _ => PlayerGender.Unknown,
+        });
 
         UpdateProviderPanel();
         var snapshot = SettingsSnapshot();
@@ -739,8 +862,18 @@ public partial class MainWindow : Window
         }
 
         _settingsStore.Save(_settings);
+        // Sam wygląd (czcionka, tło, styl live…) nakładka czyta na bieżąco — bez przebudowy,
+        // która wyczyściłaby pamięć dialogu i anulowała tłumaczenia w locie.
+        var pipelineSnapshot = _settings.PipelineSnapshot();
+        if (pipelineSnapshot == _appliedPipelineJson)
+        {
+            _appliedSettingsJson = snapshot;
+            SetStatus(warning is not null ? "⚠ " + warning : "Wygląd zapisany.");
+            return;
+        }
         _orchestrator.RebuildPipeline();
         _appliedSettingsJson = snapshot;
+        _appliedPipelineJson = pipelineSnapshot;
 
         var profileInfo = _orchestrator.ActiveProfile is { } profile ? $", profil: {profile.Name}" : string.Empty;
         SetStatus(warning is not null
@@ -813,18 +946,168 @@ public partial class MainWindow : Window
 
     private void OnWindowSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_loadingUi || WindowsList.SelectedItem is not TargetWindow window) return;
+        if (_loadingUi || _preselectingRememberedGame || WindowsList.SelectedItem is not TargetWindow window) return;
+        ApplyProfileAutoSelection(window);
+    }
 
-        // Autodetekcja profilu po nazwie procesu — tylko gdy użytkownik nie wybrał
-        // żadnego profilu ręcznie (nie nadpisujemy jego decyzji).
+    /// <summary>
+    /// Autodetekcja profilu po nazwie procesu — tylko gdy użytkownik nie wybrał żadnego
+    /// profilu ręcznie (nie nadpisujemy jego decyzji). Zmiana profilu przebudowuje pipeline,
+    /// więc przy działającej sesji live nic nie robimy: przebudowa anulowałaby jej tłumaczenia.
+    /// Skrót live wywołuje to PRZED startem sesji.
+    /// </summary>
+    private void ApplyProfileAutoSelection(TargetWindow window)
+    {
+        if (_liveSession is not null) return;
         if (CmbProfile.SelectedItem as string != NoProfileLabel) return;
 
         var match = _orchestrator.Profiles.FirstOrDefault(p =>
-            p.ProcessNames.Any(name => name.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase)));
+            p.ProcessNames.Any(name => LiveTargetResolver.SameProcess(name, window.ProcessName)));
         if (match is not null)
         {
             CmbProfile.SelectedItem = match.Name;
             SetStatus($"Wykryto grę „{match.Name}” — profil włączony automatycznie.");
+        }
+    }
+
+    private string? RememberedGameProcess => _privateGameProcess ?? _settings.LastGameProcess;
+
+    private string? RememberedGameTitle => _privateGameProcess is not null ? _privateGameTitle : _settings.LastGameTitle;
+
+    /// <summary>Okno zapamiętanej gry na liście (ten sam tytuł, inaczej największe okno procesu).</summary>
+    private TargetWindow? FindRememberedGame(IReadOnlyList<TargetWindow> windows)
+    {
+        if (string.IsNullOrWhiteSpace(RememberedGameProcess)) return null;
+        var resolution = LiveTargetResolver.Resolve(
+            windows.Select(static w => w.ToCandidate()).ToList(), foreground: 0,
+            RememberedGameProcess, RememberedGameTitle, profileProcessNames: null, OwnProcessName);
+        return resolution.Reason == LiveTargetReason.RememberedProcess
+            ? windows.FirstOrDefault(w => w.Handle == resolution.Window!.Handle)
+            : null;
+    }
+
+    private static string? OwnProcessName => Path.GetFileName(Environment.ProcessPath);
+
+    /// <summary>
+    /// Skrót live (i pozycja w zasobniku): działająca sesja → stop jak przyciskiem Stop;
+    /// inaczej start na aktywnej grze bez Alt+Tab do okna tłumacza.
+    /// </summary>
+    private async Task ToggleLiveFromHotkeyAsync()
+    {
+        if (_liveSession is not null)
+        {
+            // Zadanie ze skrótu/zasobnika jest odrzucane (`_ =`), więc wyjątek z zamykania sesji
+            // przepadłby bez śladu — łapiemy go i logujemy jak przy starcie.
+            try
+            {
+                OnStopLiveClick(this, new RoutedEventArgs());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Błąd zatrzymywania trybu live skrótem");
+                SetStatus("Nie udało się zatrzymać trybu live — szczegóły w logu diagnostycznym.");
+            }
+            return;
+        }
+        if (_liveHotkeyBusy) return;
+
+        // Okno pierwszoplanowe czytamy synchronicznie, ZANIM cokolwiek odda sterowanie —
+        // po await fokus mógłby już przejść gdzie indziej (np. na okno tłumacza).
+        var foreground = WindowEnumerator.GetForegroundRootWindow();
+        _liveHotkeyBusy = true;
+        try
+        {
+            var windows = await Task.Run(WindowEnumerator.GetOpenWindows);
+            // W międzyczasie użytkownik mógł kliknąć Start — nie uruchamiamy drugiej sesji.
+            if (_liveSession is not null) return;
+
+            var resolution = LiveTargetResolver.Resolve(
+                windows.Select(static w => w.ToCandidate()).ToList(),
+                foreground,
+                RememberedGameProcess,
+                RememberedGameTitle,
+                _orchestrator.Profiles.SelectMany(static p => p.ProcessNames),
+                OwnProcessName);
+
+            var target = resolution.Window is { } candidate
+                ? windows.FirstOrDefault(w => w.Handle == candidate.Handle)
+                : null;
+            if (target is null)
+            {
+                var message = resolution.Message ?? LiveTargetResolver.NoTargetMessage;
+                SetStatus(message);
+                TxtLiveStatus.Text = message;
+                ShowTrayNotification(message);
+                return;
+            }
+
+            // Listę podmieniamy dopiero, gdy jest cel — inaczej skrót wciśnięty z pulpitu
+            // skasowałby ręczne zaznaczenie gry na liście.
+            WindowsList.ItemsSource = windows;
+
+            // Zaznaczenie na liście uruchamia autodetekcję profilu; wywołanie wprost jest
+            // idempotentne i gwarantuje, że ewentualna przebudowa pipeline'u nastąpi PRZED startem.
+            WindowsList.SelectedItem = target;
+            WindowsList.ScrollIntoView(target);
+            ApplyProfileAutoSelection(target);
+            StartLive(target);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Błąd uruchamiania trybu live skrótem");
+            SetStatus("Nie udało się uruchomić trybu live — szczegóły w logu diagnostycznym.");
+        }
+        finally
+        {
+            _liveHotkeyBusy = false;
+        }
+    }
+
+    private void ShowTrayNotification(string message)
+    {
+        if (_trayIcon is null) return;
+        try
+        {
+            // Stały tekst komunikatu — bez tytułów okien ani treści z ekranu.
+            _trayIcon.ShowNotification("GameTranslatorOverlay", message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Nie udało się pokazać powiadomienia w zasobniku");
+        }
+    }
+
+    /// <summary>
+    /// Zapamiętuje grę dla skrótu i odświeżania listy. Nie przebudowuje pipeline'u (nazwa gry nie
+    /// wpływa na tłumaczenie). W trybie prywatnym nic nie trafia na dysk — tylko do pamięci.
+    /// </summary>
+    private void RememberGame(TargetWindow window)
+    {
+        if (_settings.PrivateMode)
+        {
+            _privateGameProcess = window.ProcessName;
+            _privateGameTitle = window.Title;
+            return;
+        }
+
+        _privateGameProcess = null;
+        _privateGameTitle = null;
+        if (_settings.LastGameProcess == window.ProcessName && _settings.LastGameTitle == window.Title) return;
+
+        // Migawkę „zastosowanych” ustawień przesuwamy tylko wtedy, gdy była aktualna —
+        // inaczej zgubilibyśmy oczekującą zmianę, która wymaga przebudowy pipeline'u.
+        var wasApplied = SettingsSnapshot() == _appliedSettingsJson;
+        _settings.LastGameProcess = window.ProcessName;
+        _settings.LastGameTitle = window.Title;
+        try
+        {
+            _settingsStore.Save(_settings);
+            if (wasApplied) _appliedSettingsJson = SettingsSnapshot();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Brak zapamiętanej gry nie może blokować trybu live.
+            _logger.LogWarning(ex, "Nie udało się zapisać ostatniej gry w ustawieniach");
         }
     }
 
@@ -836,6 +1119,12 @@ public partial class MainWindow : Window
             SetStatus("Najpierw wybierz okno gry z listy po lewej.");
             return;
         }
+        StartLive(window);
+    }
+
+    private void StartLive(TargetWindow window)
+    {
+        if (_liveSession is not null) return;
 
         var profile = _orchestrator.ActiveProfile;
         var upscale = OcrScaling.ResolvePreference(profile?.Ocr?.Upscale, _settings.OcrUpscale);
@@ -847,6 +1136,7 @@ public partial class MainWindow : Window
             ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.0,
             OcrUpscale = upscale.Preferred,
             AllowAutoUpscale = upscale.AllowAuto,
+            NoticeEcho = _noticeEcho,
         };
 
         // Wczesne utworzenie HWND nakładki, żeby wiedzieć, czy wykluczenie z capture działa.
@@ -870,12 +1160,34 @@ public partial class MainWindow : Window
             }),
             _logger);
         _liveSession = session;
+        _liveWindowHandle = window.Handle;
         session.Start();
 
-        BtnStartLive.IsEnabled = false;
-        BtnStopLive.IsEnabled = true;
+        UpdateLiveControls();
         SetLiveIndicator(LiveIndicatorState.Active);
         SetStatus($"Tryb live uruchomiony dla „{window.Title}” ({options.Fps:0.#} analiz/s).");
+        RememberGame(window);
+    }
+
+    private string LiveMenuHeader() => _liveSession is not null
+        ? $"⏹ Stop live{HotkeySuffix()}"
+        : $"▶ Start live na aktywnej grze{HotkeySuffix()}";
+
+    private string HotkeySuffix() => _liveHotkeyRegistered ? $"  ({_settings.LiveToggleHotkey})" : string.Empty;
+
+    /// <summary>Przyciski, pozycja w zasobniku i podpowiedź ikony zgodne ze stanem trybu live.</summary>
+    private void UpdateLiveControls()
+    {
+        var running = _liveSession is not null;
+        BtnStartLive.IsEnabled = !running;
+        BtnStopLive.IsEnabled = running;
+        BtnStartLive.Content = $"▶ Start live{HotkeySuffix()}";
+        if (_trayLiveItem is not null) _trayLiveItem.Header = LiveMenuHeader();
+        if (_trayIcon is not null)
+        {
+            // Bez tytułu okna gry — podpowiedź ikony widać też na zrzutach i nagraniach pulpitu.
+            _trayIcon.ToolTipText = running ? "GameTranslatorOverlay — live: włączony" : "GameTranslatorOverlay — live: wyłączony";
+        }
     }
 
     private enum LiveIndicatorState { Idle, Active, Paused }
@@ -910,6 +1222,12 @@ public partial class MainWindow : Window
         {
             SetLiveIndicator(LiveIndicatorState.Active);
         }
+        // Komunikat (błąd dostawcy, Cache-only, start/stop) przy górnej krawędzi okna gry.
+        // Warstwa komunikatu przetrwa czyszczenie nakładki powyżej.
+        if (update.Notice is { } notice)
+        {
+            ShowOverlayNotice(notice, update.WindowBounds.IsEmpty ? LiveWindowBounds() : update.WindowBounds);
+        }
         if (update.Stopped)
         {
             StopLiveSession();
@@ -941,15 +1259,18 @@ public partial class MainWindow : Window
     {
         _liveSession?.Dispose();
         _liveSession = null;
-        BtnStartLive.IsEnabled = true;
-        BtnStopLive.IsEnabled = false;
+        _liveWindowHandle = IntPtr.Zero;
+        UpdateLiveControls();
         SetLiveIndicator(LiveIndicatorState.Idle);
     }
 
     private void OnStopLiveClick(object sender, RoutedEventArgs e)
     {
+        var wasRunning = _liveSession is not null;
+        var bounds = LiveWindowBounds();
         StopLiveSession();
         _overlay.ClearBlocks();
+        if (wasRunning) ShowOverlayNotice(OverlayNotices.LiveStopped(), bounds);
         TxtLiveStatus.Text = "Tryb live zatrzymany.";
         SetStatus("Tryb live zatrzymany.");
     }
@@ -1049,6 +1370,9 @@ public partial class MainWindow : Window
     {
         _statusTimer.Stop();
         _trayIcon?.Dispose();
+        // Zatrzymanie sesji niżej odświeża stan live — nie może dotykać zwolnionej ikony.
+        _trayIcon = null;
+        _trayLiveItem = null;
         if (_trayIconHandle != IntPtr.Zero)
         {
             NativeMethods.DestroyIcon(_trayIconHandle);

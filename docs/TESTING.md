@@ -1,9 +1,11 @@
 # Testy i pomiary — GameTranslatorOverlay
 
-Stan sprawdzony 29 września 2026: **562 testy xUnit** — **402 Core** i
-**160 Infrastructure** — oraz kompilacja całego rozwiązania (z aplikacją WPF) bez ostrzeżeń.
-Ta runda była weryfikowana na Linuksie (.NET 10 SDK, `-p:EnableWindowsTargeting=true`):
-testy DPAPI i smoke test Windows OCR wymagają Windows i nie były w niej uruchamiane.
+Stan sprawdzony 1 października 2026 (wydanie 0.4.0): **1114 testów xUnit** — **880 Core**
+i **234 Infrastructure** — oraz kompilacja całego rozwiązania (z aplikacją WPF, narzędziami
+i benchmarkami) bez ostrzeżeń. Ta runda była weryfikowana na Linuksie (.NET 10 SDK,
+`-p:EnableWindowsTargeting=true`): 1111 testów zaliczonych, 3 testy DPAPI pominięte (Skipped).
+Testy DPAPI i smoke test Windows OCR wymagają Windows i nie były w tej rundzie uruchamiane
+lokalnie (job `build-test` w CI wykonuje je na `windows-latest`).
 Poprzedni pełny przebieg na Windows (15 września 2026): 371 testów i smoke test z Mockiem.
 
 Rozdzielamy testy logiki, lokalne sondy z rzeczywistym capture/OCR i ocenę
@@ -19,8 +21,16 @@ fizycznej nakładki przez użytkownika. Wynik jednej grupy nie zastępuje pozost
 | Sondy sesji | `tools/GameTranslatorOverlay.LiveDiag`, `tools/GameTranslatorOverlay.SceneReplay` | lokalny pulpit Windows, własne okno lub wskazana gra, Mock |
 | Ocena wizualna | [MANUAL_TESTING.md](MANUAL_TESTING.md) | użytkownik, konkretna gra, DPI, monitory, układ i skróty |
 
-CI uruchamia projekty xUnit na `windows-latest` oraz szybki przebieg na `ubuntu-latest` (kompilacja z `-p:EnableWindowsTargeting=true`). Smoke test i sondy pulpitu
-wykonuje się osobno; nie są częścią standardowego `dotnet test`.
+CI uruchamia projekty xUnit na `windows-latest` oraz szybki przebieg na `ubuntu-latest`
+(kompilacja z `-p:EnableWindowsTargeting=true`, pokrycie kodu z progiem i smoke test
+ProviderEval z Mockiem). Smoke test OCR i sondy pulpitu wykonuje się osobno; nie są częścią
+standardowego `dotnet test`. Pomiary wydajności są w osobnym projekcie `benchmarks/`
+(BenchmarkDotNet, poza `dotnet test`) — [BENCHMARKS.md](BENCHMARKS.md).
+
+Nowy push do tego samego PR-a anuluje starszy przebieg CI. Push na `main`, tagi `v*`
+i ręczne uruchomienie nie są anulowane ani kolejkowane — każdy commit na `main` i każde
+wydanie ma własny, dokończony przebieg. Joby testów mają token GitHub tylko do odczytu;
+zapis ma wyłącznie job publikacji.
 
 ## Co obejmuje Core.Tests
 
@@ -48,6 +58,20 @@ wykonuje się osobno; nie są częścią standardowego `dotnet test`.
   alpha/paddingu, pełne pole, geometria, granice kosztu i błędne dane (25 przypadków).
 - Niezależną stabilizację pozycji i rozmiaru oraz usuwanie źródeł paska napisów.
 - Parser opcji LiveDiag, dołączony do testów bez zależności od aplikacji WPF.
+- Kontrolę jakości (`TranslationQualityGate`): normalizację liczb, brak tłumaczenia, „rozgadany”
+  wynik, ponowienie dla dostawców LLM, znaczniki `qa=`/`qa-final` i limit zapytań.
+- Pamięć dialogu (`DialogMemory`), płeć gracza i ponowne tłumaczenie po jej zmianie (`pg=`),
+  także w połączeniu z `qa-final`.
+- Odporność na błędy cache (traktowanie jak brak wpisu, pamięć awaryjna), pętlę wpisów profilu
+  i Mock oraz liczniki użycia bez podwójnego odczytu.
+- Szybką ścieżkę znanych klatek live i pomiar „Zmiana → napis” (`ChangeToTextTracker`).
+- Komunikaty nakładki (`OverlayNoticePolicy`, `NoticeTexts`, filtr echa komunikatu w OCR,
+  komunikaty ręcznego tłumaczenia przy schowanej nakładce).
+- Wybór okna dla skrótu live (`LiveTargetResolver`) i jego komunikaty.
+- Słownik: liczba mnoga i dopełniacz, łamanie wierszy, dwukropek, zakres `label`,
+  `GlossaryPrecedence`, `PersistableTerms` bez terminów prywatnych.
+- Ewaluację (`Evaluation*Tests`): chrF zgodny z sacreBLEU, korpus, kontrole i ich fałszywe
+  alarmy, raport i CSV bezpieczny dla Excela.
 
 Czyste helpery nie dowodzą poprawnego rysowania przez WPF ani jakości Windows OCR.
 Ich powiązanie z sesją sprawdzają osobne sondy i obserwacje użytkownika.
@@ -67,12 +91,63 @@ Ich powiązanie z sesją sprawdzają osobne sondy i obserwacje użytkownika.
   liczbie wyników, odmowa modelu, brak modelu, niedziałający serwer lokalny.
 - Claude przez oficjalne SDK: model domyślny, fallback przy odmowie z nagłówkiem beta,
   schemat JSON, `effort` tylko dla obsługujących go modeli, błędy API i test przez Models API.
-- Katalog dostawców i zapis nowych ustawień (także odczyt starego `settings.json`).
+- Katalog dostawców i zapis nowych ustawień (także odczyt starego `settings.json` bez nowych
+  pól: `showOverlayNotices`, `playerGender`, `liveToggleHotkey`, `lastGameProcess`/`lastGameTitle`)
+  oraz `PipelineSnapshot` pomijający pola samego wyglądu.
+- Glosariusz DeepL w tle: wspólny termin oczekiwania, limit czasu zapytań, brak ponawiania.
+- Prompt LLM: pary `previous`, reguła płci gracza, instrukcja odmiany terminów.
+- SQLite: błąd zapisu liczników nie przerywa odczytu, eksport/import pola `context`.
 - Zgodność dostarczonych profili z bieżącą wersją aplikacji (`minAppVersion`).
 - DPAPI: szyfrowanie i odszyfrowanie danych dla bieżącego użytkownika Windows.
 
 Testy nie wywołują prawdziwych usług tłumaczeniowych ani nie czytają klucza użytkownika.
 Pliki tymczasowe są odizolowane od danych aplikacji.
+
+## Testy tylko dla Windows (`[WindowsFact]`)
+
+Testy, które mają sens tylko na Windows (DPAPI, w przyszłości Windows OCR), oznaczamy
+`[WindowsFact]` lub `[WindowsTheory]` zamiast `if (!OperatingSystem.IsWindows()) return;`.
+Na Linuksie xUnit pokazuje je jako **Skipped** z polskim powodem, a nie jako Passed.
+W pełni wykonuje je job `build-test` na `windows-latest`.
+
+## Pokrycie kodu
+
+Pokrycie zbiera `coverlet.collector` z ustawieniami w `tests/coverage.runsettings`: liczymy
+tylko kod produkcyjny, bez projektów testowych, kodu generowanego i `obj/`. W CI job
+`test-linux` wypisuje podsumowanie w zakładce Summary przebiegu, publikuje raport HTML jako
+artefakt `coverage-report` i sprawdza progi pokrycia linii skryptem `tools/check-coverage.py`:
+**Core ≥ 91%**, **Infrastructure ≥ 80%** (przy wprowadzeniu zmierzono 95,1% i 84,9%). Spadek
+poniżej progu przerywa job.
+
+Lokalnie przed każdym pomiarem usuń stare wyniki: katalog `TestResults` nie jest czyszczony
+automatycznie, a ReportGenerator scala **wszystkie** pliki `coverage.cobertura.xml`, które
+w nim znajdzie. Z resztkami poprzednich przebiegów pokrycie lokalne wychodzi zawyżone względem
+CI, które zawsze startuje od czystego checkoutu.
+
+```bash
+rm -rf TestResults            # PowerShell: Remove-Item -Recurse -Force TestResults
+dotnet build GameTranslatorOverlay.slnx -c Release -p:EnableWindowsTargeting=true
+dotnet test GameTranslatorOverlay.slnx -c Release --no-build -p:EnableWindowsTargeting=true --collect:"XPlat Code Coverage" --settings tests/coverage.runsettings --results-directory TestResults
+dotnet tool restore
+dotnet tool run reportgenerator "-reports:TestResults/**/coverage.cobertura.xml" "-targetdir:TestResults/coverage-report" "-reporttypes:HtmlInline;MarkdownSummaryGithub;Cobertura"
+python3 tools/check-coverage.py TestResults/coverage-report/Cobertura.xml GameTranslatorOverlay.Core=91 GameTranslatorOverlay.Infrastructure=80
+```
+
+Raport HTML: `TestResults/coverage-report/index.html`. ReportGenerator jest przypięty jako
+lokalne narzędzie w `.config/dotnet-tools.json` (5.5.11).
+
+## Ewaluacja dostawców (ProviderEval)
+
+[ProviderEval](../tools/GameTranslatorOverlay.ProviderEval/README.md) porównuje dostawców
+i warianty promptu na korpusie EN→PL (chrF, czasy, kontrole jakości). To nie jest test
+przechodzi/nie przechodzi: wynik ocenia człowiek. CI uruchamia go tylko jako smoke test
+z Mockiem (bez kluczy i sieci) — sprawdza, że korpus, pipeline i raport działają:
+
+```bash
+dotnet run --project tools/GameTranslatorOverlay.ProviderEval -c Release --no-build -- --corpus eval/en-pl.sample.jsonl --providers mock --out eval/out
+```
+
+Pomiary z prawdziwymi dostawcami nie były jeszcze wykonane (kontener bez dostępu do ich API).
 
 ## Uruchamianie
 

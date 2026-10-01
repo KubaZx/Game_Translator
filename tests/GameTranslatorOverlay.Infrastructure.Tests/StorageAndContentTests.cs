@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using GameTranslatorOverlay.Core.Glossary;
 using GameTranslatorOverlay.Infrastructure.Content;
 using GameTranslatorOverlay.Infrastructure.Secrets;
@@ -26,17 +27,19 @@ public sealed class TempDirectory : IDisposable
     }
 }
 
+// DPAPI istnieje tylko na Windows: [WindowsFact] sprawia, że na innych systemach testy są
+// Skipped (a nie cicho zaliczone), a atrybut klasy zastępuje analizatorowi CA1416 dawny
+// strażnik OperatingSystem.IsWindows() w treści testu.
+[SupportedOSPlatform("windows")]
 public sealed class DpapiSecretsStoreTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
 
-    [Fact]
+    [WindowsFact]
     public void Zapis_odczyt_i_usuniecie_sekretu()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         var store = new DpapiSecretsStore(new AppPaths(_temp.Path));
 
         store.Save("deepl-api-key", "sekret:fx");
@@ -46,20 +49,16 @@ public sealed class DpapiSecretsStoreTests : IDisposable
         Assert.Null(store.Load("deepl-api-key"));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Odczyt_nieistniejacego_sekretu_zwraca_null()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         var store = new DpapiSecretsStore(new AppPaths(_temp.Path));
         Assert.Null(store.Load("nie-ma"));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Sekret_jest_zaszyfrowany_na_dysku()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         var paths = new AppPaths(_temp.Path);
         var store = new DpapiSecretsStore(paths);
         store.Save("klucz", "jawna-wartosc-klucza");

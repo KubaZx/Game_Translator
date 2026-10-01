@@ -27,9 +27,12 @@ public sealed class LlmProviderOptions : HttpProviderOptions
 /// <summary>
 /// Wspólna logika dostawców opartych na modelach językowych: prompt z kontekstem gry
 /// i terminologią, dzielenie na partie, odporne czytanie odpowiedzi i pojedynczy fallback.
-/// Podklasa dostarcza wyłącznie jedno wywołanie modelu.
+/// Podklasa dostarcza wyłącznie jedno wywołanie modelu. Model odpowiada niedeterministycznie,
+/// więc pipeline może raz ponowić wynik, który nie przeszedł kontroli jakości. Model potrafi
+/// odmienić zwroty do gracza według jego płci (<see cref="IGenderAwareTranslationProvider"/>).
 /// </summary>
-public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, ILogger logger) : IContextualTranslationProvider
+public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, ILogger logger)
+    : IContextualTranslationProvider, IRetryableTranslationProvider, IGenderAwareTranslationProvider
 {
     protected LlmProviderOptions Options { get; } = options ?? new LlmProviderOptions();
     protected ILogger Logger { get; } = logger;
@@ -66,14 +69,14 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
         var results = new List<string>(texts.Count);
         foreach (var chunk in texts.Chunk(Math.Max(1, Options.MaxBatchSize)))
         {
-            results.AddRange(await TranslateChunkAsync(chunk, systemPrompt, context.RecentTexts, cancellationToken)
+            results.AddRange(await TranslateChunkAsync(chunk, systemPrompt, context.RecentExchanges, cancellationToken)
                 .ConfigureAwait(false));
         }
         return results;
     }
 
     private async Task<IReadOnlyList<string>> TranslateChunkAsync(
-        string[] chunk, string systemPrompt, IReadOnlyList<string> previousLines, CancellationToken cancellationToken)
+        string[] chunk, string systemPrompt, IReadOnlyList<RecentExchange> previousLines, CancellationToken cancellationToken)
     {
         var content = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage(chunk, previousLines), cancellationToken)
             .ConfigureAwait(false);

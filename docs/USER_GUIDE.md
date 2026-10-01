@@ -5,7 +5,7 @@ zewnętrzna nakładka: przechwytuje obraz, rozpoznaje tekst systemowym OCR Windo
 i wyświetla tłumaczenie nad grą — **nie dotykając plików ani procesu gry**.
 
 Projekt jest przeznaczony do różnych gier; nie wymaga profilu konkretnego tytułu.
-Instrukcja opisuje wydanie 0.3.1 — szczegóły w
+Instrukcja opisuje wydanie 0.4.0 — szczegóły w
 [historii zmian](https://github.com/KubaZx/Game_Translator/blob/main/CHANGELOG.md).
 
 ## Instalacja
@@ -43,9 +43,27 @@ Terminy z Twojego słownika działają także w środku dłuższych zdań
 
 - **DeepL** dostaje glosariusz zbudowany ze słownika i sam odmienia terminy po polsku.
   Glosariusz zapisuje się na Twoim koncie DeepL jako „GameTranslatorOverlay …”; po zmianie
-  słownika aplikacja podmienia go na nowy. W trybie prywatnym glosariusz nie powstaje.
+  słownika aplikacja podmienia go na nowy. Glosariusz przygotowuje się w tle: pierwsza partia
+  po zmianie słownika czeka na niego najwyżej 0,3 s, a jeśli nie jest gotowy, idzie bez niego.
+  W trybie prywatnym glosariusz nie powstaje, a terminy dodane w trybie prywatnym nie trafiają
+  do niego nigdy — także po wyłączeniu trybu prywatnego.
 - **Model językowy** i **Claude** dostają pasujące terminy i nazwę gry z profilu.
 - **Azure** i **Google** używają słownika tylko dla tekstów, które w całości są terminem.
+
+Terminy są rozpoznawane także w liczbie mnogiej i dopełniaczu („Waystones”, „Exalted Orbs”,
+„Waystone's”) oraz gdy OCR złamie je na dwa wiersze („Energy⏎Shield”). Formy mnogiej aplikacja
+nie tłumaczy sama (słownik nie zna polskiej odmiany) — termin trafia do dostawcy jako podpowiedź.
+Etykieta z dwukropkiem („Rarity:”) jest tłumaczona lokalnie („Rzadkość:”).
+
+**Zakres „Etykieta”.** Krótkie słowa, które w grze są przyciskiem albo nagłówkiem („Save”,
+„Attack”), w zdaniu często znaczą coś innego („save the village”). Zaznacz dla takiego terminu
+kolumnę **Etykieta** w edytorze słownika (w pliku JSON: `"scope": "label"`). Termin działa wtedy
+tylko jako cały napis — nie jest podpowiadany w zdaniach i nie trafia do glosariusza DeepL.
+W słowniku ogólnym tak oznaczono Save, Chest, Key, Trade, Attack i Upgrade, w PoE2 — Staff.
+
+Gdy dwa słowniki mają ten sam termin z różnym tłumaczeniem, wygrywa wyższy priorytet, potem
+termin z rozróżnianiem wielkości liter, a na końcu słownik wczytany później (ogólny → profil
+gry → Twój → sesja). DeepL i tłumaczenie lokalne stosują tę samą regułę.
 
 Tłumaczenia zapisane w cache przed dodaniem terminu nie zmieniają się same. Popraw je ręcznie
 albo wyczyść cache.
@@ -74,6 +92,25 @@ Claude sam ponawia zapytanie na modelu zastępczym wskazanym przez Anthropic; do
 modeli `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5` i `claude-fable-5-1`.
 Opłaty rozlicza Anthropic według zużytych tokenów, nie znaków.
 
+### Pamięć dialogu i postać gracza (tylko Claude i model językowy)
+
+Model językowy dostaje do 6 ostatnich linii z tej sesji (łącznie ok. 1500 znaków) razem
+z tłumaczeniami, które **sam już dla nich zwrócił**. Dzięki temu trzyma się wybranych form
+(„gotowy” czy „gotowa”), formy zwracania się i pisowni imion. Do pamięci nie trafiają teksty
+z cache i słownika ani wyniki puste, nieprzetłumaczone i „rozgadane”. Ręczna poprawka linii
+(**Popraw**) zastępuje jej tłumaczenie w pamięci, więc kolejne linie trzymają się poprawionej
+formy. Pamięć jest tylko w RAM; czyści ją zmiana dostawcy, profilu lub ustawień tłumaczenia
+i zamknięcie programu. Zmiana samego wyglądu (czcionka, tło, styl napisów, skróty,
+komunikaty) jej nie czyści — status pokazuje wtedy „Wygląd zapisany.”. DeepL dostaje jako
+kontekst tylko angielskie linie, jak dotąd.
+
+**Postać gracza** (w oknie głównym obok kroju czcionki): *nieznana*, *mężczyzna* albo
+*kobieta*. Po angielsku „you” nie ma rodzaju; przy wybranej płci model odmienia zwroty do
+gracza („zrobiłaś”, „jesteś gotowa” / „zrobiłeś”, „jesteś gotowy”). DeepL, Azure, Google
+i Mock ignorują to ustawienie. Po zmianie płci linie z cache, które zwracają się do gracza
+(you/your/yours/yourself), są raz tłumaczone ponownie — to płatne zapytania. Ręczne poprawki
+nie są nadpisywane; w Cache-only i przy błędzie dostawcy zostaje stary wynik.
+
 ## Tłumaczenie ręczne (podstawowy tryb)
 
 1. Uruchom grę w trybie **okienkowym** lub **borderless fullscreen** (pełny ekran
@@ -91,16 +128,78 @@ W panelu wyniku możesz:
 
 ## Tryb live (automatyczny)
 
-1. Wybierz okno gry z listy i kliknij **▶ Start live**.
+1. Wybierz okno gry z listy i kliknij **▶ Start live** — albo w grze wciśnij **Ctrl+Shift+L**
+   (opis niżej).
 2. Program obserwuje okno kilka razy na sekundę; gdy pojawi się nowy, stabilny tekst,
    tłumaczy go automatycznie i pokazuje w nakładce.
 3. „Wyświetlanie” wybiera układ: **Przy oryginale** (dymki przy tekście) albo
    **Napisy na dole** (pasek jak napisy filmowe — najlepszy do dialogów).
-4. **⏹ Stop** kończy tryb live. Minimalizacja gry chowa nakładkę automatycznie.
+4. **⏹ Stop** (albo ponownie **Ctrl+Shift+L**) kończy tryb live. Minimalizacja gry chowa
+   nakładkę automatycznie.
 
 Jeżeli aplikacja rozpozna dostarczony profil, może dobrać go do wybranego okna.
 Pozostałe gry działają na ustawieniach ogólnych. Profil PoE2 w zestawie jest
 opcjonalnym dodatkiem ze słownikiem terminów.
+
+### Start i stop live skrótem (Ctrl+Shift+L)
+
+Skrót działa bez przełączania się do okna tłumacza. Gdy live działa, skrót je zatrzymuje
+(jak **⏹ Stop**). Gdy nie działa, tłumacz wybiera okno w tej kolejności:
+
+1. **aktywne okno** — to, w którym jesteś w chwili wciśnięcia skrótu, chyba że to pulpit,
+   pasek zadań, menu Start, wyszukiwarka, klawiatura ekranowa albo sam tłumacz;
+2. **ostatnio tłumaczona gra** (najpierw okno o tym samym tytule, potem największe okno
+   tego procesu);
+3. **gra z profilem**, jeśli jest uruchomiona;
+4. jeśli nic nie pasuje — komunikat „Przełącz się do gry i wciśnij skrót ponownie.” w pasku
+   statusu i w zasobniku.
+
+Gdy wybrano „brak profilu”, a gra ma profil, profil włącza się przed startem (jak przy kliknięciu
+okna na liście). Po uruchomieniu aplikacji i po **Odśwież** ostatnia gra jest tylko zaznaczana
+na liście — live nie startuje sam, a profil się nie zmienia.
+
+Menu ikony w zasobniku ma pozycję **▶ Start live na aktywnej grze** (w trakcie sesji
+**⏹ Stop live**); podpowiedź ikony pokazuje „live: włączony / wyłączony”. Przycisk
+**▶ Start live** pokazuje skrót, jeśli udało się go zarejestrować.
+
+Skrót zmienisz w `settings.json` (folder danych) polem `liveToggleHotkey`, np.
+`"liveToggleHotkey": "Ctrl+Alt+F9"`. Gdy skrót jest zajęty przez inny program albo zapisany
+błędnie, pasek statusu to pokazuje, a reszta aplikacji działa.
+
+Ograniczenia:
+
+- Skrót tłumaczy dokładnie aktywne okno — jeśli na pierwszym planie jest przeglądarka,
+  live uruchomi się na przeglądarce. Zatrzymasz je tym samym skrótem.
+- Gry UWP / Microsoft Store / Game Pass (okno `ApplicationFrameHost`) nie są wybierane jako
+  aktywne okno. Wybierz grę raz na liście i kliknij **▶ Start live**; później skrót znajdzie
+  ją jako ostatnią grę.
+
+### Komunikaty w nakładce
+
+W trakcie gry okno aplikacji jest zwykle schowane, więc ważne zdarzenia pokazują się jako
+krótki, półprzezroczysty pasek wyśrodkowany przy górnej krawędzi okna gry. Pasek znika po
+3–5 s i nie przyjmuje kliknięć. Przykłady:
+
+- „⚠ Brak klucza DeepL”, „⚠ Klucz DeepL został odrzucony”, „⚠ Limit znaków DeepL wyczerpany”,
+- „⏳ DeepL ogranicza zapytania”, „⚠ Brak połączenia z dostawcą”,
+  „⚠ Limit znaków tej sesji wyczerpany”, „⚠ DeepL zwrócił pusty wynik”,
+- „Cache-only: 5 tekstów bez tłumaczenia”, „⚠ Cache niedostępny — tłumaczenia nie są zapisywane”,
+- „▶ Tłumaczenie na żywo włączone”, „■ Tłumaczenie na żywo zatrzymane”.
+
+Ten sam komunikat pojawia się najwyżej raz na 30 s. Błąd wypiera informację, a informacja
+nie przykrywa widocznego błędu. Start i stop live są pokazywane zawsze. Braki w Cache-only
+są zbierane w jeden licznik, który wraca dopiero przy nowych tekstach; ostrzeżenie
+o niedziałającym cache pojawia się raz na sesję live.
+
+Przy nakładce schowanej **Ctrl+Shift+H** przechodzą tylko komunikaty krytyczne: zatrzymany
+live, brak lub odrzucony klucz, wyczerpany limit dostawcy albo sesji. Napisy pozostają schowane.
+Ręczne tłumaczenie (**Ctrl+Shift+T**) w trybie „Nakładka na ekranie” zawsze daje odpowiedź —
+także przy schowanej nakładce: tłumaczenie albo komunikat („ℹ Nie rozpoznano tekstu
+w zaznaczeniu”, błąd dostawcy, braki Cache-only, „⚠ Tłumaczenie nie powiodło się”).
+
+Komunikaty zawierają tylko stały opis i nazwę dostawcy, nigdy tekst z ekranu. Wyłączysz je
+polem **Komunikaty w nakładce** (pod Cache-only i trybem prywatnym); błędy widać wtedy tylko
+w oknie aplikacji.
 
 ### Jak uzyskać czytelny wynik
 
@@ -127,6 +226,9 @@ zapewniają jednakowego czasu i wyglądu w każdej grze.
 Panel **Szybkość** pokazuje medianę czasów z bieżącej sesji (p90 = 9 na 10 przypadków
 było szybszych):
 
+- **Zmiana → napis** (tylko live) — od pierwszej klatki, w której zauważono zmianę obrazu, do
+  gotowych napisów: łącznie z czekaniem na stabilizację, OCR, kolejką i dostawcą. To czas
+  najbliższy temu, co widzi gracz,
 - **Nowy tekst** — od przechwycenia klatki do gotowego napisu, gdy trzeba było zapytać dostawcę,
 - **Znany** — to samo dla tekstu z cache albo słownika,
 - **nazwa dostawcy** (np. DeepL) — samo zapytanie do dostawcy,
@@ -134,6 +236,26 @@ było szybszych):
 
 **Kopiuj raport** kopiuje szczegóły do schowka (bez tekstu z gry), a **Wyzeruj** zaczyna
 pomiar od nowa, np. po zmianie dostawcy. Czasy nie obejmują samego rysowania nakładki.
+Pomiary są tylko w pamięci, bez tekstu z gry.
+
+## Kontrola jakości tłumaczeń
+
+Każdy wynik dostawcy jest sprawdzany lokalnie (bez sieci, bez ustawień):
+
+- **pusty wynik** — pokazywany jako błąd „Dostawca zwrócił pusty wynik.”, nie trafia do cache
+  i liczy się do licznika „Błędy”; w grze zostaje oryginał,
+- **zmienione lub zgubione liczby** („1,000”, „1 000” i „1.000” oraz „2.5” i „2,5” są
+  traktowane jako równe; dodatkowe liczby w tłumaczeniu są dozwolone),
+- **wynik identyczny z angielskim oryginałem**,
+- **podejrzanie długi wynik** (model dopisał komentarz).
+
+Wynik z problemem jest pokazywany i zapisywany w cache ze znacznikiem. Modele językowe
+(Claude, model językowy) dostają od razu jedno ponowienie tego samego tekstu — to dodatkowe,
+płatne zapytanie, liczone w limicie znaków sesji (przy wyczerpanym limicie ponowienia nie ma).
+DeepL, Azure i Google nie są ponawiane, bo zwróciłyby to samo. Przy następnym wystąpieniu
+oznaczony tekst jest tłumaczony ponownie jeszcze raz; jeśli problem zostaje, wynik jest
+ostateczny. Razem tekst z trwałym problemem kosztuje najwyżej 3 zapytania u modeli językowych
+i 2 u DeepL/Azure/Google. Opis problemu nie jest jeszcze pokazywany w oknie ani w nakładce.
 
 ## Słownik i dane
 
@@ -142,6 +264,16 @@ pomiar od nowa, np. po zmianie dostawcy. Czasy nie obejmują samego rysowania na
 - **Wyczyść cache** — usuwa automatyczne tłumaczenia (ręczne poprawki zostają).
 - **Eksport/Import cache…** — kopia zapasowa tłumaczeń (w tym poprawek) do pliku JSON.
 - **Folder danych** — otwiera `%LOCALAPPDATA%\GameTranslatorOverlay` (cache, ustawienia, logi).
+- Eksport/import zachowuje znacznik formatu i jakości wpisu (pole `context`); starsze pliki
+  bez tego pola nadal się importują.
+
+**Gdy baza tłumaczeń nie działa** (uszkodzony plik, blokada przez inny program, pełny dysk,
+plik tylko do odczytu): tłumaczenie działa dalej, a w grze raz na sesję live pojawia się
+„⚠ Cache niedostępny — tłumaczenia nie są zapisywane”. Wyniki są wtedy pamiętane tylko
+w pamięci programu (do 2000 tekstów, do zmiany dostawcy lub ustawień), więc ten sam tekst
+nie idzie drugi raz do dostawcy w tej sesji — ale każdy nowy tekst kosztuje jedno zapytanie
+i po restarcie nic z tego nie zostaje. Błąd zapisu samych liczników użycia trafia tylko do logu.
+W Cache-only przy niedziałającej bazie nic nie jest wysyłane.
 
 ## Prywatność
 
@@ -150,7 +282,9 @@ pomiar od nowa, np. po zmianie dostawcy. Czasy nie obejmują samego rysowania na
   i pasujące terminy słownika, a DeepL glosariusz ze słownika (zapisany na Twoim koncie
   DeepL). Lokalny serwer LLM (`localhost`) nie wysyła niczego.
 - **Tryb prywatny**: nic nie zapisuje się na dysku — cache działa tylko w pamięci,
-  a „+ Słownik” obowiązuje do końca sesji. Glosariusz DeepL nie jest wtedy tworzony.
+  a „+ Słownik” obowiązuje do końca sesji. Glosariusz DeepL nie jest wtedy tworzony, a terminy
+  dodane w tym trybie nigdy do niego nie trafiają. Ostatnia gra nie jest zapisywana
+  w `settings.json`.
 - **Tryb Cache-only**: tłumaczenie korzysta z lokalnych wyników i nie wysyła brakującego tekstu do dostawcy.
 - Pełna polityka: `PRIVACY.md`.
 
@@ -159,11 +293,12 @@ pomiar od nowa, np. po zmianie dostawcy. Czasy nie obejmują samego rysowania na
 | Skrót | Działanie |
 |---|---|
 | Ctrl+Shift+T | przetłumacz zaznaczony region |
+| Ctrl+Shift+L | start / stop trybu live na aktywnej grze |
 | Ctrl+Shift+H | ukryj / pokaż nakładkę |
 | Esc lub Ctrl+Shift+T (podczas zaznaczania) | anuluj |
 
-Skróty można zmienić w pliku `settings.json` w folderze danych (wymagany modyfikator
-Ctrl/Alt/Shift dla liter i cyfr).
+Skróty można zmienić w pliku `settings.json` w folderze danych (`translateHotkey`,
+`toggleOverlayHotkey`, `liveToggleHotkey`; wymagany modyfikator Ctrl/Alt/Shift dla liter i cyfr).
 
 ## Rozwiązywanie problemów
 
@@ -182,6 +317,9 @@ Ctrl/Alt/Shift dla liter i cyfr).
 | Widać `[PL]` i nadal angielski tekst | wybrano Mock; do prawdziwego tłumaczenia wybierz innego dostawcę i skonfiguruj go |
 | Live jest opóźniony lub znika przy ruchu | zatrzymaj na chwilę kamerę; sprawdź osobno czas nowego wyniku i znikania starego; porównaj z ręcznym regionem |
 | W Cache-only nie pojawia się nowy opis | tego tekstu może nie być w lokalnych wynikach; tryb celowo nie pyta dostawcy |
+| Ctrl+Shift+L nie reaguje | sprawdź pasek statusu — skrót mógł być zajęty przez inny program; zmień `liveToggleHotkey` w `settings.json` |
+| „Przełącz się do gry i wciśnij skrót ponownie.” | kliknij w okno gry i wciśnij skrót; gry UWP/Game Pass wybierz raz na liście |
+| „⚠ Cache niedostępny — tłumaczenia nie są zapisywane” | zamknij program blokujący plik bazy w folderze danych, zwolnij miejsce na dysku; tłumaczenie działa dalej bez zapisu |
 | Inny problem | zajrzyj do logów: folder danych → `logs\` (logi nie zawierają treści z ekranu) |
 
 ## Uwaga o prywatności w trybie live

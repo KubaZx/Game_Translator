@@ -15,6 +15,16 @@ public sealed class GlossaryTermRow
     public int Priority { get; set; } = 100;
     public bool CaseSensitive { get; set; }
     public string? Note { get; set; }
+
+    /// <summary>Zakres z JSON-a — zachowany przy edycji i zapisie, żeby nie zgubić „label”.</summary>
+    public string? Scope { get; set; }
+
+    /// <summary>Termin tylko dla całych etykiet (przycisk, nagłówek), nie w zdaniach ani w glosariuszu DeepL.</summary>
+    public bool LabelOnly
+    {
+        get => GlossaryScope.IsLabel(Scope);
+        set => Scope = value ? GlossaryScope.Label : null;
+    }
 }
 
 /// <summary>
@@ -55,6 +65,7 @@ public partial class GlossaryEditorWindow : Window
                 Priority = term.Priority,
                 CaseSensitive = term.CaseSensitive,
                 Note = term.Note,
+                Scope = term.Scope,
             });
         }
 
@@ -129,6 +140,7 @@ public partial class GlossaryEditorWindow : Window
                     existing.Target = term.Target;
                     existing.Priority = term.Priority;
                     existing.Note = term.Note;
+                    existing.Scope = term.Scope;
                     overwritten++;
                 }
                 else
@@ -140,6 +152,7 @@ public partial class GlossaryEditorWindow : Window
                         Priority = term.Priority,
                         CaseSensitive = term.CaseSensitive,
                         Note = term.Note,
+                        Scope = term.Scope,
                     });
                 }
                 imported++;
@@ -201,7 +214,8 @@ public partial class GlossaryEditorWindow : Window
                 r.Target.Trim(),
                 r.CaseSensitive,
                 r.Priority,
-                string.IsNullOrWhiteSpace(r.Note) ? null : r.Note.Trim())));
+                string.IsNullOrWhiteSpace(r.Note) ? null : r.Note.Trim(),
+                string.IsNullOrWhiteSpace(r.Scope) ? null : r.Scope.Trim())));
         return document;
     }
 

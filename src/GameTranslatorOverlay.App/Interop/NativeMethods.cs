@@ -38,6 +38,9 @@ internal static class NativeMethods
 
     public const uint PW_RENDERFULLCONTENT = 2;
 
+    /// <summary>GetAncestor: okno najwyższego poziomu (fokus bywa na oknie potomnym gry).</summary>
+    public const uint GA_ROOT = 2;
+
     /// <summary>Okno niewidoczne dla przechwytywania ekranu (Windows 10 2004+).</summary>
     public const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
 
@@ -73,6 +76,12 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
 
     [DllImport("user32.dll")]
     public static extern bool IsWindow(IntPtr hWnd);

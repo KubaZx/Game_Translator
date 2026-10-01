@@ -1,4 +1,15 @@
+using GameTranslatorOverlay.Core.Translation;
+
 namespace GameTranslatorOverlay.Core.Usage;
+
+/// <summary>
+/// Liczniki problemów wykrytych przez kontrolę jakości tłumaczeń w tej sesji — same liczby,
+/// bez treści tekstów. <see cref="Retries"/> to ponowienia wysłane do dostawcy.
+/// </summary>
+public sealed record QualityIssueSummary(long Empty, long NumbersChanged, long Untranslated, long Runaway, long Retries)
+{
+    public long Total => Empty + NumbersChanged + Untranslated + Runaway;
+}
 
 /// <summary>Thread-safe local session counters and admission budget for provider requests.</summary>
 public sealed class UsageTracker
@@ -11,6 +22,11 @@ public sealed class UsageTracker
     private long _cacheHits;
     private long _glossaryHits;
     private long _failedRequests;
+    private long _qualityEmpty;
+    private long _qualityNumbers;
+    private long _qualityUntranslated;
+    private long _qualityRunaway;
+    private long _qualityRetries;
 
     public long ApiRequests { get { lock (_budgetGate) return _apiRequests; } }
     public long ApiCharacters { get { lock (_budgetGate) return _apiCharacters; } }
@@ -18,6 +34,14 @@ public sealed class UsageTracker
     public long CacheHits => Interlocked.Read(ref _cacheHits);
     public long GlossaryHits => Interlocked.Read(ref _glossaryHits);
     public long FailedRequests => Interlocked.Read(ref _failedRequests);
+
+    /// <summary>Problemy jakości w wynikach pokazanych graczowi (po ewentualnym ponowieniu).</summary>
+    public QualityIssueSummary QualityIssues => new(
+        Interlocked.Read(ref _qualityEmpty),
+        Interlocked.Read(ref _qualityNumbers),
+        Interlocked.Read(ref _qualityUntranslated),
+        Interlocked.Read(ref _qualityRunaway),
+        Interlocked.Read(ref _qualityRetries));
 
     /// <summary>Czasy etapów (OCR, dostawca, gotowy napis) w tej sesji aplikacji.</summary>
     public LatencyMonitor Latency { get; } = new();
@@ -64,6 +88,17 @@ public sealed class UsageTracker
     public void RecordGlossaryHit() => Interlocked.Increment(ref _glossaryHits);
     public void RecordFailure() => Interlocked.Increment(ref _failedRequests);
 
+    /// <summary>Zlicza każdą flagę z <paramref name="kind"/> osobno (wynik może mieć kilka problemów).</summary>
+    public void RecordQualityIssue(TranslationQualityFlags kind)
+    {
+        if (kind.HasFlag(TranslationQualityFlags.Empty)) Interlocked.Increment(ref _qualityEmpty);
+        if (kind.HasFlag(TranslationQualityFlags.NumbersChanged)) Interlocked.Increment(ref _qualityNumbers);
+        if (kind.HasFlag(TranslationQualityFlags.Untranslated)) Interlocked.Increment(ref _qualityUntranslated);
+        if (kind.HasFlag(TranslationQualityFlags.Runaway)) Interlocked.Increment(ref _qualityRunaway);
+    }
+
+    public void RecordQualityRetry() => Interlocked.Increment(ref _qualityRetries);
+
     public bool WouldExceedSessionLimit(int additionalCharacters)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(additionalCharacters);
@@ -101,6 +136,11 @@ public sealed class UsageTracker
             Interlocked.Exchange(ref _cacheHits, 0);
             Interlocked.Exchange(ref _glossaryHits, 0);
             Interlocked.Exchange(ref _failedRequests, 0);
+            Interlocked.Exchange(ref _qualityEmpty, 0);
+            Interlocked.Exchange(ref _qualityNumbers, 0);
+            Interlocked.Exchange(ref _qualityUntranslated, 0);
+            Interlocked.Exchange(ref _qualityRunaway, 0);
+            Interlocked.Exchange(ref _qualityRetries, 0);
         }
         Latency.Reset();
     }

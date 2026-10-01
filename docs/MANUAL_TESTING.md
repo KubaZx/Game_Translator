@@ -667,3 +667,158 @@ i wklej wynik do notatnika; kliknij **Wyzeruj**.
 **Oczekiwany wynik:** panel pokazuje medianę „Nowy tekst”, „Znany”, dostawcy, OCR i klatki,
 a p90 po co najmniej 5 pomiarach. Raport zawiera medianę, p90, maksimum i liczbę pomiarów,
 bez tekstu z gry. Po wyzerowaniu panel pokazuje „Brak pomiarów”.
+
+## M29 — Tryb live: szybkość i „Zmiana → napis” (0.4.0)
+
+**Kroki:**
+1. Uruchom live z prawdziwym dostawcą (np. DeepL) nad grą z dialogami; otwórz panel „Szybkość”.
+2. Wywołaj nową, nieznaną kwestię dialogu.
+3. Kilka razy przełącz między dwoma znanymi ekranami (np. menu ↔ ekwipunek), których teksty są w cache.
+4. Wywołaj długi nowy tekst (wolna odpowiedź dostawcy) i od razu przejdź do ekranu ze znanymi tekstami.
+5. Przy linii A tłumaczonej ponad 1 s pokaż linię B z animacją pisania (z diagnostyką live).
+6. Zamknij dialog (nic do tłumaczenia) i w trakcie tego przebiegu wywołaj nową linię.
+7. Nad drżącym OCR (tekst na grafice) sprawdź potwierdzenie odczytu.
+8. Włącz Cache-only i powtórz krok 3; na koniec **Kopiuj raport**.
+
+**Oczekiwany wynik:** pierwsza pozycja panelu to „Zmiana → napis”, nie mniejsza niż „Nowy
+tekst” dla tej samej kwestii; dla znanych ekranów wyraźnie krótsza niż dla nowego tekstu.
+Znany ekran dostaje napisy bez czekania na koniec wolnego zapytania; bez migania i podwójnych
+dymków. Linia B nie jest tłumaczona w połowie pisania (w logu brak OCR częściowego tekstu B),
+pojawia się ok. 250 ms po końcu animacji. Czas zamknięcia dialogu nie trafia do pomiaru nowej
+linii. Potwierdzenie niepewnego odczytu nadal ok. 250 ms po pierwszym przebiegu. W Cache-only
+znane ekrany działają, nowy tekst daje komunikat Cache-only, nic nie wychodzi do sieci.
+Raport ma linię „Zmiana → napis (tryb live)” zaraz po nagłówku. W eksporcie cache licznik
+użyć często widzianej etykiety rośnie o 1 na klatkę, a nie o 2, gdy obok pojawia się nowy tekst.
+
+## M30 — Komunikaty w nakładce (0.4.0)
+
+**Kroki:**
+1. DeepL bez klucza: uruchom live na grze z tekstem.
+2. Powtórz krok 1, ale przed pojawieniem się błędu wciśnij Ctrl+Shift+H; potem Ctrl+Shift+H ponownie.
+3. Z kluczem DeepL odłącz sieć i uruchom live (także przy nakładce schowanej skrótem).
+4. Włącz Cache-only, uruchom live na nieznanym tekście.
+5. Zablokuj plik bazy cache (np. otwórz go na wyłączność w innym programie) i uruchom live.
+6. Kliknij „⏹ Stop” albo zamknij okno gry (także przy zminimalizowanej grze).
+7. Tryb wyświetlania „Nakładka na ekranie”, bez klucza: Ctrl+Shift+T na tekście; potem na
+   obszarze bez tekstu; potem przy nakładce schowanej Ctrl+Shift+H i odłączonej sieci, tak aby
+   część bloków była w cache.
+8. Ustaw `GTO_DIAG_CAPTURABLE=1`, usuń klucz DeepL i uruchom live w grze z tytułem/HUD-em tuż
+   pod górną krawędzią okna.
+9. Odznacz „Komunikaty w nakładce” i powtórz krok 1.
+
+**Oczekiwany wynik:** „▶ Tłumaczenie na żywo włączone” płynnie się pojawia i znika; potem
+„⚠ Brak klucza DeepL” przy górnej krawędzi okna gry, znika po ok. 5 s, najwyżej raz na 30 s,
+nie przechwytuje kliknięć. Przy schowanej nakładce komunikat o kluczu jest widoczny, napisy nie;
+po jego zniknięciu nakładka jest znów całkiem schowana. „⚠ Brak połączenia z dostawcą” pojawia
+się przy widocznej nakładce, a przy schowanej nie (nie jest krytyczny). Cache-only: „Cache-only:
+N tekstów bez tłumaczenia”, ponownie najwcześniej po 30 s i tylko przy nowych tekstach.
+Zablokowana baza: jednorazowo „⚠ Cache niedostępny — tłumaczenia nie są zapisywane”, tłumaczenie
+działa dalej. Stop: „■ Tłumaczenie na żywo zatrzymane”, które nie znika razem z napisami;
+przy zminimalizowanej grze pojawia się przy ostatnim położeniu gry albo na monitorze z kursorem.
+Ręczne tłumaczenie: „⚠ Brak klucza DeepL” przy zaznaczeniu, „ℹ Nie rozpoznano tekstu
+w zaznaczeniu” dla pustego obszaru; przy schowanej nakładce pokazują się przetłumaczone bloki
+i ostrzeżenie. Anty-sprzężenie: w licznikach API i w logu nie ma zapytania z „Brak klucza DeepL”,
+komunikat nie wraca jako przetłumaczony napis, a tekst gry pod nim po przywróceniu klucza
+tłumaczy się normalnie. Po wyłączeniu komunikatów błędy widać tylko w oknie aplikacji.
+
+## M31 — Pamięć dialogu i postać gracza (0.4.0)
+
+**Kroki:**
+1. Dostawca Claude (albo serwer zgodny z OpenAI), „Postać gracza: nieznana”. Przetłumacz kolejno
+   „Are you ready?”, „I knew you would come.”, „You did well.”.
+2. Popraw ręcznie drugą linię na formę żeńską („Wiedziałam, że przyjdziesz”) i przetłumacz
+   „I was waiting for you.”.
+3. Zmień „Postać gracza” na „kobieta”; zrestartuj aplikację.
+4. Przetłumacz ponownie „Are you ready?”, potem jeszcze raz; przetłumacz też tekst bez „you”
+   z cache („The gate is open.”).
+5. Przełącz na DeepL (płeć „kobieta”) i przetłumacz „Are you ready?”.
+6. Wróć do LLM, ustaw „mężczyzna”, włącz Cache-only i przetłumacz „Are you ready?”.
+7. Wyłącz Cache-only, ustaw „kobieta” i odłącz sieć (albo podaj błędny klucz); pokaż kilka razy
+   linię z „you” zapisaną wcześniej z płcią „mężczyzna”.
+8. Włącz tryb prywatny i powtórz krok 1.
+9. Uruchom aplikację ze starym `settings.json` bez pola `playerGender`.
+
+**Oczekiwany wynik:** formy rodzajowe są spójne między liniami; po poprawce model trzyma się
+formy żeńskiej („czekałam”). Wybór płci jest zachowany po restarcie. „Are you ready?” daje jedno
+nowe zapytanie (API +1) i „Jesteś gotowa?”; kolejne tłumaczenie i tekst bez „you” pochodzą
+z cache. DeepL bierze wynik z cache bez zapytania. W Cache-only zostaje stary wynik, nic nie
+wychodzi do sieci. Przy braku sieci linia pokazuje stary wynik; licznik zapytań/błędów rośnie
+tylko przy pierwszym wystąpieniu. W trybie prywatnym data modyfikacji bazy cache się nie
+zmienia. Stary plik ustawień daje „nieznana”.
+
+## M32 — Skrót trybu live Ctrl+Shift+L (0.4.0)
+
+**Kroki:**
+1. Gra w oknie: kliknij w okno gry, wciśnij Ctrl+Shift+L; wciśnij go drugi i trzeci raz, także
+   szybko dwa razy pod rząd.
+2. Gra borderless oraz gra z oknem launchera lub konsoli obok okna gry — jak w kroku 1.
+3. Po wcześniejszym starcie zatrzymaj live, kliknij w okno tłumacza i wciśnij skrót.
+4. Kliknij w przeglądarkę i wciśnij skrót; zatrzymaj skrótem.
+5. Kliknij w pulpit/pasek zadań i wciśnij skrót — z zapamiętaną grą i bez niej (usunięte
+   `lastGameProcess`, brak gier z profilem), przy ręcznie zaznaczonej grze na liście.
+6. Zminimalizuj tłumacz do zasobnika, z menu ikony wybierz „▶ Start live na aktywnej grze”,
+   potem „⏹ Stop live”.
+7. Ustaw „brak profilu”, uruchom live skrótem na grze z profilem; zatrzymaj, zamknij i uruchom
+   ponownie aplikację, kliknij „Odśwież”.
+8. Tryb prywatny: uruchom live na innej grze, zamknij program.
+9. Ustaw `liveToggleHotkey` na skrót zajęty przez inny program albo błędny (np. „L”) i uruchom
+   aplikację; potem usuń pole z `settings.json`.
+10. Gra UWP/Game Pass (jeśli dostępna): wciśnij skrót w grze; potem wybierz ją na liście i kliknij Start live.
+
+**Oczekiwany wynik:** live startuje na grze bez Alt+Tab, gra jest zaznaczona na liście,
+przycisk Start wyłączony, podpowiedź ikony „live: włączony”; drugie naciśnięcie zatrzymuje,
+trzecie startuje; szybkie podwójne naciśnięcie nie tworzy dwóch sesji. Wybierane jest okno gry,
+a nie launcher. Z okna tłumacza i z pulpitu start następuje na zapamiętanej grze; przeglądarka
+jako aktywne okno dostaje live (zgodnie z opisem). Bez zapamiętanej gry: „Przełącz się do gry
+i wciśnij skrót ponownie.” w statusie i w zasobniku, zaznaczenie na liście bez zmian. Menu
+zasobnika przełącza się między Start i Stop. Przy „brak profilu” profil gry włącza się przed
+startem skrótem; po restarcie i „Odśwież” gra jest tylko zaznaczona, profil zostaje „brak
+profilu”, live nie startuje, data modyfikacji `settings.json` się nie zmienia. W trybie
+prywatnym `lastGameProcess`/`lastGameTitle` w pliku się nie zmieniają. Zajęty lub błędny skrót:
+komunikat w statusie, przycisk i menu zasobnika bez skrótu; bez pola skrót działa jako
+Ctrl+Shift+L. Gra UWP nie jest wybierana skrótem (znane ograniczenie), z listy działa.
+
+## M33 — Słownik: zakres „Etykieta” i liczba mnoga z DeepL (0.4.0)
+
+**Kroki:**
+1. DeepL z kluczem. W słowniku termin „Waystone” → „Kamień drogi”. Przetłumacz Ctrl+Shift+T
+   tekst z „Waystones” i „Waystone's” w zdaniu oraz etykietę „Rarity:” (jeśli słownik ma „Rarity”).
+2. Przetłumacz przycisk „Save” (sam napis) i zdanie „We must save the village.”.
+3. W edytorze słownika dodaj termin z zaznaczoną kolumną **Etykieta**, zapisz, wyeksportuj i
+   zaimportuj słownik.
+4. Włącz tryb prywatny, dodaj „+ Słownik” termin, wyłącz tryb prywatny i przetłumacz tekst
+   z tym terminem i z „Waystone”. Sprawdź glosariusze na koncie DeepL.
+5. Zmień słownik i od razu przetłumacz tekst z terminem.
+
+**Oczekiwany wynik:** „Waystones” tłumaczone z terminem w odmienionej formie; „Rarity:” →
+„Rzadkość:”. Sam przycisk „Save” → „Zapis”, a w zdaniu „save” tłumaczone zwyczajnie. Kolumna
+„Etykieta” przetrwa zapis, eksport i import (w pliku `"scope": "label"`). Glosariusz na koncie
+DeepL nie zawiera terminu prywatnego ani terminów z zakresem „Etykieta”. Pierwsze tłumaczenie po
+zmianie słownika nie czeka zauważalnie dłużej niż ok. 0,3 s (może pójść bez glosariusza);
+kolejne używają nowego glosariusza.
+
+## M34 — Kontrola jakości z dostawcą LLM (0.4.0)
+
+**Kroki:**
+1. Dostawca Claude albo model językowy (najlepiej mały model lokalny, który częściej się myli).
+   Przetłumacz kilka tekstów z liczbami („Deals 1,250 damage in 2.5 seconds”), długi opis
+   i krótką kwestię.
+2. Sprawdź liczniki API i błędów w oknie; powtórz te same teksty dwa razy.
+3. Ustaw niski limit znaków sesji i powtórz z nowym tekstem z liczbami.
+
+**Oczekiwany wynik:** liczby w tłumaczeniu są zachowane (zapis „1 250” i „2,5” jest poprawny).
+Gdy wynik ma problem, licznik API rośnie o jedno dodatkowe zapytanie (ponowienie), a przy
+kolejnych wystąpieniach łącznie najwyżej o 3 na tekst; potem tekst idzie z cache. Pusty wynik
+daje błąd „Dostawca zwrócił pusty wynik.” i nie trafia do cache. Przy wyczerpanym limicie sesji
+ponowienia nie ma. Z DeepL te same teksty nie są ponawiane. Okno nie pokazuje jeszcze opisu
+problemu jakości (znane ograniczenie).
+
+## M35 — Zmiana wyglądu nie czyści pamięci dialogu (0.4.0)
+
+**Kroki:** dostawca Claude, live w grze z dialogiem; przetłumacz 2–3 kwestie tej samej postaci.
+W trakcie tłumaczenia kolejnej kwestii zmień krój czcionki, tło dymków, tryb wyświetlania i
+odznacz/zaznacz „Komunikaty w nakładce”. Potem zmień dostawcę na inny i z powrotem.
+
+**Oczekiwany wynik:** zmiany wyglądu dają status „Wygląd zapisany.”, nie przerywają tłumaczenia
+w locie, a kolejne kwestie trzymają się wcześniejszych form (pamięć dialogu zostaje). Zmiana
+dostawcy daje „Ustawienia zapisane…” i zaczyna pamięć od nowa.

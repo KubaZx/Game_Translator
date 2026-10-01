@@ -107,7 +107,7 @@
     { "source": "Power Charge", "target": "Ładunek mocy", "caseSensitive": false, "priority": 10 },
     { "source": "Bow", "target": "Łuk", "caseSensitive": false, "priority": 0 },
     { "source": "Crossbow", "target": "Kusza", "caseSensitive": false, "priority": 0 },
-    { "source": "Staff", "target": "Kostur", "caseSensitive": false, "priority": 0 },
+    { "source": "Staff", "target": "Kostur", "caseSensitive": false, "priority": 0, "scope": "label" },
     { "source": "Quarterstaff", "target": "Kij bojowy", "caseSensitive": false, "priority": 0, "note": "Niedosłownie; broń obuchowa do walki wręcz, odrębna od kosturu magicznego." },
     { "source": "Wand", "target": "Różdżka", "caseSensitive": false, "priority": 0 },
     { "source": "Sceptre", "target": "Berło", "caseSensitive": false, "priority": 0 },
