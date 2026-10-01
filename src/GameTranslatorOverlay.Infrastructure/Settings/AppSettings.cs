@@ -87,6 +87,33 @@ public sealed class AppSettings
     /// odmieniają według niej zwroty do gracza; brak pola w starym pliku = unknown.
     /// </summary>
     public string PlayerGender { get; set; } = Core.Translation.PlayerGenders.UnknownSetting;
+
+    /// <summary>
+    /// Pola, które nie wpływają na pipeline tłumaczenia: wygląd nakładki i panelu, skróty
+    /// (rejestrowane przy starcie), zapamiętana gra, komunikaty, zastrzeżenie. Nakładka czyta
+    /// je na bieżąco, więc ich zmiana nie może przebudowywać pipeline'u — przebudowa czyści
+    /// pamięć dialogu i anuluje płatne tłumaczenia będące w locie.
+    /// </summary>
+    private static readonly string[] PresentationOnly =
+    [
+        nameof(ResultDisplayMode), nameof(LiveDisplayMode), nameof(OverlayPlacement),
+        nameof(OverlayBackgroundOpacity), nameof(OverlayFontSize), nameof(OverlayFontFamily),
+        nameof(ResultAutoHideSeconds), nameof(SubtitleSeconds), nameof(ShowOverlayNotices),
+        nameof(TranslateHotkey), nameof(ToggleOverlayHotkey), nameof(LiveToggleHotkey),
+        nameof(LastGameProcess), nameof(LastGameTitle), nameof(DisclaimerAcknowledged),
+    ];
+
+    /// <summary>
+    /// Migawka tylko tych ustawień, które wymagają przebudowy pipeline'u (dostawca, języki,
+    /// profil, tryby, limity, płeć gracza, ustawienia dostawców…). Nowe pole trafia tu
+    /// domyślnie — bezpieczniej przebudować o raz za dużo niż nie przebudować wcale.
+    /// </summary>
+    public string PipelineSnapshot()
+    {
+        var node = JsonSerializer.SerializeToNode(this)!.AsObject();
+        foreach (var name in PresentationOnly) node.Remove(name);
+        return node.ToJsonString();
+    }
 }
 
 public sealed class JsonSettingsStore(AppPaths paths)

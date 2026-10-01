@@ -213,7 +213,7 @@ public partial class MainWindow : Window
             _settings.DisclaimerAcknowledged = true;
             _settingsStore.Save(_settings);
         }
-        _appliedSettingsJson = SettingsSnapshot();
+        MarkSettingsApplied();
     }
 
     /// <summary>
@@ -223,7 +223,16 @@ public partial class MainWindow : Window
     /// </summary>
     private string? _appliedSettingsJson;
 
+    /// <summary>Część migawki istotna dla pipeline'u (bez wyglądu nakładki i skrótów).</summary>
+    private string? _appliedPipelineJson;
+
     private string SettingsSnapshot() => System.Text.Json.JsonSerializer.Serialize(_settings);
+
+    private void MarkSettingsApplied()
+    {
+        _appliedSettingsJson = SettingsSnapshot();
+        _appliedPipelineJson = _settings.PipelineSnapshot();
+    }
 
     private const string DisclaimerText =
         "Zastrzeżenie: GameTranslatorOverlay jest zewnętrzną nakładką tłumaczącą tekst widoczny " +
@@ -663,7 +672,7 @@ public partial class MainWindow : Window
     private void SaveSettingsWithoutRebuild()
     {
         _settingsStore.Save(_settings);
-        _appliedSettingsJson = SettingsSnapshot();
+        MarkSettingsApplied();
     }
 
     /// <summary>
@@ -853,8 +862,18 @@ public partial class MainWindow : Window
         }
 
         _settingsStore.Save(_settings);
+        // Sam wygląd (czcionka, tło, styl live…) nakładka czyta na bieżąco — bez przebudowy,
+        // która wyczyściłaby pamięć dialogu i anulowała tłumaczenia w locie.
+        var pipelineSnapshot = _settings.PipelineSnapshot();
+        if (pipelineSnapshot == _appliedPipelineJson)
+        {
+            _appliedSettingsJson = snapshot;
+            SetStatus(warning is not null ? "⚠ " + warning : "Wygląd zapisany.");
+            return;
+        }
         _orchestrator.RebuildPipeline();
         _appliedSettingsJson = snapshot;
+        _appliedPipelineJson = pipelineSnapshot;
 
         var profileInfo = _orchestrator.ActiveProfile is { } profile ? $", profil: {profile.Name}" : string.Empty;
         SetStatus(warning is not null

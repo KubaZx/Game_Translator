@@ -83,6 +83,13 @@ jobs:
           GameTranslatorOverlay.Core=91
           GameTranslatorOverlay.Infrastructure=80
 
+      # Narzędzie ewaluacji dostawców na przykładowym korpusie, z atrapą Mock: bez kluczy
+      # i bez sieci. Sprawdza, że korpus, pipeline i raport działają od początku do końca.
+      - name: ProviderEval (Mock)
+        run: >
+          dotnet run --project tools/GameTranslatorOverlay.ProviderEval -c Release --no-build --
+          --corpus eval/en-pl.sample.jsonl --providers mock --out eval/out
+
   build-test:
     runs-on: windows-latest
     steps:
