@@ -141,8 +141,12 @@ public class TranslationPipelineCombinedFixesTests
 
             var owner = Task.Run(() => pipeline.TranslateAsync([MultiLine], "en", "pl"));
             while (provider.CallCount == 0) await Task.Delay(1);
-            var waiter = Task.Run(() => pipeline.TranslateAsync([MultiLine], "en", "pl"));
-            await Task.Delay(20);
+            // Bez Task.Run: przy cache w pamięci droga do rejestracji w zapytaniu w toku jest
+            // synchroniczna, więc po powrocie z wywołania czekający na pewno już dołączył.
+            // Wcześniej Task.Run + 20 ms na wolnym runnerze CI przepuszczało właściciela do końca,
+            // a spóźniony czekający słusznie wysyłał własne zapytanie (2 wywołania zamiast 1).
+            var waiter = pipeline.TranslateAsync([MultiLine], "en", "pl");
+            Assert.False(waiter.IsCompleted);
             gate.SetResult();
 
             foreach (var call in new[] { owner, waiter })

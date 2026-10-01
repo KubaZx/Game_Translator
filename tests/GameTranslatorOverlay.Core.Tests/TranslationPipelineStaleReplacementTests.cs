@@ -159,7 +159,11 @@ public class TranslationPipelineStaleReplacementTests
             var stored = await cache.LookupAsync(MultiLine, "en", "pl", Profile);
             Assert.Equal(Profile, stored!.GameProfile);
             Assert.Equal(TextReflow.FormatVersion, stored.Context);
-            Assert.Equal(1, provider.CallCount);
+            // Wątek uruchomiony przez Task.Run może dotrzeć dopiero po zakończeniu właściciela
+            // (wolny runner CI) i wtedy słusznie wysyła własne zapytanie — liczba wywołań zależy
+            // od harmonogramu wątków. Sama deduplikacja ma deterministyczny test
+            // (TranslationOutcomeIssueTests.Czekajacy_na_to_samo_zapytanie_dostaje_ten_sam_rodzaj_bledu).
+            Assert.InRange(provider.CallCount, 1, calls.Count);
         }
     }
 
