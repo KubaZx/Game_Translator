@@ -7,6 +7,7 @@ using System.Windows.Threading;
 using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Usage;
 using GameTranslatorOverlay.Core.Vision;
 using GameTranslatorOverlay.Infrastructure.Settings;
 
@@ -14,7 +15,8 @@ namespace GameTranslatorOverlay.App.Ui;
 
 /// <summary>
 /// Przezroczysta nakładka click-through z trzema warstwami: bloki ręczne (auto-ukrywane),
-/// bloki live (zarządzane diffem po kluczach) i pasek napisów. Nie przejmuje fokusu
+/// bloki live (zarządzane diffem po kluczach) i pasek napisów — oraz osobną warstwą
+/// krótkich komunikatów dla gracza (przy górnej krawędzi okna gry). Nie przejmuje fokusu
 /// ani kliknięć; jest wykluczana z przechwytywania ekranu (WDA_EXCLUDEFROMCAPTURE),
 /// a gdy wykluczenie zawiedzie, pętla live ma dodatkowy filtr anty-sprzężeniowy.
 /// </summary>
@@ -31,6 +33,14 @@ public partial class OverlayWindow : Window
     private MonitorArea? _monitor;
     private bool _hiddenByUser;
 
+    private readonly DispatcherTimer _noticeTimer = new();
+    private Border? _noticeElement;
+    private RectPx _lastNoticeAnchor;
+
+    // Krytyczny komunikat przy nakładce schowanej skrótem: okno pokazujemy tylko dla niego,
+    // a warstwy tłumaczeń zostają schowane (decyzja gracza dotyczy napisów, nie ostrzeżeń).
+    private bool _shownForNoticeOnly;
+
     /// <summary>Czy okno jest realnie wykluczone z przechwytywania ekranu.</summary>
     public bool IsCaptureExclusionActive { get; private set; }
 
@@ -39,6 +49,7 @@ public partial class OverlayWindow : Window
         InitializeComponent();
         _manualClearTimer.Tick += (_, _) => ClearManualBlocks();
         _subtitleTimer.Tick += (_, _) => ClearSubtitle();
+        _noticeTimer.Tick += (_, _) => FadeOutNotice();
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -96,8 +107,16 @@ public partial class OverlayWindow : Window
     {
         if (!_hiddenByUser)
         {
+            RestoreContentLayer();
             Show();
         }
+    }
+
+    /// <summary>Warstwa napisów wraca po komunikacie pokazanym przy schowanej nakładce.</summary>
+    private void RestoreContentLayer()
+    {
+        _shownForNoticeOnly = false;
+        RootCanvas.Visibility = Visibility.Visible;
     }
 
     private static bool IsCoverPlacement(AppSettings settings) =>
@@ -500,6 +519,7 @@ public partial class OverlayWindow : Window
 
         ClearManualBlocks();
         _hiddenByUser = false;
+        RestoreContentLayer();
 
         foreach (var (box, text, lineHeight, colorRgb) in blocks)
         {
@@ -673,10 +693,119 @@ public partial class OverlayWindow : Window
 
     private void HideIfEmpty()
     {
-        if (RootCanvas.Children.Count == 0)
+        // Komunikat dla gracza trzyma okno widoczne aż do swojego wygaśnięcia.
+        if (RootCanvas.Children.Count == 0 && _noticeElement is null)
         {
             Hide();
         }
+    }
+
+    /// <summary>
+    /// Krótki komunikat (~13 px, półprzezroczyste tło) wyśrodkowany przy górnej krawędzi
+    /// okna gry, z płynnym pojawieniem i wygaszeniem. Nie przyjmuje kliknięć i nie znika
+    /// przy czyszczeniu bloków. Gdy gracz schował nakładkę, przechodzą tylko komunikaty
+    /// krytyczne (zatrzymany live, klucz, limit). Zwraca false, gdy komunikat pominięto.
+    /// </summary>
+    public bool ShowNotice(OverlayNotice notice, RectPx gameWindowBounds)
+    {
+        if (_hiddenByUser && !notice.IsCritical) return false;
+
+        if (!gameWindowBounds.IsEmpty) _lastNoticeAnchor = gameWindowBounds;
+        var anchor = _lastNoticeAnchor;
+        // Bez znanego okna gry (np. stop zanim przyszła pierwsza klatka) — monitor z kursorem.
+        var monitor = RootCanvas.Children.Count > 0 && _monitor is not null
+            ? _monitor
+            : anchor.IsEmpty ? Displays.FromCursor() : Displays.FromRect(anchor);
+        if (anchor.IsEmpty) anchor = monitor.Bounds;
+
+        if (_noticeElement is null)
+        {
+            _noticeElement = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(0xD0, 0x0B, 0x0E, 0x11)),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(10, 4, 10, 4),
+                IsHitTestVisible = false,
+                // Start od zera — animacja bez From jedzie od bieżącej wartości, a przy 1,0
+                // pojawienie się byłoby skokowe.
+                Opacity = 0,
+                Child = new TextBlock
+                {
+                    FontSize = 13,
+                    Foreground = Brushes.White,
+                    FontFamily = new FontFamily("Segoe UI"),
+                    TextWrapping = TextWrapping.NoWrap,
+                },
+            };
+            NoticeCanvas.Children.Add(_noticeElement);
+        }
+
+        var text = (TextBlock)_noticeElement.Child;
+        text.Text = notice.Text;
+        text.Foreground = notice.Severity switch
+        {
+            NoticeSeverity.Error => new SolidColorBrush(Color.FromRgb(0xFF, 0x8A, 0x80)),
+            NoticeSeverity.Warning => new SolidColorBrush(Color.FromRgb(0xFF, 0xD5, 0x4F)),
+            _ => Brushes.White,
+        };
+
+        _noticeElement.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var scale = monitor.Scale;
+        var centerX = (anchor.X + anchor.Width / 2.0 - monitor.Bounds.X) / scale;
+        var top = (anchor.Y - monitor.Bounds.Y) / scale + 12;
+        Canvas.SetLeft(_noticeElement, Math.Max(0, centerX - _noticeElement.DesiredSize.Width / 2));
+        Canvas.SetTop(_noticeElement, Math.Max(0, top));
+
+        _noticeElement.BeginAnimation(OpacityProperty,
+            new System.Windows.Media.Animation.DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
+        _noticeTimer.Stop();
+        _noticeTimer.Interval = notice.Duration > TimeSpan.Zero ? notice.Duration : OverlayNotices.InfoDuration;
+        _noticeTimer.Start();
+
+        if (RootCanvas.Children.Count == 0 || _monitor is null) _monitor = monitor;
+        // Okno schowane skrótem albo chwilowo (ruch sceny) — pokazujemy sam komunikat;
+        // nieaktualne napisy nie mogą wrócić na ekran razem z nim.
+        if (_hiddenByUser || (!IsVisible && RootCanvas.Children.Count > 0))
+        {
+            _shownForNoticeOnly = true;
+            RootCanvas.Visibility = Visibility.Collapsed;
+        }
+        CoverMonitor(_monitor);
+        Show();
+        return true;
+    }
+
+    private void FadeOutNotice()
+    {
+        _noticeTimer.Stop();
+        if (_noticeElement is not { } element) return;
+        var fade = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(250));
+        fade.Completed += (_, _) =>
+        {
+            // Nowy komunikat mógł przyjść w trakcie wygaszania — wtedy element żyje dalej.
+            if (!ReferenceEquals(_noticeElement, element) || _noticeTimer.IsEnabled) return;
+            RemoveNotice();
+        };
+        element.BeginAnimation(OpacityProperty, fade);
+    }
+
+    private void RemoveNotice()
+    {
+        _noticeTimer.Stop();
+        if (_noticeElement is not null)
+        {
+            NoticeCanvas.Children.Remove(_noticeElement);
+            _noticeElement = null;
+        }
+        if (_shownForNoticeOnly)
+        {
+            // Okno było schowane przed komunikatem (skrót gracza albo ruch sceny) — wraca
+            // do tego stanu; napisy pokaże dopiero zwykła aktualizacja.
+            RestoreContentLayer();
+            Hide();
+            return;
+        }
+        HideIfEmpty();
     }
 
     private void ClearManualBlocks()
@@ -725,8 +854,13 @@ public partial class OverlayWindow : Window
         _liveFit.Clear();
         _manualElements.Clear();
         _subtitleElement = null;
-        if (!preserveUserHidden) _hiddenByUser = false;
-        Hide();
+        if (!preserveUserHidden)
+        {
+            _hiddenByUser = false;
+            RestoreContentLayer();
+        }
+        // Komunikat dla gracza (np. „live zatrzymany”) nie znika razem z napisami.
+        HideIfEmpty();
     }
 
     public void ToggleVisibility()
@@ -737,7 +871,8 @@ public partial class OverlayWindow : Window
         if (_hiddenByUser)
         {
             _hiddenByUser = false;
-            if (RootCanvas.Children.Count > 0)
+            RestoreContentLayer();
+            if (RootCanvas.Children.Count > 0 || _noticeElement is not null)
             {
                 Show();
             }

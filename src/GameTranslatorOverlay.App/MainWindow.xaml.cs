@@ -38,6 +38,11 @@ public partial class MainWindow : Window
     private readonly AppPaths _paths;
     private readonly ILogger<MainWindow> _logger;
     private LiveTranslationSession? _liveSession;
+    private IntPtr _liveWindowHandle;
+
+    // Teksty pokazanych komunikatów nakładki — pętla live odrzuca ich odczyty OCR
+    // (filtr anty-sprzężeniowy, gdy wykluczenie nakładki z przechwytywania zawiedzie).
+    private readonly OverlayNoticeEcho _noticeEcho = new();
 
     private readonly OverlayWindow _overlay = new();
     private readonly ResultPanelWindow _panel = new();
@@ -149,6 +154,7 @@ public partial class MainWindow : Window
         TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         ChkCacheOnly.IsChecked = _settings.CacheOnlyMode;
         ChkPrivate.IsChecked = _settings.PrivateMode;
+        ChkOverlayNotices.IsChecked = _settings.ShowOverlayNotices;
 
         _loadingUi = false;
 
@@ -310,6 +316,34 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Pokazuje komunikat w nakładce, o ile gracz ich nie wyłączył.</summary>
+    private void ShowOverlayNotice(OverlayNotice? notice, RectPx anchor)
+    {
+        if (notice is null || !_settings.ShowOverlayNotices) return;
+        // Najpierw filtr, potem ekran: następna klatka OCR może już widzieć komunikat.
+        _noticeEcho.Remember(notice.Text);
+        _overlay.ShowNotice(notice, anchor);
+    }
+
+    private RectPx LiveWindowBounds() =>
+        _liveWindowHandle != IntPtr.Zero && NativeMethods.IsWindow(_liveWindowHandle)
+            ? ScreenCapture.GetWindowBounds(_liveWindowHandle)
+            : default;
+
+    /// <summary>
+    /// Włączenie/wyłączenie komunikatów nie zmienia tłumaczenia — zapis bez przebudowy
+    /// pipeline'u, żeby nie anulować tłumaczeń w locie.
+    /// </summary>
+    private void OnOverlayNoticesChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loadingUi) return;
+        _settings.ShowOverlayNotices = ChkOverlayNotices.IsChecked == true;
+        SaveSettingsWithoutRebuild();
+        SetStatus(_settings.ShowOverlayNotices
+            ? "Komunikaty w nakładce włączone."
+            : "Komunikaty w nakładce wyłączone — błędy widać tylko w tym oknie.");
+    }
+
     private void OnRefreshClick(object sender, RoutedEventArgs e) => _ = RefreshWindowsAsync();
 
     private void SetPreviewBusy(bool busy)
@@ -425,6 +459,7 @@ public partial class MainWindow : Window
             return;
         }
         _selectingRegion = true;
+        RectPx? manualRegion = null;
         try
         {
             // Połączenie z dostawcą zestawia się, gdy użytkownik zaznacza region — pierwsze
@@ -436,6 +471,7 @@ public partial class MainWindow : Window
                 SetStatus("Zaznaczanie anulowane.");
                 return;
             }
+            manualRegion = selected;
 
             // Chowamy własne okna, żeby nie przechwycić starego tłumaczenia.
             _overlay.Hide();
@@ -454,20 +490,30 @@ public partial class MainWindow : Window
         catch (OcrLanguageNotAvailableException ex)
         {
             SetStatus(ex.Message);
+            ShowManualFailureNotice(manualRegion);
         }
         catch (CacheStorageException ex)
         {
             SetStatus(ex.Message);
+            ShowManualFailureNotice(manualRegion);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Błąd tłumaczenia regionu");
             SetStatus("Nieoczekiwany błąd tłumaczenia — szczegóły w logu diagnostycznym.");
+            ShowManualFailureNotice(manualRegion);
         }
         finally
         {
             _selectingRegion = false;
         }
+    }
+
+    /// <summary>W trybie nakładki błąd ręcznego tłumaczenia nie może skończyć się ciszą.</summary>
+    private void ShowManualFailureNotice(RectPx? region)
+    {
+        if (region is { } selected && _settings.ResultDisplayMode == "overlay")
+            ShowOverlayNotice(OverlayNotices.TranslationFailed(), selected);
     }
 
     private void DisplayResult(RegionTranslationResult result)
@@ -477,13 +523,23 @@ public partial class MainWindow : Window
             b.Outcome.TranslatedText ?? $"⚠ {b.Outcome.ErrorMessage}"));
         TxtTiming.Text = "Czasy: " + result.Timings;
 
+        // Gracz patrzy na grę, nie na to okno: brak tekstu, błąd dostawcy albo pudła
+        // Cache-only dostają komunikat w nakładce (przy zaznaczonym regionie). Pokazujemy go
+        // dopiero po ShowBlocks — to ono zdejmuje ukrycie skrótem, a schowana nakładka
+        // przepuszcza tylko komunikaty krytyczne.
+        var overlayMode = _settings.ResultDisplayMode == "overlay";
+        var notice = overlayMode
+            ? OverlayNotices.ForManualResult(result.Blocks.Select(static b => b.Outcome).ToList(), _orchestrator.ActiveProvider.Name)
+            : null;
+
         if (result.Blocks.Count == 0)
         {
+            ShowOverlayNotice(notice, result.Region);
             SetStatus(result.Warning ?? "OCR nie rozpoznał tekstu w zaznaczonym obszarze.");
             return;
         }
 
-        if (_settings.ResultDisplayMode == "overlay")
+        if (overlayMode)
         {
             var translated = result.Blocks
                 .Where(static b => b.Outcome.TranslatedText is not null)
@@ -493,6 +549,7 @@ public partial class MainWindow : Window
             {
                 _overlay.ShowBlocks(translated, _settings);
             }
+            ShowOverlayNotice(notice, result.Region);
         }
         else
         {
@@ -847,6 +904,7 @@ public partial class MainWindow : Window
             ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.0,
             OcrUpscale = upscale.Preferred,
             AllowAutoUpscale = upscale.AllowAuto,
+            NoticeEcho = _noticeEcho,
         };
 
         // Wczesne utworzenie HWND nakładki, żeby wiedzieć, czy wykluczenie z capture działa.
@@ -870,6 +928,7 @@ public partial class MainWindow : Window
             }),
             _logger);
         _liveSession = session;
+        _liveWindowHandle = window.Handle;
         session.Start();
 
         BtnStartLive.IsEnabled = false;
@@ -910,6 +969,12 @@ public partial class MainWindow : Window
         {
             SetLiveIndicator(LiveIndicatorState.Active);
         }
+        // Komunikat (błąd dostawcy, Cache-only, start/stop) przy górnej krawędzi okna gry.
+        // Warstwa komunikatu przetrwa czyszczenie nakładki powyżej.
+        if (update.Notice is { } notice)
+        {
+            ShowOverlayNotice(notice, update.WindowBounds.IsEmpty ? LiveWindowBounds() : update.WindowBounds);
+        }
         if (update.Stopped)
         {
             StopLiveSession();
@@ -941,6 +1006,7 @@ public partial class MainWindow : Window
     {
         _liveSession?.Dispose();
         _liveSession = null;
+        _liveWindowHandle = IntPtr.Zero;
         BtnStartLive.IsEnabled = true;
         BtnStopLive.IsEnabled = false;
         SetLiveIndicator(LiveIndicatorState.Idle);
@@ -948,8 +1014,11 @@ public partial class MainWindow : Window
 
     private void OnStopLiveClick(object sender, RoutedEventArgs e)
     {
+        var wasRunning = _liveSession is not null;
+        var bounds = LiveWindowBounds();
         StopLiveSession();
         _overlay.ClearBlocks();
+        if (wasRunning) ShowOverlayNotice(OverlayNotices.LiveStopped(), bounds);
         TxtLiveStatus.Text = "Tryb live zatrzymany.";
         SetStatus("Tryb live zatrzymany.");
     }

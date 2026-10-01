@@ -80,6 +80,12 @@ public sealed class TranslationOrchestrator(
     /// <summary>Czasy etapów tej sesji aplikacji (live i ręczne tłumaczenie).</summary>
     public LatencyMonitor Latency => usage.Latency;
 
+    /// <summary>
+    /// Czy bieżący pipeline zgłosił błąd trwałego cache (wyniki tylko w pamięci) — UI
+    /// pokazuje wtedy ostrzeżenie w nakładce. Nowy pipeline zaczyna bez tego stanu.
+    /// </summary>
+    public bool IsCacheDegraded => Volatile.Read(ref _pipelineState)?.Pipeline.IsCacheDegraded == true;
+
     public ITranslationCache CurrentCache => _privateCache is { } inMemory ? inMemory : persistentCache;
 
     public void Initialize()
@@ -370,8 +376,19 @@ public sealed class TranslationOrchestrator(
     /// Używane przez tryb live — każdy cykl bierze świeży pipeline, więc zmiana
     /// ustawień (dostawca, tryb prywatny) obowiązuje od następnej klatki.
     /// </summary>
+    public Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
+        IReadOnlyList<string> texts, CancellationToken cancellationToken = default) =>
+        TranslateTextsAsync(texts, knownLocal: null, cancellationToken);
+
+    /// <summary>
+    /// Jak <see cref="TranslateTextsAsync(IReadOnlyList{string}, CancellationToken)"/>, ale z wynikiem
+    /// <see cref="TranslateLocalAsync"/> dla tych samych tekstów — znane teksty nie idą drugi raz
+    /// do bazy (podwójny licznik użyć). Wynik próby innego pipeline'u (zmiana ustawień między
+    /// próbą a tłumaczeniem) jest pomijany: mógłby pochodzić z innego cache albo reguł.
+    /// </summary>
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
-        IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+        IReadOnlyList<string> texts, IReadOnlyList<TranslationOutcome?>? knownLocal,
+        CancellationToken cancellationToken = default)
     {
         // Token epoki: zmiana ustawień (np. włączenie trybu prywatnego/Cache-only)
         // przerywa także tłumaczenia live będące w locie — stary pipeline nie może
@@ -390,14 +407,55 @@ public sealed class TranslationOrchestrator(
                 continue;
             }
 
+            var hint = knownLocal is LocalProbe probe && ReferenceEquals(probe.State, state) ? knownLocal : null;
             var outcomes = await state.Pipeline
-                .TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, linked.Token)
+                .TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, hint, linked.Token)
                 .ConfigureAwait(false);
             // A provider may finish despite cancellation. Never publish a result
             // belonging to settings that have already been replaced.
             linked.Token.ThrowIfCancellationRequested();
             return outcomes;
         }
+    }
+
+    /// <summary>
+    /// Tylko lokalna część <see cref="TranslateTextsAsync"/> (korekty, słownik, cache) —
+    /// bez dostawcy i bez rezerwacji budżetu. Null = tekstu nie ma lokalnie. Ta sama
+    /// obsługa epoki co w <see cref="TranslateTextsAsync"/>: wynik starego pipeline'u
+    /// (np. sprzed włączenia trybu prywatnego) nigdy nie wraca do wołającego.
+    /// </summary>
+    public async Task<IReadOnlyList<TranslationOutcome?>> TranslateLocalAsync(
+        IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+    {
+        while (true)
+        {
+            var state = Volatile.Read(ref _pipelineState)
+                ?? throw new InvalidOperationException("Pipeline tłumaczenia nie został zbudowany.");
+
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, state.EpochToken);
+            if (!ReferenceEquals(state, Volatile.Read(ref _pipelineState)))
+            {
+                continue;
+            }
+
+            var outcomes = await state.Pipeline
+                .TranslateLocalAsync(texts, settings.SourceLanguage, settings.TargetLanguage, linked.Token)
+                .ConfigureAwait(false);
+            linked.Token.ThrowIfCancellationRequested();
+            return new LocalProbe(outcomes, state);
+        }
+    }
+
+    // Wynik próby lokalnej z migawką pipeline'u, który go dał — tylko ten sam pipeline
+    // może go ponownie użyć w TranslateTextsAsync.
+    private sealed class LocalProbe(IReadOnlyList<TranslationOutcome?> outcomes, PipelineState state)
+        : IReadOnlyList<TranslationOutcome?>
+    {
+        public PipelineState State { get; } = state;
+        public TranslationOutcome? this[int index] => outcomes[index];
+        public int Count => outcomes.Count;
+        public IEnumerator<TranslationOutcome?> GetEnumerator() => outcomes.GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     public string SourceLanguage => settings.SourceLanguage;

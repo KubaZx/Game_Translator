@@ -34,6 +34,27 @@ public enum TranslationOrigin
     Unavailable,
 }
 
+/// <summary>
+/// Lokalny powód braku tłumaczenia (bez treści tekstu) — pozwala pokazać graczowi krótki
+/// komunikat w nakładce zamiast parsować <see cref="TranslationOutcome.ErrorMessage"/>.
+/// </summary>
+public enum OutcomeIssue
+{
+    None,
+
+    /// <summary>Tryb Cache-only: tekstu nie ma w lokalnej bazie, nic nie wyszło do sieci.</summary>
+    CacheOnlyMiss,
+
+    /// <summary>Wyczerpany limit znaków tej sesji (lokalna odmowa, bez zapytania).</summary>
+    SessionLimit,
+
+    /// <summary>Dostawca zgłosił błąd — rodzaj w <see cref="TranslationOutcome.FailureKind"/>.</summary>
+    Provider,
+
+    /// <summary>Dostawca odpowiedział pustym tłumaczeniem.</summary>
+    EmptyResult,
+}
+
 public sealed record TranslationOutcome(
     string SourceText,
     string NormalizedText,
@@ -48,6 +69,15 @@ public sealed record TranslationOutcome(
     /// w pokazanym tłumaczeniu, np. zmienione liczby; null, gdy wynik przeszedł kontrolę.
     /// </summary>
     public string? QualityWarning { get; init; }
+
+    /// <summary>
+    /// Rodzaj błędu dostawcy, gdy tekst nie został przetłumaczony przez jego wyjątek
+    /// (także u czekających na to samo zapytanie); null w pozostałych przypadkach.
+    /// </summary>
+    public TranslationFailureKind? FailureKind { get; init; }
+
+    /// <summary>Dlaczego zabrakło tłumaczenia (Cache-only, limit sesji, błąd dostawcy, pusty wynik).</summary>
+    public OutcomeIssue Issue { get; init; }
 }
 
 /// <summary>
@@ -108,13 +138,32 @@ public sealed class TranslationPipeline(
     public ITranslationProvider Provider => provider;
     public TranslationPipelineOptions Options => options;
 
+    public Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken = default) =>
+        TranslateAsync(texts, sourceLanguage, targetLanguage, knownLocal: null, cancellationToken);
+
+    /// <summary>
+    /// Jak <see cref="TranslateAsync(IReadOnlyList{string}, string, string, CancellationToken)"/>,
+    /// ale z wynikiem wcześniejszego <see cref="TranslateLocalAsync"/> dla tych samych tekstów.
+    /// Znane już lokalnie teksty nie są szukane w cache drugi raz: odczyt z trwałej bazy podbija
+    /// jej licznik użyć (use_count), więc częściowo znana klatka live liczyłaby każdy znany
+    /// tekst podwójnie, a każde pudło kosztowałoby drugie zapytanie. Trafienia z próby liczymy
+    /// tutaj (próba częściowo znanej partii ich nie liczy). Teksty null z próby (brak, wpis
+    /// nieaktualny) przechodzą pełną ścieżkę — w międzyczasie mogły trafić do cache.
+    /// Lista o innej długości niż <paramref name="texts"/> jest ignorowana.
+    /// </summary>
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
         IReadOnlyList<string> texts,
         string sourceLanguage,
         string targetLanguage,
+        IReadOnlyList<TranslationOutcome?>? knownLocal,
         CancellationToken cancellationToken = default)
     {
         if (texts.Count == 0) return [];
+        if (knownLocal is not null && knownLocal.Count != texts.Count) knownLocal = null;
 
         var normalizedInputs = texts
             .Select(static text => (Source: text, Normalized: TextNormalizer.Normalize(text)))
@@ -123,13 +172,22 @@ public sealed class TranslationPipeline(
         var outcomes = new Dictionary<string, TranslationOutcome>(StringComparer.Ordinal);
         var pending = new List<(string Source, string Normalized)>();
 
-        foreach (var (source, normalized) in normalizedInputs)
+        for (var index = 0; index < normalizedInputs.Count; index++)
         {
+            var (source, normalized) = normalizedInputs[index];
             if (outcomes.ContainsKey(normalized) || pending.Any(p => p.Normalized == normalized)) continue;
 
             if (normalized.Length == 0)
             {
                 outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, "Pusty tekst.");
+                continue;
+            }
+
+            if (knownLocal?[index] is { } known && known.NormalizedText == normalized)
+            {
+                if (known.Origin == TranslationOrigin.Glossary) usage.RecordGlossaryHit();
+                else if (known.Origin == TranslationOrigin.Cache) usage.RecordCacheHit();
+                outcomes[normalized] = known;
                 continue;
             }
 
@@ -150,7 +208,10 @@ public sealed class TranslationPipeline(
             {
                 foreach (var (source, normalized) in pending)
                 {
-                    outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, CacheOnlyMessage);
+                    outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, CacheOnlyMessage)
+                    {
+                        Issue = OutcomeIssue.CacheOnlyMiss,
+                    };
                 }
             }
             else
@@ -170,6 +231,8 @@ public sealed class TranslationPipeline(
                     TranslatedText = stale.TranslatedText,
                     Origin = TranslationOrigin.Cache,
                     ErrorMessage = null,
+                    FailureKind = null,
+                    Issue = OutcomeIssue.None,
                     QualityWarning = TranslationQualityGate.Describe(stale.Context.QualityIssues),
                 };
             }
@@ -182,9 +245,63 @@ public sealed class TranslationPipeline(
             .ToList();
     }
 
+    /// <summary>
+    /// Tylko lokalna część <see cref="TranslateAsync"/>: korekta ręczna → słownik → cache,
+    /// z tymi samymi regułami (filtr atrapy Mock, nieaktualne wpisy, awaryjna pamięć przy
+    /// uszkodzonej bazie). Nie woła dostawcy i nie rezerwuje budżetu znaków, więc tryb live
+    /// może pokazać w pełni znaną klatkę bez czekania na wolne miejsce w kolejce tłumaczeń.
+    /// Element null = tekstu nie da się przetłumaczyć lokalnie. Nieaktualny wpis (stary
+    /// format, oznaczony przez kontrolę jakości) NIE jest tu lokalny — TranslateAsync spróbuje
+    /// go odświeżyć — i nie zostawia wpisu zapasowego. Trafienia liczymy tylko, gdy lokalna
+    /// jest cała partia: w przeciwnym razie wołający i tak przejdzie przez TranslateAsync,
+    /// który policzy te same trafienia, a podwójne liczenie zawyżałoby statystyki.
+    /// </summary>
+    public async Task<IReadOnlyList<TranslationOutcome?>> TranslateLocalAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken = default)
+    {
+        if (texts.Count == 0) return [];
+
+        var outcomes = new Dictionary<string, TranslationOutcome?>(StringComparer.Ordinal);
+        var normalizedInputs = texts
+            .Select(static text => (Source: text, Normalized: TextNormalizer.Normalize(text)))
+            .ToList();
+        var allLocal = true;
+        foreach (var (source, normalized) in normalizedInputs)
+        {
+            if (outcomes.ContainsKey(normalized)) continue;
+            var local = normalized.Length == 0
+                // Ten sam wynik co w TranslateAsync — też bez dostawcy.
+                ? new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, "Pusty tekst.")
+                : await TryTranslateLocallyAsync(source, normalized, sourceLanguage, targetLanguage,
+                    cancellationToken, probeOnly: true).ConfigureAwait(false);
+            outcomes[normalized] = local;
+            allLocal &= local is not null;
+        }
+
+        if (allLocal)
+        {
+            foreach (var outcome in outcomes.Values)
+            {
+                if (outcome is { Origin: TranslationOrigin.Glossary }) usage.RecordGlossaryHit();
+                else if (outcome is { Origin: TranslationOrigin.Cache }) usage.RecordCacheHit();
+            }
+        }
+
+        return normalizedInputs
+            .Select(input => outcomes[input.Normalized] is { } outcome ? outcome with { SourceText = input.Source } : null)
+            .ToList();
+    }
+
+    /// <param name="probeOnly">
+    /// Sprawdzenie bez skutków ubocznych: bez liczenia trafień i bez zapamiętywania wpisów
+    /// zapasowych (te są potrzebne tylko ścieżce, która naprawdę zapyta dostawcę).
+    /// </param>
     private async Task<TranslationOutcome?> TryTranslateLocallyAsync(
         string source, string normalized, string sourceLanguage, string targetLanguage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool probeOnly = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         CachedTranslation? cached;
@@ -212,7 +329,7 @@ public sealed class TranslationPipeline(
             && cached.Provider.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase)
             && !provider.Name.Equals(MockTranslationProvider.ProviderName, StringComparison.OrdinalIgnoreCase))
         {
-            if (!options.CacheOnlyMode && cached.GameProfile.Length > 0)
+            if (!probeOnly && !options.CacheOnlyMode && cached.GameProfile.Length > 0)
                 _staleFallbacks[normalized] = new StaleEntry(null, cached.GameProfile, default);
             cached = null;
         }
@@ -226,25 +343,26 @@ public sealed class TranslationPipeline(
         if (!options.CacheOnlyMode && cached is { IsManual: false }
             && TranslationCacheContext.IsStale(cached.Context, normalized))
         {
-            _staleFallbacks[normalized] = new StaleEntry(
-                cached.TranslatedText, cached.GameProfile, TranslationCacheContext.Parse(cached.Context));
+            if (!probeOnly)
+                _staleFallbacks[normalized] = new StaleEntry(
+                    cached.TranslatedText, cached.GameProfile, TranslationCacheContext.Parse(cached.Context));
             cached = null;
         }
 
         // Manual corrections retain precedence over the glossary on both lookups.
         if (cached is { IsManual: true })
         {
-            usage.RecordCacheHit();
+            if (!probeOnly) usage.RecordCacheHit();
             return new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache);
         }
         if (glossary.TryTranslateExact(normalized, out var translation))
         {
-            usage.RecordGlossaryHit();
+            if (!probeOnly) usage.RecordGlossaryHit();
             return new TranslationOutcome(source, normalized, translation, TranslationOrigin.Glossary);
         }
         if (cached is not null)
         {
-            usage.RecordCacheHit();
+            if (!probeOnly) usage.RecordCacheHit();
             return new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache)
             {
                 QualityWarning = TranslationQualityGate.Describe(TranslationCacheContext.Parse(cached.Context).QualityIssues),
@@ -252,7 +370,7 @@ public sealed class TranslationPipeline(
         }
         if (degradedHit is not null)
         {
-            usage.RecordCacheHit();
+            if (!probeOnly) usage.RecordCacheHit();
             return new TranslationOutcome(source, normalized, degradedHit, TranslationOrigin.Cache);
         }
         return null;
@@ -339,7 +457,11 @@ public sealed class TranslationPipeline(
             }
             catch (TranslationException ex)
             {
-                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, WaiterMessage(ex));
+                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, WaiterMessage(ex))
+                {
+                    FailureKind = WaiterFailureKind(ex),
+                    Issue = WaiterIssue(ex),
+                };
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -360,6 +482,18 @@ public sealed class TranslationPipeline(
         { Kind: TranslationFailureKind.Unknown, Message: TranslationQualityGate.EmptyResultMessage } => TranslationQualityGate.EmptyResultMessage,
         _ => ex.UserFriendlyMessage,
     };
+
+    // Czekający dostaje ten sam powód co właściciel zapytania: lokalne odmowy (limit sesji,
+    // pusty wynik) nie udają błędu dostawcy, więc nie niosą też jego rodzaju błędu.
+    private static OutcomeIssue WaiterIssue(TranslationException ex) => ex switch
+    {
+        { Kind: TranslationFailureKind.QuotaExceeded, Message: SessionLimitMessage } => OutcomeIssue.SessionLimit,
+        { Kind: TranslationFailureKind.Unknown, Message: TranslationQualityGate.EmptyResultMessage } => OutcomeIssue.EmptyResult,
+        _ => OutcomeIssue.Provider,
+    };
+
+    private static TranslationFailureKind? WaiterFailureKind(TranslationException ex) =>
+        WaiterIssue(ex) == OutcomeIssue.Provider ? ex.Kind : null;
 
     private Task<IReadOnlyList<string>> SendToProviderAsync(
         IReadOnlyList<string> texts, TranslationContext context, string sourceLanguage, string targetLanguage,
@@ -455,7 +589,10 @@ public sealed class TranslationPipeline(
             {
                 tcs.TrySetException(denied);
                 outcomes[normalized] = new TranslationOutcome(
-                    source, normalized, null, TranslationOrigin.Unavailable, SessionLimitMessage);
+                    source, normalized, null, TranslationOrigin.Unavailable, SessionLimitMessage)
+                {
+                    Issue = OutcomeIssue.SessionLimit,
+                };
             }
             // A local admission denial is not a failed request to the provider.
             return;
@@ -476,7 +613,11 @@ public sealed class TranslationPipeline(
             foreach (var (source, normalized, _, tcs) in chunk)
             {
                 tcs.TrySetException(ex);
-                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, ex.UserFriendlyMessage);
+                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, ex.UserFriendlyMessage)
+                {
+                    FailureKind = ex.Kind,
+                    Issue = OutcomeIssue.Provider,
+                };
             }
             return;
         }
@@ -489,7 +630,11 @@ public sealed class TranslationPipeline(
             foreach (var (source, normalized, _, tcs) in chunk)
             {
                 tcs.TrySetException(mismatch);
-                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, mismatch.UserFriendlyMessage);
+                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, mismatch.UserFriendlyMessage)
+                {
+                    FailureKind = mismatch.Kind,
+                    Issue = OutcomeIssue.Provider,
+                };
             }
             return;
         }
@@ -538,7 +683,10 @@ public sealed class TranslationPipeline(
                 usage.RecordFailure();
                 tcs.TrySetException(new TranslationException(TranslationFailureKind.Unknown, TranslationQualityGate.EmptyResultMessage));
                 outcomes[normalized] = new TranslationOutcome(
-                    source, normalized, null, TranslationOrigin.Unavailable, TranslationQualityGate.EmptyResultMessage);
+                    source, normalized, null, TranslationOrigin.Unavailable, TranslationQualityGate.EmptyResultMessage)
+                {
+                    Issue = OutcomeIssue.EmptyResult,
+                };
                 // Pusty wynik przy ponownym tłumaczeniu wpisu z problemem jakości: stary wynik
                 // (pokazany jako zapasowy) zapisujemy jako ostateczny — inaczej każde kolejne
                 // wystąpienie byłoby kolejnym płatnym zapytaniem z pustą odpowiedzią.

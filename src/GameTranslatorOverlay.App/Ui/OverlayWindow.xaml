@@ -11,5 +11,9 @@
         ShowActivated="False"
         IsHitTestVisible="False"
         WindowStartupLocation="Manual">
-  <Canvas x:Name="RootCanvas" />
+  <Grid>
+    <Canvas x:Name="RootCanvas" />
+    <!-- Komunikaty dla gracza: osobna warstwa, której nie czyści ClearBlocks. -->
+    <Canvas x:Name="NoticeCanvas" IsHitTestVisible="False" />
+  </Grid>
 </Window>
