@@ -209,18 +209,38 @@ public sealed class TranslationPipeline(
         if (texts.Count == 0) return [];
         if (knownLocal is not null && knownLocal.Count != texts.Count) knownLocal = null;
 
-        var normalizedInputs = texts
-            .Select(static text => (Source: text, Normalized: TextNormalizer.Normalize(text)))
-            .ToList();
+        var normalizedInputs = NormalizeAll(texts);
 
-        var outcomes = new Dictionary<string, TranslationOutcome>(StringComparer.Ordinal);
+        // Najpierw zbieramy teksty, o które trzeba zapytać cache (pierwsze wystąpienie, niepuste,
+        // nieznane z próby lokalnej) — dokładnie te, o które pytała dotąd pętla niżej, tekst po
+        // tekście — i pytamy o nie jednym odczytem partii: cache trwały obsługuje wtedy całą
+        // klatkę jednym połączeniem zamiast osobnego zadania i połączenia na każdy tekst.
+        var lookupSlots = new int[normalizedInputs.Length];
+        var lookupTexts = new List<string>(normalizedInputs.Length);
+        var seen = new HashSet<string>(normalizedInputs.Length, StringComparer.Ordinal);
+        for (var index = 0; index < normalizedInputs.Length; index++)
+        {
+            var normalized = normalizedInputs[index].Normalized;
+            lookupSlots[index] = NoLookup;
+            if (!seen.Add(normalized)) lookupSlots[index] = DuplicateText;
+            else if (normalized.Length > 0 && !(knownLocal?[index] is { } known && known.NormalizedText == normalized))
+            {
+                lookupSlots[index] = lookupTexts.Count;
+                lookupTexts.Add(normalized);
+            }
+        }
+        var lookups = await LookupManyAsync(lookupTexts, sourceLanguage, targetLanguage, cancellationToken)
+            .ConfigureAwait(false);
+
+        var outcomes = new Dictionary<string, TranslationOutcome>(normalizedInputs.Length, StringComparer.Ordinal);
         var pending = new List<(string Source, string Normalized)>();
         var staleFallbacks = new Dictionary<string, StaleEntry>(StringComparer.Ordinal);
 
-        for (var index = 0; index < normalizedInputs.Count; index++)
+        for (var index = 0; index < normalizedInputs.Length; index++)
         {
+            // Powtórzony tekst dostaje wynik pierwszego wystąpienia (niżej, przy składaniu wyniku).
+            if (lookupSlots[index] == DuplicateText) continue;
             var (source, normalized) = normalizedInputs[index];
-            if (outcomes.ContainsKey(normalized) || pending.Any(p => p.Normalized == normalized)) continue;
 
             if (normalized.Length == 0)
             {
@@ -236,9 +256,9 @@ public sealed class TranslationPipeline(
                 continue;
             }
 
-            var local = await TryTranslateLocallyAsync(source, normalized, sourceLanguage, targetLanguage, cancellationToken,
-                    staleFallbacks)
-                .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var local = TryTranslateLocally(source, normalized, sourceLanguage, targetLanguage,
+                lookups[lookupSlots[index]], staleFallbacks);
             if (local is not null)
             {
                 outcomes[normalized] = local;
@@ -285,11 +305,56 @@ public sealed class TranslationPipeline(
             }
         }
 
-        return normalizedInputs
-            .Select(input => outcomes.TryGetValue(input.Normalized, out var outcome)
-                ? outcome with { SourceText = input.Source }
-                : new TranslationOutcome(input.Source, input.Normalized, null, TranslationOrigin.Unavailable, "Brak wyniku."))
-            .ToList();
+        var results = new List<TranslationOutcome>(normalizedInputs.Length);
+        foreach (var (source, normalized) in normalizedInputs)
+        {
+            results.Add(outcomes.TryGetValue(normalized, out var outcome)
+                ? WithSource(outcome, source)
+                : new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, "Brak wyniku."));
+        }
+        return results;
+    }
+
+    private const int NoLookup = -1;
+    private const int DuplicateText = -2;
+
+    private static (string Source, string Normalized)[] NormalizeAll(IReadOnlyList<string> texts)
+    {
+        var inputs = new (string Source, string Normalized)[texts.Count];
+        for (var i = 0; i < inputs.Length; i++) inputs[i] = (texts[i], TextNormalizer.Normalize(texts[i]));
+        return inputs;
+    }
+
+    // Wynik ma nieść tekst źródłowy tego wystąpienia; kopia rekordu tylko wtedy, gdy się różni
+    // (zwykle wynik powstał właśnie dla tego tekstu i kopia byłaby identyczna).
+    private static TranslationOutcome WithSource(TranslationOutcome outcome, string source) =>
+        string.Equals(outcome.SourceText, source, StringComparison.Ordinal) ? outcome : outcome with { SourceText = source };
+
+    /// <summary>
+    /// Odczyt cache dla całej partii. Błąd pojedynczego odczytu trafia do jego wyniku (obsługa
+    /// jak dotąd w <see cref="TryTranslateLocally"/>); gdyby cache rzucił błędem całego
+    /// wywołania, traktujemy go jak błąd każdego odczytu partii.
+    /// </summary>
+    private async Task<IReadOnlyList<CacheLookupResult>> LookupManyAsync(
+        IReadOnlyList<string> normalizedTexts, string sourceLanguage, string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        if (normalizedTexts.Count == 0) return [];
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var results = await cache.LookupManyAsync(
+                    normalizedTexts, sourceLanguage, targetLanguage, options.GameProfile, cancellationToken)
+                .ConfigureAwait(false);
+            if (results.Count == normalizedTexts.Count) return results;
+            throw new InvalidOperationException("Cache zwrócił inną liczbę wyników niż liczba tekstów.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var failed = new CacheLookupResult[normalizedTexts.Count];
+            Array.Fill(failed, new CacheLookupResult(null, ex));
+            return failed;
+        }
     }
 
     /// <summary>
@@ -311,19 +376,36 @@ public sealed class TranslationPipeline(
     {
         if (texts.Count == 0) return [];
 
-        var outcomes = new Dictionary<string, TranslationOutcome?>(StringComparer.Ordinal);
-        var normalizedInputs = texts
-            .Select(static text => (Source: text, Normalized: TextNormalizer.Normalize(text)))
-            .ToList();
+        var normalizedInputs = NormalizeAll(texts);
+        var outcomes = new Dictionary<string, TranslationOutcome?>(normalizedInputs.Length, StringComparer.Ordinal);
+
+        // Jak w TranslateAsync: jeden odczyt cache dla wszystkich różnych niepustych tekstów.
+        var lookupTexts = new List<string>(normalizedInputs.Length);
+        var seen = new HashSet<string>(normalizedInputs.Length, StringComparer.Ordinal);
+        foreach (var (_, normalized) in normalizedInputs)
+        {
+            if (seen.Add(normalized) && normalized.Length > 0) lookupTexts.Add(normalized);
+        }
+        var lookups = await LookupManyAsync(lookupTexts, sourceLanguage, targetLanguage, cancellationToken)
+            .ConfigureAwait(false);
+
         var allLocal = true;
+        var nextLookup = 0;
         foreach (var (source, normalized) in normalizedInputs)
         {
             if (outcomes.ContainsKey(normalized)) continue;
-            var local = normalized.Length == 0
+            TranslationOutcome? local;
+            if (normalized.Length == 0)
+            {
                 // Ten sam wynik co w TranslateAsync — też bez dostawcy.
-                ? new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, "Pusty tekst.")
-                : await TryTranslateLocallyAsync(source, normalized, sourceLanguage, targetLanguage,
-                    cancellationToken, staleFallbacks: null).ConfigureAwait(false);
+                local = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, "Pusty tekst.");
+            }
+            else
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                local = TryTranslateLocally(source, normalized, sourceLanguage, targetLanguage,
+                    lookups[nextLookup++], staleFallbacks: null);
+            }
             outcomes[normalized] = local;
             allLocal &= local is not null;
         }
@@ -337,9 +419,10 @@ public sealed class TranslationPipeline(
             }
         }
 
-        return normalizedInputs
-            .Select(input => outcomes[input.Normalized] is { } outcome ? outcome with { SourceText = input.Source } : null)
-            .ToList();
+        var results = new List<TranslationOutcome?>(normalizedInputs.Length);
+        foreach (var (source, normalized) in normalizedInputs)
+            results.Add(outcomes[normalized] is { } outcome ? WithSource(outcome, source) : null);
+        return results;
     }
 
     /// <param name="staleFallbacks">
@@ -352,15 +435,29 @@ public sealed class TranslationPipeline(
         CancellationToken cancellationToken, Dictionary<string, StaleEntry>? staleFallbacks)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var probeOnly = staleFallbacks is null;
-        CachedTranslation? cached;
-        string? degradedHit = null;
+        CacheLookupResult lookup;
         try
         {
-            cached = await cache.LookupAsync(normalized, sourceLanguage, targetLanguage, options.GameProfile, cancellationToken)
-                .ConfigureAwait(false);
+            lookup = new CacheLookupResult(await cache.LookupAsync(
+                    normalized, sourceLanguage, targetLanguage, options.GameProfile, cancellationToken)
+                .ConfigureAwait(false));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            lookup = new CacheLookupResult(null, ex);
+        }
+        return TryTranslateLocally(source, normalized, sourceLanguage, targetLanguage, lookup, staleFallbacks);
+    }
+
+    /// <summary>Jak <see cref="TryTranslateLocallyAsync"/>, z gotowym wynikiem odczytu cache tego tekstu.</summary>
+    private TranslationOutcome? TryTranslateLocally(
+        string source, string normalized, string sourceLanguage, string targetLanguage,
+        CacheLookupResult lookup, Dictionary<string, StaleEntry>? staleFallbacks)
+    {
+        var probeOnly = staleFallbacks is null;
+        var cached = lookup.Translation;
+        string? degradedHit = null;
+        if (lookup.Error is { } ex)
         {
             // Cache to tylko przyspieszenie: zablokowana, pełna albo tylko-do-odczytu baza nie
             // może zatrzymać tłumaczenia. Brak wpisu = zwykła ścieżka (w Cache-only nic nie

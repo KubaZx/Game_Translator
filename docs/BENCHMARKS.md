@@ -57,7 +57,8 @@ Pliki tymczasowe (baza SQLite w pomiarze cache) powstają wyłącznie w
 | `ChangeDetectionBenchmarks.SiatkaLuminancji` | `LuminanceGrid.FromBgra32` na pełnej klatce 1920×1080 lub 3840×2160 (siatka 48×27, 9 próbek na komórkę). |
 | `ChangeDetectionBenchmarks.AnalizaZmian` | `NoiseAwareChangeDetector.Analyze` dwóch siatek (odsiew szumu, region zmian). |
 | `ChangeDetectionBenchmarks.KlatkaPelna` | Oba kroki razem — decyzja „czy klatka się zmieniła” wykonywana dla każdej przechwyconej klatki przed ewentualnym OCR. Klatki syntetyczne: ciemne tło z ziarnem pikseli (poniżej progu komórki — uśrednione, niewidoczne dla detektora), pas „mgły” w górnych 40% ekranu, który co klatkę zmienia luminancję o 14 (ponad próg komórki 10, poniżej progu mocnej zmiany 25 — po rozgrzaniu odsiewany jako szum), oraz jasny prostokąt przesuwający się między klatkami (zmiana mocna). `GlobalSetup` sprawdza, że obie ścieżki detektora pracują. |
-| `FingerprintBenchmarks.OdciskRegionu` | `TextRegionFingerprint.FromBitmap` (budowniczy wiersz po wierszu: SHA-256 z RGB + test kontrastu) dla regionu 64×16 (etykieta), 512×64 (wiersz napisów) i 512×512 (największy dopuszczalny region). |
+| `FingerprintBenchmarks.OdciskRegionu` | `TextRegionFingerprint.FromBitmap` (budowniczy wiersz po wierszu: skrót RGB — od 2026-10 XxHash128, wcześniej SHA-256 — + test kontrastu) dla regionu 64×16 (etykieta), 512×64 (wiersz napisów) i 512×512 (największy dopuszczalny region). |
+| `FingerprintBenchmarks.PustyRegion` | `TextPresenceProbe.IsClearlyEmpty` na jednolitym regionie tych samych rozmiarów (tekst zniknął z ekranu) — najgorszy przypadek testu kontrastu: bez wczesnego wyjścia, każdy piksel RGB. Dodany 2026-10. |
 | `TextBenchmarks.GrupowanieFiltrNormalizacja` | 40 syntetycznych wierszy OCR (dialog, menu, dziennik zadań, podpowiedź przedmiotu, śmieci HUD): `TextBlockGrouper.Group`, potem dla każdego bloku `TextNormalizer.Normalize` i `JunkFilter.IsMeaningful`. |
 | `TextBenchmarks.SklejanieWierszy` | `TextReflow.Unwrap` na 6-wierszowym dialogu (sklejanie miękkich zawinięć przed wysłaniem do dostawcy). |
 | `TextBenchmarks.RozkladanieTlumaczenia` | `TextReflow.Rewrap` — rozłożenie polskiego tłumaczenia z powrotem na wiersze oryginału. |
@@ -70,6 +71,9 @@ antywirusem, na którym gra się naprawdę.** Na Windows dostęp do pliku SQLite
 filtr antywirusa i inny system plików, więc zwłaszcza wariant „zimny” może wyglądać inaczej.
 Liczby służą do porównań między commitami na tej samej maszynie, nie jako obietnica czasu
 w grze.
+
+Tabele poniżej to stan sprzed optymalizacji z 2026-10; wyniki po nich (z porównaniem) są
+w sekcji [Optymalizacje 2026-10](#optymalizacje-2026-10).
 
 Przebieg pełny (domyślne zadanie BenchmarkDotNet), commit z wprowadzeniem benchmarków,
 2026-09-30:
@@ -165,3 +169,105 @@ ma błąd większy niż sama średnia:
 
 Do decyzji (np. „czy zmiana przyspieszyła cache”) używaj pełnego przebiegu przed i po zmianie
 na tej samej maszynie; szybki wystarcza do wyłapania regresji rzędu wielokrotności.
+
+## Optymalizacje 2026-10
+
+Pełny przebieg (domyślne zadanie BenchmarkDotNet) klas `FingerprintBenchmarks`,
+`CacheHitFrameBenchmarks` i `ChangeDetectionBenchmarks` przed zmianami i po nich, na tej samej
+maszynie, jeden proces pomiarowy naraz (bez równoległych buildów i testów):
+
+```
+BenchmarkDotNet v0.15.8, Linux Ubuntu 24.04.4 LTS (Noble Numbat)
+Intel Xeon Processor 2.10GHz, 1 CPU, 4 logical and 4 physical cores
+.NET SDK 10.0.112
+  [Host]     : .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+  DefaultJob : .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+```
+
+**To oszczędności procesora rzędu mikrosekund, nie widoczne skrócenie tłumaczenia.** Czas od
+zmiany na ekranie do napisu wyznaczają OCR (ok. 100 ms) i dostawca (setki ms); praktyczny zysk
+to mniej pracy procesora w każdej klatce trybu live — czyli mniej odebranego grze czasu CPU.
+
+### Odcisk regionu tekstu
+
+| Pomiar | Region | Przed: Mean ± Error | Przed: Allocated | Po: Mean ± Error | Po: Allocated |
+|---|---|---:|---:|---:|---:|
+| OdciskRegionu | 512x512 | 1,035.458 ± 9.511 μs | 328 B | 121.778 ± 2.381 μs | 744 B |
+| OdciskRegionu | 512x64 | 129.423 ± 1.596 μs | 328 B | 14.591 ± 0.288 μs | 744 B |
+| OdciskRegionu | 64x16 | 5.489 ± 0.032 μs | 328 B | 0.920 ± 0.011 μs | 744 B |
+| PustyRegion ¹ | 512x512 | 674.258 ± 12.503 μs | – | 60.281 ± 0.967 μs | 48 B |
+| PustyRegion ¹ | 512x64 | 83.983 ± 0.872 μs | – | 7.295 ± 0.094 μs | 48 B |
+| PustyRegion ¹ | 64x16 | 2.664 ± 0.053 μs | – | 0.409 ± 0.004 μs | 48 B |
+
+¹ Pomiar dodany w tej zmianie; „przed” zmierzony osobnym przebiegiem samego `PustyRegion`
+z poprzednią wersją `TextPresenceProbe` (BenchmarkDotNet pokazał wtedy „–” zamiast 48 B
+za obiekt sondy — kod alokacji się nie zmienił).
+
+- **Skrót XxHash128 zamiast SHA-256** (`System.IO.Hashing`, Microsoft, MIT): odcisk porównuje
+  tylko klatki tej samej gry w jednej sesji i nigdzie nie jest zapisywany, więc nie potrzebuje
+  odporności kryptograficznej; 128 bitów daje szansę przypadkowej kolizji rzędu 2^-128.
+  Skrót obejmuje piksele BGRA z wyzerowaną wektorowo alfą zamiast RGB przepisywanego bajt po
+  bajcie — te same bajty kolorów w tej samej kolejności. Większa alokacja (744 B zamiast 328 B)
+  to stan obiektu XxHash128; stała na region, bez znaczenia dla GC.
+- **Wektorowy test kontrastu** (`TextPresenceProbe`): minimum i maksimum kanałów liczone
+  wektorami po 256 pikseli, z tym samym wynikiem co przegląd piksel po pikselu (testy porównują
+  obie wersje na losowych danych).
+
+### Trafienia cache w klatce live
+
+| Pomiar | Teksty | Przed: Mean ± Error | Przed: Allocated | Po: Mean ± Error | Po: Allocated |
+|---|---:|---:|---:|---:|---:|
+| SqliteRozgrzanaPamiec | 20 | 49.78 ± 0.762 μs | 57.8 KB | 11.36 ± 0.047 μs | 7.85 KB |
+| PamiecTrybPrywatny | 20 | 49.92 ± 0.981 μs | 59.36 KB | 12.72 ± 0.144 μs | 7.3 KB |
+| SqliteZimnaPamiec | 20 | 2,816.61 ± 107.857 μs | 134.1 KB | 928.60 ± 30.139 μs | 54.44 KB |
+| SqliteRozgrzanaPamiec | 100 | 295.15 ± 5.888 μs | 338.83 KB | 58.22 ± 0.782 μs | 44.88 KB |
+| PamiecTrybPrywatny | 100 | 242.24 ± 4.000 μs | 297.28 KB | 61.85 ± 1.071 μs | 33.43 KB |
+| SqliteZimnaPamiec | 100 | 13,147.02 ± 390.159 μs | 708.04 KB | 3,144.04 ± 122.006 μs | 304.89 KB |
+
+Wariant zimny ma nadal rozkład wielomodalny i iteracje poniżej 100 ms (uwagi wyżej) — traktuj
+go jako rząd wielkości; różnica przed/po jest jednak wielokrotnie większa niż błąd.
+
+- **Normalizacja bez kopii czystego tekstu:** `TextNormalizer.Normalize` zwraca ten sam napis,
+  gdy zachowawczy test pokazuje, że pełna normalizacja nic by nie zmieniła (znaki widocznego
+  ASCII, Latin-1 i Latin Extended-A, pojedyncze spacje, bez pustych wierszy i odstępów na
+  brzegach); wszystko inne idzie pełną ścieżką. Usuwa podwójną normalizację (pipeline, potem
+  słownik). Osobny pomiar z wyłączonym samym tym skrótem: 25.08 μs / 41.29 KB (20 tekstów,
+  SQLite rozgrzany) zamiast 11.36 μs / 7.85 KB.
+- **Pamięć trafień bez SHA-256:** pamięć trafień SQLite i cache trybu prywatnego są kluczowane
+  samym znormalizowanym tekstem (struktura klucza zamiast napisu `hash|język|język|profil`),
+  więc trafienie nie liczy skrótu ani nie składa klucza. SHA-256 (format kolumny `text_hash` bez
+  zmian) liczony jest tylko przy odczycie z bazy i zapisie. Osobny pomiar z doliczonym
+  (jak dawniej) skrótem SHA-256 i napisem klucza przy każdym trafieniu w pamięci: 31.09 μs / 16.99 KB (20 tekstów) i
+  157.31 μs / 107.07 KB (100 tekstów).
+- **Odczyt partii (`ITranslationCache.LookupManyAsync`):** pipeline (`TranslateAsync` i próba
+  lokalna `TranslateLocalAsync`) pyta cache o wszystkie teksty klatki naraz — te same teksty co
+  dotąd, w tej samej kolejności, z tą samą obsługą błędu pojedynczego odczytu. SQLite obsługuje
+  trafienia w pamięci bez zadania w tle, a pozostałe teksty jednym zadaniem, na jednym połączeniu
+  i jednym przygotowanym zapytaniu (zamiast `Task.Run`, połączenia i zapytania na każdy tekst) —
+  to jest główny zysk wariantu zimnego. Priorytety wpisów, wersjonowanie pamięci i zbiorczy zapis
+  liczników bez zmian. Implementacja domyślna w interfejsie woła `LookupAsync` po kolei.
+- Drobne: bez LINQ i domknięć w pętli klatki (`pending.Any` → zbiór), słowniki o znanym rozmiarze,
+  kopia `TranslationOutcome` tylko wtedy, gdy tekst źródłowy wystąpienia się różni.
+
+**Wypróbowane i wycofane:** `TextHasher.Sha256Hex` z buforem na stosie zamiast tablicy bajtów
+UTF-8 — w wariancie zimnym (jedyny, który jeszcze liczy skrót) 2,992.55 ± 76.820 μs bez tej
+zmiany wobec 3,324.68 ± 92.057 μs z nią (100 tekstów), czyli w granicach rozrzutu tego
+pomiaru, a alokacja niższa tylko o ok. 3 KB na 100 tekstów. Nie warto komplikować kodu.
+
+### Detekcja zmian klatki
+
+| Pomiar | Rozdzielczość | Przed: Mean ± Error | Przed: Allocated | Po: Mean ± Error | Po: Allocated |
+|---|---|---:|---:|---:|---:|
+| SiatkaLuminancji | 1920x1080 | 53.616 ± 0.761 μs | 5240 B | 34.036 ± 0.579 μs | 5240 B |
+| KlatkaPelna | 1920x1080 | 58.840 ± 0.765 μs | 5304 B | 39.542 ± 0.786 μs | 5304 B |
+| SiatkaLuminancji | 3840x2160 | 65.460 ± 1.290 μs | 5240 B | 50.081 ± 1.000 μs | 5240 B |
+| KlatkaPelna | 3840x2160 | 70.704 ± 0.906 μs | 5304 B | 55.353 ± 1.095 μs | 5304 B |
+| AnalizaZmian | 1920x1080 | 4.691 ± 0.093 μs | 64 B | 4.587 ± 0.025 μs | 64 B |
+| AnalizaZmian | 3840x2160 | 4.633 ± 0.062 μs | 64 B | 4.598 ± 0.031 μs | 64 B |
+
+- **Siatka luminancji wierszami pikseli:** `LuminanceGrid.FromBgra32` przechodzi po wierszu
+  próbek przez wszystkie komórki wiersza siatki naraz (przesunięcia kolumn liczone raz). Każda
+  komórka dodaje próbki w tej samej kolejności, więc wynik jest co do bitu taki sam (test
+  porównuje bity z wersją komórka po komórce), ale sumy sąsiednich komórek są niezależne —
+  procesor nie czeka na każde dodawanie — a odczyty idą po pamięci kolejno.
+  `AnalizaZmian` bez zmian w kodzie (różnica w granicach błędu).

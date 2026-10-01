@@ -49,36 +49,48 @@ public sealed record LuminanceGrid(int Columns, int Rows, float[] Cells)
         columns = Math.Min(columns, width);
         rows = Math.Min(rows, height);
         var cells = new float[columns * rows];
+        const int SamplesPerCell = SamplesPerAxis * SamplesPerAxis;
+
+        // Przesunięcia próbek w poziomie są takie same dla każdego wiersza komórek — liczymy je raz.
+        var xCount = columns * SamplesPerAxis;
+        var xOffsets = xCount <= 768 ? stackalloc int[xCount] : new int[xCount];
+        for (var column = 0; column < columns; column++)
+        {
+            var cellLeft = column * width / columns;
+            var cellRight = Math.Max(cellLeft + 1, (column + 1) * width / columns);
+            for (var sx = 0; sx < SamplesPerAxis; sx++)
+                xOffsets[column * SamplesPerAxis + sx] = SampleCoordinate(cellLeft, cellRight, sx) * 4;
+        }
 
         for (var row = 0; row < rows; row++)
         {
             var cellTop = row * height / rows;
             var cellBottom = Math.Max(cellTop + 1, (row + 1) * height / rows);
+            var rowCells = cells.AsSpan(row * columns, columns);
 
-            for (var column = 0; column < columns; column++)
+            // Wiersz pikseli po wierszu: sumy wszystkich komórek wiersza rosną równolegle. Każda
+            // komórka nadal dodaje swoje próbki w tej samej kolejności (wiersz próbek, potem
+            // kolumna) — wynik jest co do bitu taki sam — ale kolejne komórki są niezależne, więc
+            // procesor nie czeka na każde dodanie, a odczyty idą po pamięci kolejno.
+            for (var sy = 0; sy < SamplesPerAxis; sy++)
             {
-                var cellLeft = column * width / columns;
-                var cellRight = Math.Max(cellLeft + 1, (column + 1) * width / columns);
-
-                var sum = 0f;
-                var count = 0;
-                for (var sy = 0; sy < SamplesPerAxis; sy++)
+                var lineOffset = SampleCoordinate(cellTop, cellBottom, sy) * stride;
+                for (var column = 0; column < columns; column++)
                 {
-                    var y = SampleCoordinate(cellTop, cellBottom, sy);
+                    var sum = rowCells[column];
                     for (var sx = 0; sx < SamplesPerAxis; sx++)
                     {
-                        var x = SampleCoordinate(cellLeft, cellRight, sx);
-                        var offset = y * stride + x * 4;
+                        var offset = lineOffset + xOffsets[column * SamplesPerAxis + sx];
                         var b = pixels[offset];
                         var g = pixels[offset + 1];
                         var r = pixels[offset + 2];
                         sum += 0.299f * r + 0.587f * g + 0.114f * b;
-                        count++;
                     }
+                    rowCells[column] = sum;
                 }
-
-                cells[row * columns + column] = sum / count;
             }
+
+            for (var column = 0; column < columns; column++) rowCells[column] /= SamplesPerCell;
         }
 
         return new LuminanceGrid(columns, rows, cells);

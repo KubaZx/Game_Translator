@@ -13,6 +13,7 @@ znajdują się na stronach projektów.
 | SQLitePCLRaw.bundle_e_sqlite3 | Apache-2.0 | natywny silnik SQLite |
 | SQLite | Public Domain | silnik bazy danych |
 | System.Security.Cryptography.ProtectedData | MIT | szyfrowanie klucza API (DPAPI) |
+| System.IO.Hashing (Microsoft) | MIT | szybki skrót XxHash128 odcisku regionu tekstu w trybie live |
 | Serilog + Serilog.Extensions.Hosting + Serilog.Sinks.File | Apache-2.0 | logi diagnostyczne |
 | H.NotifyIcon.Wpf | MIT | ikona w zasobniku systemowym |
 | Anthropic (oficjalne SDK C#) + Microsoft.Extensions.AI.Abstractions | MIT | opcjonalny dostawca tłumaczeń Claude |

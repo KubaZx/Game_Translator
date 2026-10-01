@@ -4,7 +4,25 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
-Brak zmian po wydaniu 0.4.0.
+### Wydajność
+
+Oszczędności rzędu mikrosekund na klatkę — mniej pracy procesora w trakcie gry, nie krótszy
+czas tłumaczenia (ten wyznaczają OCR i dostawca). Liczby przed/po:
+[BENCHMARKS.md → Optymalizacje 2026-10](docs/BENCHMARKS.md#optymalizacje-2026-10).
+
+- **Odcisk regionu tekstu** (trzymanie statycznego menu przy ruchu kamery) liczony skrótem
+  XxHash128 zamiast SHA-256, z wektorowym maskowaniem kanału alfa i wektorowym testem kontrastu.
+  Nadal każdy zmieniony piksel RGB unieważnia odcisk, a alfa i dopełnienie wiersza się nie liczą.
+  Nowa zależność: `System.IO.Hashing` (Microsoft, MIT).
+- **Trafienia cache w klatce live:** pipeline pyta cache o całą klatkę jednym odczytem partii,
+  normalizacja nie kopiuje tekstu, który jest już czysty, pamięć trafień SQLite i cache trybu
+  prywatnego nie liczą SHA-256 przy każdym trafieniu. Format kolumny `text_hash` bez zmian —
+  istniejące bazy działają jak dotąd.
+- **Odczyt z bazy przy zimnej pamięci trafień** (pierwsza klatka po starcie): wszystkie teksty
+  klatki spoza pamięci czytane jednym zadaniem w tle, na jednym połączeniu i jednym
+  przygotowanym zapytaniu zamiast osobnego zadania, połączenia i zapytania na każdy tekst.
+- **Siatka luminancji** (decyzja „czy klatka się zmieniła”) liczona wierszami pikseli zamiast
+  komórka po komórce — wynik co do bitu ten sam.
 
 ## [0.4.0] — 2026-10-01
 

@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using GameTranslatorOverlay.Core.Text;
 
 namespace GameTranslatorOverlay.Core.Caching;
 
@@ -13,24 +12,41 @@ public sealed class InMemoryTranslationCache : ITranslationCache
 {
     private sealed record Entry(CachedTranslation Translation, string SourceLanguage, string TargetLanguage);
 
-    private readonly ConcurrentDictionary<string, Entry> _entries = new();
-    private long _nextId;
+    // Klucz to sam znormalizowany tekst, nie jego SHA-256: ten sam tekst ⇔ ten sam skrót, a skrót
+    // trzeba by liczyć przy każdym odczycie (tryb live pyta o te same teksty w każdej klatce).
+    // Skrót jest potrzebny tylko w kolumnie text_hash bazy SQLite — tu nic nie trafia na dysk.
+    private readonly record struct Key(string NormalizedText, string SourceLanguage, string TargetLanguage, string GameProfile);
 
-    private static string Key(string hash, string src, string tgt, string profile) => $"{hash}|{src}|{tgt}|{profile}";
+    private readonly ConcurrentDictionary<Key, Entry> _entries = new();
+    private long _nextId;
 
     public Task<CachedTranslation?> LookupAsync(
         string normalizedText, string sourceLanguage, string targetLanguage,
+        string gameProfile, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Lookup(normalizedText, sourceLanguage, targetLanguage, gameProfile));
+
+    /// <summary>Cała klatka synchronicznie — bez osobnego zadania na każdy tekst.</summary>
+    public Task<IReadOnlyList<CacheLookupResult>> LookupManyAsync(
+        IReadOnlyList<string> normalizedTexts, string sourceLanguage, string targetLanguage,
         string gameProfile, CancellationToken cancellationToken = default)
     {
-        var hash = TextHasher.Sha256Hex(normalizedText);
+        cancellationToken.ThrowIfCancellationRequested();
+        var results = new CacheLookupResult[normalizedTexts.Count];
+        for (var i = 0; i < results.Length; i++)
+            results[i] = new CacheLookupResult(Lookup(normalizedTexts[i], sourceLanguage, targetLanguage, gameProfile));
+        return Task.FromResult<IReadOnlyList<CacheLookupResult>>(results);
+    }
+
+    private CachedTranslation? Lookup(string normalizedText, string sourceLanguage, string targetLanguage, string gameProfile)
+    {
         Entry? best = null;
 
-        if (gameProfile.Length > 0 && _entries.TryGetValue(Key(hash, sourceLanguage, targetLanguage, gameProfile), out var profileEntry))
+        if (gameProfile.Length > 0 && _entries.TryGetValue(new Key(normalizedText, sourceLanguage, targetLanguage, gameProfile), out var profileEntry))
         {
             best = profileEntry;
         }
 
-        if (_entries.TryGetValue(Key(hash, sourceLanguage, targetLanguage, string.Empty), out var globalEntry))
+        if (_entries.TryGetValue(new Key(normalizedText, sourceLanguage, targetLanguage, string.Empty), out var globalEntry))
         {
             if (best is null || (!best.Translation.IsManual && globalEntry.Translation.IsManual))
             {
@@ -38,13 +54,13 @@ public sealed class InMemoryTranslationCache : ITranslationCache
             }
         }
 
-        if (best is null) return Task.FromResult<CachedTranslation?>(null);
+        if (best is null) return null;
 
         var updated = best.Translation with { LastUsedAt = DateTimeOffset.UtcNow, UseCount = best.Translation.UseCount + 1 };
         // Statystyki użycia aktualizujemy CAS-em (best-effort): przegrany wyścig z równoległą
         // korektą/czyszczeniem nie może wskrzesić starego wpisu ani nadpisać ręcznej poprawki.
-        _entries.TryUpdate(Key(hash, sourceLanguage, targetLanguage, updated.GameProfile), best with { Translation = updated }, best);
-        return Task.FromResult<CachedTranslation?>(updated);
+        _entries.TryUpdate(new Key(normalizedText, sourceLanguage, targetLanguage, updated.GameProfile), best with { Translation = updated }, best);
+        return updated;
     }
 
     public Task StoreAsync(NewCacheEntry entry, CancellationToken cancellationToken = default)
@@ -61,8 +77,7 @@ public sealed class InMemoryTranslationCache : ITranslationCache
 
     private void Upsert(NewCacheEntry entry, bool manualOverwrite)
     {
-        var hash = TextHasher.Sha256Hex(entry.NormalizedText);
-        var key = Key(hash, entry.SourceLanguage, entry.TargetLanguage, entry.GameProfile);
+        var key = new Key(entry.NormalizedText, entry.SourceLanguage, entry.TargetLanguage, entry.GameProfile);
         var now = DateTimeOffset.UtcNow;
 
         _entries.AddOrUpdate(
@@ -146,8 +161,7 @@ public sealed class InMemoryTranslationCache : ITranslationCache
                 continue;
             }
 
-            var hash = TextHasher.Sha256Hex(entry.NormalizedText);
-            var key = Key(hash, entry.SourceLanguage, entry.TargetLanguage, entry.GameProfile);
+            var key = new Key(entry.NormalizedText, entry.SourceLanguage, entry.TargetLanguage, entry.GameProfile);
             if (_entries.ContainsKey(key)) continue;
             await StoreAsync(entry.ToNewCacheEntry(), cancellationToken).ConfigureAwait(false);
             imported++;

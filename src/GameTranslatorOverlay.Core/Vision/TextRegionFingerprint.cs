@@ -1,4 +1,5 @@
-using System.Security.Cryptography;
+using System.IO.Hashing;
+using System.Runtime.Intrinsics;
 using GameTranslatorOverlay.Core.Ocr;
 
 namespace GameTranslatorOverlay.Core.Vision;
@@ -7,6 +8,13 @@ namespace GameTranslatorOverlay.Core.Vision;
 /// Exact RGB evidence for a complete, nonuniform source region. Stores only a digest,
 /// never its image. Alpha and row padding are irrelevant; every RGB pixel matters.
 /// </summary>
+/// <remarks>
+/// Skrót to 128-bitowy XxHash128 (niekryptograficzny), a nie SHA-256: odcisk porównuje
+/// tylko dwie klatki tej samej gry w jednej sesji, nikt nie dobiera pikseli pod kolizję,
+/// a 128 bitów daje szansę przypadkowej kolizji rzędu 2^-128 — tyle co nic. SHA-256
+/// kosztował ok. 1 ms na region 512×512 przy każdym sprawdzeniu statycznego menu.
+/// Skrót nigdy nie jest zapisywany na dysk, więc zmiana algorytmu nie unieważnia danych.
+/// </remarks>
 public sealed class TextRegionFingerprint
 {
     public const int MaximumPixels = 262144;
@@ -43,7 +51,9 @@ public sealed class TextRegionFingerprint
     /// <summary>Feeds complete rows/chunks without allocating a full region copy.</summary>
     public sealed class Builder : IDisposable
     {
-        private readonly IncrementalHash _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        // Bufor na stosie: 256 pikseli na porcję skrótu.
+        private const int ChunkBytes = 1024;
+        private readonly XxHash128 _hash = new();
         private readonly TextPresenceProbe _contrast = new();
         private readonly int _width, _height;
         private long _pixels;
@@ -65,18 +75,42 @@ public sealed class TextRegionFingerprint
             }
             _pixels += pixels.Length / 4;
             _contrast.ObserveBgra32(pixels);
-            Span<byte> rgb = stackalloc byte[768];
+
+            // Skrót liczymy z pikseli BGRA z wyzerowanym kanałem alfa zamiast z upakowanego RGB:
+            // ta sama informacja (każdy bajt B, G, R wchodzi do skrótu w tej samej kolejności,
+            // alfa zawsze jako 0), a maskowanie całymi wektorami jest wielokrotnie tańsze niż
+            // przepisywanie pojedynczych bajtów. Granice porcji nie zmieniają skrótu strumienia.
+            Span<byte> masked = stackalloc byte[ChunkBytes];
             while (!pixels.IsEmpty)
             {
-                var count = Math.Min(pixels.Length / 4, rgb.Length / 3);
-                for (var i = 0; i < count; i++)
+                var count = Math.Min(pixels.Length, ChunkBytes);
+                MaskAlpha(pixels[..count], masked);
+                _hash.Append(masked[..count]);
+                pixels = pixels[count..];
+            }
+        }
+
+        private static readonly Vector128<byte> AlphaMask = Vector128.Create(
+            (byte)255, 255, 255, 0, 255, 255, 255, 0, 255, 255, 255, 0, 255, 255, 255, 0);
+
+        private static void MaskAlpha(ReadOnlySpan<byte> source, Span<byte> destination)
+        {
+            var index = 0;
+            if (Vector128.IsHardwareAccelerated)
+            {
+                // Maska bajtowa (B, G, R zostają, A = 0) nie zależy od kolejności bajtów w słowie.
+                for (; index <= source.Length - Vector128<byte>.Count; index += Vector128<byte>.Count)
                 {
-                    rgb[i * 3] = pixels[i * 4];
-                    rgb[i * 3 + 1] = pixels[i * 4 + 1];
-                    rgb[i * 3 + 2] = pixels[i * 4 + 2];
+                    (Vector128.Create(source.Slice(index, Vector128<byte>.Count)) & AlphaMask)
+                        .CopyTo(destination.Slice(index, Vector128<byte>.Count));
                 }
-                _hash.AppendData(rgb[..(count * 3)]);
-                pixels = pixels[(count * 4)..];
+            }
+            for (; index < source.Length; index += 4)
+            {
+                destination[index] = source[index];
+                destination[index + 1] = source[index + 1];
+                destination[index + 2] = source[index + 2];
+                destination[index + 3] = 0;
             }
         }
 
@@ -88,10 +122,6 @@ public sealed class TextRegionFingerprint
                 ? null : new TextRegionFingerprint(_width, _height, _hash.GetHashAndReset());
         }
 
-        public void Dispose()
-        {
-            _finished = true;
-            _hash.Dispose();
-        }
+        public void Dispose() => _finished = true;
     }
 }
