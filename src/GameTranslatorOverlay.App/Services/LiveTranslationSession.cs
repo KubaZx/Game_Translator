@@ -1090,6 +1090,11 @@ public sealed class LiveTranslationSession(
                 .ToList();
         }
 
+        // Komunikat nakładki odfiltrowujemy już na poziomie linii: zgrupowany z tekstem gry
+        // („⚠ Brak klucza DeepL” nad „Chapter 3”) przestałby przypominać komunikat i poszedłby
+        // do dostawcy. Sprawdzenie na blokach niżej zostaje jako druga ochrona.
+        if (options.NoticeEcho is { } lineEcho) lines = lineEcho.RemoveEchoLines(lines);
+
         var blocks = TextBlockGrouper.Group(lines)
             .Where(static block => JunkFilter.IsMeaningful(block.Text))
             .ToList();

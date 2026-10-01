@@ -523,22 +523,23 @@ public partial class MainWindow : Window
             b.Outcome.TranslatedText ?? $"⚠ {b.Outcome.ErrorMessage}"));
         TxtTiming.Text = "Czasy: " + result.Timings;
 
-        if (_settings.ResultDisplayMode == "overlay")
-        {
-            // Gracz patrzy na grę, nie na to okno: brak tekstu, błąd dostawcy albo pudła
-            // Cache-only dostają komunikat w nakładce (przy zaznaczonym regionie).
-            ShowOverlayNotice(
-                OverlayNotices.ForManualResult(result.Blocks.Select(static b => b.Outcome).ToList(), _orchestrator.ActiveProvider.Name),
-                result.Region);
-        }
+        // Gracz patrzy na grę, nie na to okno: brak tekstu, błąd dostawcy albo pudła
+        // Cache-only dostają komunikat w nakładce (przy zaznaczonym regionie). Pokazujemy go
+        // dopiero po ShowBlocks — to ono zdejmuje ukrycie skrótem, a schowana nakładka
+        // przepuszcza tylko komunikaty krytyczne.
+        var overlayMode = _settings.ResultDisplayMode == "overlay";
+        var notice = overlayMode
+            ? OverlayNotices.ForManualResult(result.Blocks.Select(static b => b.Outcome).ToList(), _orchestrator.ActiveProvider.Name)
+            : null;
 
         if (result.Blocks.Count == 0)
         {
+            ShowOverlayNotice(notice, result.Region);
             SetStatus(result.Warning ?? "OCR nie rozpoznał tekstu w zaznaczonym obszarze.");
             return;
         }
 
-        if (_settings.ResultDisplayMode == "overlay")
+        if (overlayMode)
         {
             var translated = result.Blocks
                 .Where(static b => b.Outcome.TranslatedText is not null)
@@ -548,6 +549,7 @@ public partial class MainWindow : Window
             {
                 _overlay.ShowBlocks(translated, _settings);
             }
+            ShowOverlayNotice(notice, result.Region);
         }
         else
         {

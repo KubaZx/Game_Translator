@@ -726,6 +726,9 @@ public partial class OverlayWindow : Window
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(10, 4, 10, 4),
                 IsHitTestVisible = false,
+                // Start od zera — animacja bez From jedzie od bieżącej wartości, a przy 1,0
+                // pojawienie się byłoby skokowe.
+                Opacity = 0,
                 Child = new TextBlock
                 {
                     FontSize = 13,

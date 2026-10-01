@@ -1,4 +1,5 @@
 using System.Text;
+using GameTranslatorOverlay.Core.Ocr;
 using GameTranslatorOverlay.Core.Text;
 
 namespace GameTranslatorOverlay.Core.Usage;
@@ -46,12 +47,40 @@ public sealed class OverlayNoticeEcho
             foreach (var known in _keys)
             {
                 if (known == key) return true;
-                if (key.Length >= MinFuzzyLength && known.Length >= MinFuzzyLength
-                    && TextSimilarity.Ratio(known, key) >= SimilarityThreshold)
-                    return true;
+                if (key.Length < MinFuzzyLength || known.Length < MinFuzzyLength) continue;
+                // Ratio = 1 − odległość/dłuższy, a odległość ≥ różnica długości — przy różnicy
+                // ponad 20% próg jest nieosiągalny. Odcinamy to przed pełnym Levenshteinem,
+                // bo ta pętla biegnie dla każdego bloku w każdej klatce live.
+                var longer = Math.Max(known.Length, key.Length);
+                if (Math.Abs(known.Length - key.Length) > (1 - SimilarityThreshold) * longer) continue;
+                if (TextSimilarity.Ratio(known, key) >= SimilarityThreshold) return true;
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Usuwa linie OCR będące naszym komunikatem, zanim grupowanie sklei je z tekstem gry:
+    /// komunikat leży tuż nad tytułem/HUD-em, a blok „⚠ Brak klucza DeepL Chapter 3 …”
+    /// nie przypomina już komunikatu i poszedłby do dostawcy. Bez echa zwraca tę samą listę.
+    /// </summary>
+    public IReadOnlyList<OcrLine> RemoveEchoLines(IReadOnlyList<OcrLine> lines)
+    {
+        lock (_gate)
+        {
+            if (_keys.Count == 0) return lines;
+        }
+        List<OcrLine>? kept = null;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (IsEcho(lines[i].Text))
+            {
+                kept ??= new List<OcrLine>(lines.Take(i));
+                continue;
+            }
+            kept?.Add(lines[i]);
+        }
+        return kept ?? lines;
     }
 
     /// <summary>
