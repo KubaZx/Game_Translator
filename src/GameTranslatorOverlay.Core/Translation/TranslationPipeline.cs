@@ -93,9 +93,19 @@ public sealed class TranslationPipeline(
     // na zawsze i każde wystąpienie tekstu szłoby do płatnego dostawcy.
     private readonly ConcurrentDictionary<string, StaleEntry> _staleFallbacks = new(StringComparer.Ordinal);
 
+    // Teksty, które już raz poszły do dostawcy z powodu innej płci gracza we wpisie cache.
+    // Znacznik qa-final nie zatrzymuje takiej ponownej próby (płeć nadal się różni), a gdy
+    // dostawca zwróci pusty wynik albo błąd, nic nowego nie jest zapisywane — bez tej listy
+    // każde wystąpienie linii byłoby kolejnym płatnym zapytaniem. Najwyżej jedna próba na
+    // tekst i pipeline (nowy pipeline po zmianie ustawień próbuje od nowa — też raz).
+    // Tylko w pamięci procesu; rozmiar ograniczony jak awaryjna pamięć wyników.
+    private readonly ConcurrentDictionary<string, byte> _genderRetried = new(StringComparer.Ordinal);
+
     // TranslatedText null = wpis zastępowany, którego nie wolno pokazać jako zapasowy
     // (np. wynik atrapy Mock przy prawdziwym dostawcy) — liczy się tylko jego profil.
-    private sealed record StaleEntry(string? TranslatedText, string GameProfile, TranslationCacheContext Context);
+    // GenderStale = wpis jest nieaktualny (także) z powodu innej płci gracza.
+    private sealed record StaleEntry(
+        string? TranslatedText, string GameProfile, TranslationCacheContext Context, bool GenderStale = false);
 
     // Błąd odczytu cache logujemy raz na pipeline — w trybie live pytamy co klatkę.
     private int _cacheLookupFailureLogged;
@@ -256,11 +266,15 @@ public sealed class TranslationPipeline(
         // oraz — u dostawcy świadomego płci — tekst zwracający się do gracza, przetłumaczony
         // z inną płcią gracza niż obecna („gotowy” po przełączeniu na postać kobiecą).
         // Ręczne korekty zawsze zostają.
+        // Tekst już raz wysłany z powodu innej płci nie jest nią ponownie unieważniany (patrz
+        // _genderRetried) — inne powody (np. niesprawdzony problem jakości) działają dalej.
+        var gender = _genderRetried.ContainsKey(normalized) ? PlayerGender.Unknown : EffectiveGender;
         if (!options.CacheOnlyMode && cached is { IsManual: false }
-            && TranslationCacheContext.IsStale(cached.Context, normalized, EffectiveGender))
+            && TranslationCacheContext.IsStale(cached.Context, normalized, gender))
         {
             _staleFallbacks[normalized] = new StaleEntry(
-                cached.TranslatedText, cached.GameProfile, TranslationCacheContext.Parse(cached.Context));
+                cached.TranslatedText, cached.GameProfile, TranslationCacheContext.Parse(cached.Context),
+                TranslationCacheContext.IsStaleForPlayerGender(cached.Context, normalized, gender));
             cached = null;
         }
 
@@ -408,12 +422,16 @@ public sealed class TranslationPipeline(
         var terms = glossary.FindTermsIn(texts, options.MaxContextTerms);
         var gameName = string.IsNullOrWhiteSpace(options.GameName) ? null : options.GameName.Trim();
         var recent = _dialog.Excluding(texts);
-        return gameName is null && terms.Count == 0 && recent.Count == 0 && options.PlayerGender == PlayerGender.Unknown
+        // DeepL przyjmuje wyłącznie kontekst w języku źródłowym — dostaje same źródła, z własnym
+        // budżetem znaków (bez tłumaczeń, których i tak nie widzi) i także linie, których wynik
+        // nie nadaje się na przykład dla modelu.
+        var recentSources = _dialog.SourcesExcluding(texts);
+        return gameName is null && terms.Count == 0 && recent.Count == 0 && recentSources.Count == 0
+               && options.PlayerGender == PlayerGender.Unknown
             ? TranslationContext.Empty
             : new TranslationContext(gameName, terms)
             {
-                // DeepL przyjmuje wyłącznie kontekst w języku źródłowym — dostaje same źródła.
-                RecentTexts = recent.Select(static pair => pair.Source).ToList(),
+                RecentTexts = recentSources,
                 RecentExchanges = recent,
                 GlossaryTerms = GlossaryTermsFor(terms),
                 PlayerGender = options.PlayerGender,
@@ -437,12 +455,14 @@ public sealed class TranslationPipeline(
         return foundTerms.Any(persistableSet.Contains) ? persistable : [];
     }
 
-    // Wynik pusty, nieprzetłumaczony (echo oryginału) albo „rozgadany” nie jest przykładem,
-    // którego model ma się trzymać — pokazany jako jego własne wcześniejsze tłumaczenie
-    // utrwalałby błąd w kolejnych liniach. Zmienione liczby (częsty fałszywy alarm, np.
-    // „10:30 PM” → „22:30”) nie psują form gramatycznych, więc taka linia zostaje w pamięci.
-    private const TranslationQualityFlags NotRememberedIssues =
-        TranslationQualityFlags.Empty | TranslationQualityFlags.Untranslated | TranslationQualityFlags.Runaway;
+    // Wynik nieprzetłumaczony (echo oryginału) albo „rozgadany” nie jest przykładem, którego
+    // model ma się trzymać — pokazany jako jego własne wcześniejsze tłumaczenie utrwalałby błąd
+    // w kolejnych liniach. Jego angielski oryginał zostaje jednak w kontekście źródłowym (DeepL),
+    // jak przed pamięcią par. Pusty wynik to błąd dostawcy — nie trafia nigdzie. Zmienione
+    // liczby (częsty fałszywy alarm, np. „10:30 PM” → „22:30”) nie psują form gramatycznych,
+    // więc taka linia zostaje pełnoprawnym przykładem.
+    private const TranslationQualityFlags NotExampleIssues =
+        TranslationQualityFlags.Untranslated | TranslationQualityFlags.Runaway;
 
     private async Task TranslateChunkAsync(
         (string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)[] chunk,
@@ -477,6 +497,15 @@ public sealed class TranslationPipeline(
             }
             // A local admission denial is not a failed request to the provider.
             return;
+        }
+
+        // Próbę z nową płcią liczymy w chwili wysłania (odmowa lokalnego limitu wyżej niczego nie wysyła), bez względu na jej wynik (pusty wynik,
+        // błąd, nieczytelna odpowiedź) — patrz _genderRetried.
+        for (var i = 0; i < chunk.Length; i++)
+        {
+            if (staleEntries[i] is not { GenderStale: true }) continue;
+            if (_genderRetried.Count >= MaxDegradedResults) _genderRetried.Clear();
+            _genderRetried.TryAdd(chunk[i].Normalized, 0);
         }
 
         IReadOnlyList<string> translations;
@@ -537,9 +566,10 @@ public sealed class TranslationPipeline(
                 cancellationToken)
             .ConfigureAwait(false);
 
-        _dialog.Remember(Enumerable.Range(0, chunk.Length)
-            .Where(i => (issues[i] & NotRememberedIssues) == TranslationQualityFlags.None)
-            .Select(i => new RecentExchange(textsToSend[i], raw[i].Trim())));
+        _dialog.RememberResults(Enumerable.Range(0, chunk.Length)
+            .Where(i => !issues[i].HasFlag(TranslationQualityFlags.Empty))
+            .Select(i => (new RecentExchange(textsToSend[i], raw[i].Trim()),
+                (issues[i] & NotExampleIssues) == TranslationQualityFlags.None)));
 
         for (var i = 0; i < chunk.Length; i++)
         {

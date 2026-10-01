@@ -160,9 +160,29 @@ public class DialogMemoryTests
         var plan = new ReflowPlan([2, 1]);
 
         Assert.Equal("Pierwsze zdanie\nDrugie.", TextReflow.ToParagraphs("Pierwsze\nzdanie\nDrugie.", plan));
-        // Inna liczba wierszy niż w planie — wiersze zostają osobno.
+        // Inna liczba wierszy niż w planie — wiersze dzielone proporcjonalnie, nigdy więcej
+        // akapitów niż w źródle.
         Assert.Equal("Jedno\nDrugie", TextReflow.ToParagraphs("Jedno\n\nDrugie", plan));
-        Assert.Equal("A\nB\nC\nD", TextReflow.ToParagraphs("A\r\nB\nC\nD", plan));
+        Assert.Equal("A B C\nD", TextReflow.ToParagraphs("A\r\nB\nC\nD", plan));
+    }
+
+    [Theory]
+    // Źródło 2+2 wiersze, korekta w 3 wierszach — nadal dwa akapity.
+    [InlineData(new[] { 2, 2 }, "A\nB\nC", "A B\nC")]
+    [InlineData(new[] { 2, 2 }, "A\nB\nC\nD\nE", "A B C\nD E")]
+    // Każdy akapit dostaje co najmniej jeden wiersz.
+    [InlineData(new[] { 3, 1, 1 }, "A\nB\nC\nD", "A B\nC\nD")]
+    [InlineData(new[] { 1, 1, 3 }, "A\nB\nC", "A\nB\nC")]
+    // Mniej wierszy niż akapitów — nie da się dopasować, całość jako jeden akapit.
+    [InlineData(new[] { 2, 2 }, "Tylko jeden wiersz", "Tylko jeden wiersz")]
+    [InlineData(new[] { 1, 1, 1 }, "A\nB", "A B")]
+    public void Korekta_o_innej_liczbie_wierszy_ma_najwyzej_tyle_akapitow_co_zrodlo(
+        int[] counts, string corrected, string expected)
+    {
+        var result = TextReflow.ToParagraphs(corrected, new ReflowPlan(counts));
+
+        Assert.Equal(expected, result);
+        Assert.True(result.Split('\n').Length <= counts.Length);
     }
 
     // --- Pipeline ---
@@ -266,6 +286,51 @@ public class DialogMemoryTests
         await pipeline.TranslateAsync(["Next"], "en", "pl");
 
         Assert.Equal([new RecentExchange("Good line", "PL Good line")], provider.Contexts[^1].RecentExchanges);
+        // Kontekst źródłowy (DeepL) nadal zawiera oryginały linii z echem i „rozgadanych” —
+        // angielski tekst jest poprawnym kontekstem rozmowy; pomija tylko pusty wynik.
+        Assert.Equal([Echoed, "Short one", "Good line"], provider.Contexts[^1].RecentTexts);
+    }
+
+    [Fact]
+    public async Task Budzet_kontekstu_zrodlowego_liczy_tylko_zrodla()
+    {
+        var provider = new ScriptedContextualProvider(static (text, _) => "Bardzo długie tłumaczenie linii " + text);
+        var (pipeline, _) = Create(provider, new TranslationPipelineOptions { MaxRecentContextChars = 40 });
+
+        for (var i = 1; i <= 4; i++) await pipeline.TranslateAsync([$"Line {i}"], "en", "pl");
+
+        // Para ma 6 + 38 znaków — w 40 nie mieści się żadna, ale same źródła (6 znaków) tak.
+        Assert.Empty(provider.Contexts[^1].RecentExchanges);
+        Assert.Equal(["Line 1", "Line 2", "Line 3"], provider.Contexts[^1].RecentTexts);
+    }
+
+    [Fact]
+    public void Wynik_niebedacy_przykladem_usuwa_dawna_pare_ale_zostaje_w_zrodlach()
+    {
+        var memory = new DialogMemory(6, 1000);
+        memory.Remember([new("A", "a"), new("B", "b")]);
+
+        memory.RememberResults([(new RecentExchange("A", "A"), false)]);
+
+        Assert.Equal([new RecentExchange("B", "b")], memory.Excluding([]));
+        Assert.Equal(["B", "A"], memory.SourcesExcluding([]));
+        Assert.Equal(["A"], memory.SourcesExcluding(["B"]));
+    }
+
+    [Fact]
+    public void Zrodla_maja_limit_liczby_i_znakow()
+    {
+        var memory = new DialogMemory(maxPairs: 2, maxChars: 10);
+        memory.RememberResults([(new RecentExchange("AAAA", "a"), true), (new RecentExchange("BBBB", "b"), false),
+            (new RecentExchange("CCCC", "c"), true), (new RecentExchange(new string('x', 11), "x"), true)]);
+
+        Assert.Equal(["BBBB", "CCCC"], memory.SourcesExcluding([]));
+
+        var tight = new DialogMemory(maxPairs: 6, maxChars: 10);
+        tight.RememberResults([(new RecentExchange("AAAA", "a"), false), (new RecentExchange("BBBB", "b"), false),
+            (new RecentExchange("CCCC", "c"), false)]);
+        Assert.Equal(["BBBB", "CCCC"], tight.SourcesExcluding([]));
+        Assert.Empty(new DialogMemory(0, 10).SourcesExcluding([]));
     }
 
     [Fact]

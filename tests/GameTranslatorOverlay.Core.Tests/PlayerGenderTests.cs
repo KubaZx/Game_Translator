@@ -289,4 +289,75 @@ public class PlayerGenderTests
         Assert.Equal(1, provider.CallCount);
         Assert.Equal("reflow-1;pg=f", (await cache.LookupAsync(Ready, "en", "pl", "rpg"))!.Context);
     }
+
+    // --- Najwyżej jedna płatna próba na tekst przy innej płci ---
+
+    [Fact]
+    public void Sama_plec_rozpoznaje_powod_nieaktualnosci()
+    {
+        Assert.True(TranslationCacheContext.IsStaleForPlayerGender("reflow-1;qa=numbers;qa-final;pg=m", Ready, PlayerGender.Female));
+        Assert.False(TranslationCacheContext.IsStaleForPlayerGender("reflow-1;qa=numbers;pg=f", Ready, PlayerGender.Female));
+        Assert.False(TranslationCacheContext.IsStaleForPlayerGender("reflow-1;pg=m", Gate, PlayerGender.Female));
+        Assert.False(TranslationCacheContext.IsStaleForPlayerGender("reflow-1;pg=m", Ready, PlayerGender.Unknown));
+    }
+
+    [Theory]
+    [InlineData("reflow-1;pg=m")]
+    [InlineData("reflow-1;qa=numbers;pg=m")]
+    public async Task Pusty_wynik_przy_zmianie_plci_nie_tworzy_petli_platnych_zapytan(string context)
+    {
+        const string Coins = "You have 10 coins.";
+        var provider = new GenderAwareProvider(static (_, _) => "   ");
+        var (pipeline, cache) = Create(provider, PlayerGender.Female);
+        await StoreAuto(cache, Coins, "Masz 10 monet.", context);
+
+        for (var i = 0; i < 3; i++)
+        {
+            var outcome = Assert.Single(await pipeline.TranslateAsync([Coins], "en", "pl"));
+            Assert.Equal("Masz 10 monet.", outcome.TranslatedText);
+        }
+
+        // Pierwsze wystąpienie to jedna próba z nową płcią; kolejne biorą stary wynik z cache.
+        Assert.Equal(1, provider.CallCount);
+    }
+
+    [Fact]
+    public async Task Blad_dostawcy_przy_zmianie_plci_jest_ponawiany_raz_na_pipeline()
+    {
+        var provider = new GenderAwareProvider(static (text, _) => "PL " + text)
+        {
+            ThrowOnCall = new TranslationException(TranslationFailureKind.Unknown, "nieczytelna odpowiedź"),
+        };
+        var (pipeline, cache) = Create(provider, PlayerGender.Female);
+        await StoreAuto(cache, Ready, "Jesteś gotowy?", "reflow-1;pg=m");
+
+        for (var i = 0; i < 3; i++)
+        {
+            var outcome = Assert.Single(await pipeline.TranslateAsync([Ready], "en", "pl"));
+            Assert.Equal("Jesteś gotowy?", outcome.TranslatedText);
+            Assert.Equal(TranslationOrigin.Cache, outcome.Origin);
+        }
+        Assert.Equal(1, provider.CallCount);
+
+        // Nowy pipeline (np. po zmianie ustawień) próbuje ponownie — znów tylko raz.
+        var next = new TranslationPipeline(new GlossaryService(), cache, provider, new UsageTracker(),
+            new TranslationPipelineOptions { PlayerGender = PlayerGender.Female });
+        await next.TranslateAsync([Ready], "en", "pl");
+        await next.TranslateAsync([Ready], "en", "pl");
+        Assert.Equal(2, provider.CallCount);
+    }
+
+    [Fact]
+    public async Task Udana_proba_po_zmianie_plci_zapisuje_nowy_wynik()
+    {
+        var provider = new GenderAwareProvider(static (_, _) => "Jesteś gotowa?");
+        var (pipeline, cache) = Create(provider, PlayerGender.Female);
+        await StoreAuto(cache, Ready, "Jesteś gotowy?", "reflow-1;pg=m");
+
+        await pipeline.TranslateAsync([Ready], "en", "pl");
+        var again = Assert.Single(await pipeline.TranslateAsync([Ready], "en", "pl"));
+
+        Assert.Equal("Jesteś gotowa?", again.TranslatedText);
+        Assert.Equal(1, provider.CallCount);
+    }
 }

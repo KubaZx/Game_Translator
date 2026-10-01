@@ -113,8 +113,18 @@ public readonly record struct TranslationCacheContext(
         var parsed = Parse(context);
         if (parsed.NeedsQualityRetry) return true;
         if (normalizedText.Contains('\n') && parsed.Format != TextReflow.FormatVersion) return true;
-        return currentGender != PlayerGender.Unknown
-            && parsed.PlayerGender != currentGender
-            && PlayerGenders.AddressesPlayer(normalizedText);
+        return DiffersInPlayerGender(parsed, normalizedText, currentGender);
     }
+
+    /// <summary>
+    /// Czy sama płeć gracza czyni wpis nieaktualnym (niezależnie od innych powodów) — pipeline
+    /// zapamiętuje takie teksty, żeby ponawiać je najwyżej raz (patrz <see cref="IsStale(string?, string, PlayerGender)"/>).
+    /// </summary>
+    public static bool IsStaleForPlayerGender(string? context, string normalizedText, PlayerGender currentGender) =>
+        DiffersInPlayerGender(Parse(context), normalizedText, currentGender);
+
+    private static bool DiffersInPlayerGender(TranslationCacheContext parsed, string normalizedText, PlayerGender currentGender) =>
+        currentGender != PlayerGender.Unknown
+        && parsed.PlayerGender != currentGender
+        && PlayerGenders.AddressesPlayer(normalizedText);
 }
