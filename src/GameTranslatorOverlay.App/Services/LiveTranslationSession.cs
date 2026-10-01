@@ -211,6 +211,15 @@ public sealed class LiveTranslationSession(
     private readonly ChangeToTextTracker _changeToText = new();
     private TimeSpan? _processingChangeOrigin;
 
+    // Klatka porzucona przed pokazaniem (nowa scena, zniknięty tekst): jej zmiana wciąż
+    // czeka na napis, więc pomiar „zmiana → napis” biegnie od pierwotnej zmiany.
+    private bool _frameDiscarded;
+
+    // Lokalne sprawdzenia porzucone przez zmianę sceny. Nie należą do BoundedTranslationWork,
+    // więc pętla czeka na nie osobno — Completion (na które czekają narzędzia dev przed
+    // usunięciem danych) nie może się skończyć przy otwartym zapytaniu do bazy.
+    private readonly List<Task> _abandonedLocalLookups = [];
+
     public bool IsRunning => _loop is { IsCompleted: false };
 
     /// <summary>Pozwala narzedziom dev zaczekac na zakonczenie przed usunieciem ich danych.</summary>
@@ -400,6 +409,7 @@ public sealed class LiveTranslationSession(
             // all tasks finish, including when the window closes or the loop fails.
             _cts.Cancel();
             await _translationWork.DrainAsync().ConfigureAwait(false);
+            await DrainAbandonedLocalLookupsAsync().ConfigureAwait(false);
         }
     }
 
@@ -573,11 +583,14 @@ public sealed class LiveTranslationSession(
             // tylko te, które przyjdą w trakcie jej OCR i tłumaczenia.
             _lastObservedChangeAt = null;
             _processingChangeOrigin = _changeToText.BeginProcessing();
+            _frameDiscarded = false;
+            var frameCompleted = false;
             try
             {
                 await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, capturedFrameRect, captureMs, peakChanged,
                         captureStartedTimestamp, usedScreenFallback, clock, cancellationToken)
                     .ConfigureAwait(false);
+                frameCompleted = !_frameDiscarded;
             }
             finally
             {
@@ -590,7 +603,8 @@ public sealed class LiveTranslationSession(
                 if (_whiffRetryRequested || _refreshAfterBusyChanges || _readingRetryRequested)
                 {
                     var retryNow = clock.Elapsed;
-                    if (_whiffRetryRequested || _readingRetryRequested)
+                    var rereadRequested = _whiffRetryRequested || _readingRetryRequested;
+                    if (rereadRequested)
                     {
                         // Celowe drugie czytanie: pełne okno stabilności PO tym przebiegu
                         // (patrz ChangeStabilizerPollingTests) — tego nie skracamy.
@@ -605,9 +619,10 @@ public sealed class LiveTranslationSession(
                     _readingRetryRequested = false;
                     _whiffRetryRequested = false;
                     _refreshAfterBusyChanges = false;
-                    // Napis dla zmiany jeszcze się nie pojawił, a pętla zaraz ponowi odczyt —
-                    // pomiar „zmiana → napis” biegnie dalej od pierwotnej zmiany.
-                    _changeToText.CarryOver(changeOrigin);
+                    // Ponowny odczyt tej samej zmiany (powtórka, porzucona klatka): pomiar
+                    // „zmiana → napis” biegnie dalej od pierwotnej zmiany. Klatka ukończona bez
+                    // napisu swoją zmianę obsłużyła — nowa linia liczy się od własnej próbki.
+                    _changeToText.FinishProcessing(changeOrigin, frameCompleted, rereadRequested);
                 }
             }
             return (changedFraction, strongFraction, significantFraction, true);
@@ -808,8 +823,27 @@ public sealed class LiveTranslationSession(
             _ = lookup.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
+            _abandonedLocalLookups.RemoveAll(static t => t.IsCompleted);
+            _abandonedLocalLookups.Add(lookup);
             throw;
         }
+    }
+
+    private async Task DrainAbandonedLocalLookupsAsync()
+    {
+        foreach (var lookup in _abandonedLocalLookups)
+        {
+            try
+            {
+                await lookup.ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Wynik porzuconego sprawdzenia nikogo nie interesuje — liczy się tylko,
+                // że skończyło pracę na bazie przed Completion.
+            }
+        }
+        _abandonedLocalLookups.Clear();
     }
 
     private void InvalidateUnavailableScene(CancellationToken cancellationToken)
@@ -991,6 +1025,7 @@ public sealed class LiveTranslationSession(
         if (!_sceneValidity.IsCurrent(generation))
         {
             _refreshAfterBusyChanges = true;
+            _frameDiscarded = true;
             return;
         }
         var rawLineCount = ocrResult.Lines.Count;
@@ -1209,9 +1244,11 @@ public sealed class LiveTranslationSession(
                 }
                 else
                 {
+                    // Wynik próby trafia do tłumaczenia: znane teksty nie są szukane w bazie
+                    // drugi raz (podwójny licznik użyć i zbędne zapytanie na gorącej ścieżce).
                     Task<IReadOnlyList<TranslationOutcome>>? translation;
                     while (!_translationWork.TryStart(
-                               () => orchestrator.TranslateTextsAsync(texts, cancellationToken),
+                               () => orchestrator.TranslateTextsAsync(texts, local, cancellationToken),
                                out translation))
                     {
                         // No FIFO of old frames. If both slots are occupied, watch the scene
@@ -1227,6 +1264,7 @@ public sealed class LiveTranslationSession(
         catch (SceneSupersededException)
         {
             _refreshAfterBusyChanges = true;
+            _frameDiscarded = true;
             return;
         }
         var translateMs = translateWatch.ElapsedMilliseconds;
@@ -1237,6 +1275,7 @@ public sealed class LiveTranslationSession(
             // The provider may fill its cache, but no block/style/survivor from the
             // obsolete frame is allowed back onto the overlay.
             _refreshAfterBusyChanges = true;
+            _frameDiscarded = true;
             return;
         }
 

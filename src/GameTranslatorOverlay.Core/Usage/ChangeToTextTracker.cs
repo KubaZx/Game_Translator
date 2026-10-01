@@ -44,6 +44,19 @@ public sealed class ChangeToTextTracker
         if (_pendingSince is not { } pending || value < pending) _pendingSince = value;
     }
 
+    /// <summary>
+    /// Koniec przetworzenia, po którym pętla odświeży obraz. Pierwotny początek przechodzi
+    /// dalej tylko przy prawdziwym ponownym odczycie TEJ SAMEJ zmiany: celowej powtórce
+    /// (czknięcie OCR, potwierdzenie odczytu) albo klatce porzuconej przed pokazaniem
+    /// (nowa scena, zniknięty tekst, błąd). Klatka przetworzona do końca, która po prostu
+    /// nie miała czego przetłumaczyć (dialog zniknął, OCR nic nie znalazł), swoją zmianę
+    /// już obsłużyła — nowa linia, która pojawiła się w trakcie, liczy się od własnej próbki.
+    /// </summary>
+    public void FinishProcessing(TimeSpan? origin, bool frameCompleted, bool rereadRequested)
+    {
+        if (rereadRequested || !frameCompleted) CarryOver(origin);
+    }
+
     /// <summary>Po zminimalizowaniu gry albo zatrzymaniu pomiar nie ma sensu.</summary>
     public void Reset() => _pendingSince = null;
 

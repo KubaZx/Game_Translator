@@ -89,4 +89,43 @@ public class ChangeToTextTrackerTests
         Assert.Null(ChangeToTextTracker.Measure(Ms(500), Ms(400)));
         Assert.Equal(0, ChangeToTextTracker.Measure(Ms(500), Ms(500)));
     }
+
+    [Fact]
+    public void Ukonczona_klatka_bez_napisu_nie_zawyza_pomiaru_nowej_linii_z_jej_trakcie()
+    {
+        var tracker = new ChangeToTextTracker();
+        tracker.ObserveChange(Ms(0));
+        var origin = tracker.BeginProcessing();
+        // W trakcie OCR (który nic nie znalazł) pojawia się nowa linia.
+        tracker.ObserveChange(Ms(500));
+
+        tracker.FinishProcessing(origin, frameCompleted: true, rereadRequested: false);
+
+        Assert.Equal(Ms(500), tracker.PendingSince);
+    }
+
+    [Fact]
+    public void Porzucona_klatka_przenosi_pierwotny_poczatek()
+    {
+        var tracker = new ChangeToTextTracker();
+        tracker.ObserveChange(Ms(0));
+        var origin = tracker.BeginProcessing();
+        tracker.ObserveChange(Ms(500));
+
+        tracker.FinishProcessing(origin, frameCompleted: false, rereadRequested: false);
+
+        Assert.Equal(Ms(0), tracker.PendingSince);
+    }
+
+    [Fact]
+    public void Celowa_powtorka_odczytu_przenosi_pierwotny_poczatek_nawet_po_ukonczonej_klatce()
+    {
+        var tracker = new ChangeToTextTracker();
+        tracker.ObserveChange(Ms(100));
+        var origin = tracker.BeginProcessing();
+
+        tracker.FinishProcessing(origin, frameCompleted: true, rereadRequested: true);
+
+        Assert.Equal(Ms(100), tracker.PendingSince);
+    }
 }

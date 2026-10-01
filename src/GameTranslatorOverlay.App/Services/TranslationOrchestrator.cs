@@ -370,8 +370,19 @@ public sealed class TranslationOrchestrator(
     /// Używane przez tryb live — każdy cykl bierze świeży pipeline, więc zmiana
     /// ustawień (dostawca, tryb prywatny) obowiązuje od następnej klatki.
     /// </summary>
+    public Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
+        IReadOnlyList<string> texts, CancellationToken cancellationToken = default) =>
+        TranslateTextsAsync(texts, knownLocal: null, cancellationToken);
+
+    /// <summary>
+    /// Jak <see cref="TranslateTextsAsync(IReadOnlyList{string}, CancellationToken)"/>, ale z wynikiem
+    /// <see cref="TranslateLocalAsync"/> dla tych samych tekstów — znane teksty nie idą drugi raz
+    /// do bazy (podwójny licznik użyć). Wynik próby innego pipeline'u (zmiana ustawień między
+    /// próbą a tłumaczeniem) jest pomijany: mógłby pochodzić z innego cache albo reguł.
+    /// </summary>
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
-        IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+        IReadOnlyList<string> texts, IReadOnlyList<TranslationOutcome?>? knownLocal,
+        CancellationToken cancellationToken = default)
     {
         // Token epoki: zmiana ustawień (np. włączenie trybu prywatnego/Cache-only)
         // przerywa także tłumaczenia live będące w locie — stary pipeline nie może
@@ -390,8 +401,9 @@ public sealed class TranslationOrchestrator(
                 continue;
             }
 
+            var hint = knownLocal is LocalProbe probe && ReferenceEquals(probe.State, state) ? knownLocal : null;
             var outcomes = await state.Pipeline
-                .TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, linked.Token)
+                .TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, hint, linked.Token)
                 .ConfigureAwait(false);
             // A provider may finish despite cancellation. Never publish a result
             // belonging to settings that have already been replaced.
@@ -424,8 +436,20 @@ public sealed class TranslationOrchestrator(
                 .TranslateLocalAsync(texts, settings.SourceLanguage, settings.TargetLanguage, linked.Token)
                 .ConfigureAwait(false);
             linked.Token.ThrowIfCancellationRequested();
-            return outcomes;
+            return new LocalProbe(outcomes, state);
         }
+    }
+
+    // Wynik próby lokalnej z migawką pipeline'u, który go dał — tylko ten sam pipeline
+    // może go ponownie użyć w TranslateTextsAsync.
+    private sealed class LocalProbe(IReadOnlyList<TranslationOutcome?> outcomes, PipelineState state)
+        : IReadOnlyList<TranslationOutcome?>
+    {
+        public PipelineState State { get; } = state;
+        public TranslationOutcome? this[int index] => outcomes[index];
+        public int Count => outcomes.Count;
+        public IEnumerator<TranslationOutcome?> GetEnumerator() => outcomes.GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     public string SourceLanguage => settings.SourceLanguage;

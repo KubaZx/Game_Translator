@@ -276,4 +276,110 @@ public class TranslationPipelineLocalTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => pipeline.TranslateLocalAsync(["Hello"], "en", "pl", cts.Token));
     }
+
+    // Liczy odczyty bazy — trwały cache podbija przy każdym odczycie licznik użyć (use_count).
+    private sealed class LookupCountingCache(ITranslationCache inner) : ITranslationCache
+    {
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _lookups = new(StringComparer.Ordinal);
+        public int LookupsOf(string normalizedText) => _lookups.GetValueOrDefault(normalizedText);
+
+        public Task<CachedTranslation?> LookupAsync(string normalizedText, string sourceLanguage, string targetLanguage,
+            string gameProfile, CancellationToken cancellationToken = default)
+        {
+            _lookups.AddOrUpdate(normalizedText, 1, static (_, count) => count + 1);
+            return inner.LookupAsync(normalizedText, sourceLanguage, targetLanguage, gameProfile, cancellationToken);
+        }
+
+        public Task StoreAsync(NewCacheEntry entry, CancellationToken cancellationToken = default) =>
+            inner.StoreAsync(entry, cancellationToken);
+        public Task SaveManualCorrectionAsync(NewCacheEntry entry, CancellationToken cancellationToken = default) =>
+            inner.SaveManualCorrectionAsync(entry, cancellationToken);
+        public Task<CacheStats> GetStatsAsync(CancellationToken cancellationToken = default) => inner.GetStatsAsync(cancellationToken);
+        public Task<int> ClearAsync(bool keepManualCorrections, CancellationToken cancellationToken = default) =>
+            inner.ClearAsync(keepManualCorrections, cancellationToken);
+        public Task<int> DeleteOlderThanAsync(DateTimeOffset cutoff, bool keepManualCorrections, CancellationToken cancellationToken = default) =>
+            inner.DeleteOlderThanAsync(cutoff, keepManualCorrections, cancellationToken);
+        public Task<string> ExportJsonAsync(CancellationToken cancellationToken = default) => inner.ExportJsonAsync(cancellationToken);
+        public Task<int> ImportJsonAsync(string json, CancellationToken cancellationToken = default) => inner.ImportJsonAsync(json, cancellationToken);
+    }
+
+    [Fact]
+    public async Task Wynik_proby_nie_powtarza_odczytu_znanych_tekstow_z_bazy()
+    {
+        var inner = new InMemoryTranslationCache();
+        await inner.StoreAsync(new NewCacheEntry("Inventory", "Inventory", "en", "pl", "Ekwipunek", "Counting",
+            Context: TextReflow.FormatVersion));
+        var cache = new LookupCountingCache(inner);
+        var usage = new UsageTracker();
+        var provider = new CountingProvider();
+        var pipeline = Create(cache, provider, usage);
+        string[] texts = ["Inventory", "A brand new line"];
+
+        var local = await pipeline.TranslateLocalAsync(texts, "en", "pl");
+        Assert.Equal(1, cache.LookupsOf("Inventory"));
+        var full = await pipeline.TranslateAsync(texts, "en", "pl", local);
+
+        // Znany tekst czytany raz (próba); nieznany ponownie — mógł w międzyczasie trafić do bazy.
+        Assert.Equal(1, cache.LookupsOf("Inventory"));
+        Assert.True(cache.LookupsOf("A brand new line") > 1);
+        Assert.Equal("Ekwipunek", full[0].TranslatedText);
+        Assert.Equal("PL:A brand new line", full[1].TranslatedText);
+        Assert.Equal(1, provider.Calls);
+        // Trafienie liczone dokładnie raz.
+        Assert.Equal(1, usage.CacheHits);
+    }
+
+    [Fact]
+    public async Task Wynik_proby_daje_to_samo_co_pelna_sciezka_i_liczy_slownik_raz()
+    {
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry("Hello", "Hello", "en", "pl", "Cześć", "Counting",
+            Context: TextReflow.FormatVersion));
+        var glossary = new GlossaryService();
+        glossary.AddTerm(new GlossaryTerm("Armour", "Pancerz"));
+        var usage = new UsageTracker();
+        var pipeline = Create(cache, new CountingProvider(), usage, glossary);
+        string[] texts = ["Hello", "Armour", "New line", " Hello "];
+
+        var local = await pipeline.TranslateLocalAsync(texts, "en", "pl");
+        var withHint = await pipeline.TranslateAsync(texts, "en", "pl", local);
+
+        Assert.Equal(["Cześć", "Pancerz", "PL:New line", "Cześć"], withHint.Select(static o => o.TranslatedText));
+        Assert.Equal(" Hello ", withHint[3].SourceText);
+        Assert.Equal(1, usage.CacheHits);
+        Assert.Equal(1, usage.GlossaryHits);
+    }
+
+    [Fact]
+    public async Task Wynik_proby_dla_innych_tekstow_jest_ignorowany()
+    {
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry("Hello", "Hello", "en", "pl", "Cześć", "Counting",
+            Context: TextReflow.FormatVersion));
+        var pipeline = Create(cache, new CountingProvider());
+
+        var local = await pipeline.TranslateLocalAsync(["Hello"], "en", "pl");
+        // Inna długość listy albo inny tekst na tej pozycji — próba nie pasuje, zwykła ścieżka.
+        var shorter = await pipeline.TranslateAsync(["Goodbye", "Hello"], "en", "pl", local);
+        var swapped = await pipeline.TranslateAsync(["Goodbye"], "en", "pl", local);
+
+        Assert.Equal(["PL:Goodbye", "Cześć"], shorter.Select(static o => o.TranslatedText));
+        Assert.Equal("PL:Goodbye", Assert.Single(swapped).TranslatedText);
+    }
+
+    [Fact]
+    public async Task Nieaktualny_wpis_z_proby_dalej_ma_zapas_przy_bledzie_dostawcy()
+    {
+        var multiLine = TextNormalizer.Normalize("Talk to the\nblacksmith about the sword.");
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry(multiLine, multiLine, "en", "pl", "Porozmawiaj z\nkowalem o mieczu.", "Counting"));
+        var pipeline = Create(cache, new CountingProvider(failure: Offline()));
+
+        var local = await pipeline.TranslateLocalAsync([multiLine], "en", "pl");
+        Assert.Null(Assert.Single(local));
+        var full = Assert.Single(await pipeline.TranslateAsync([multiLine], "en", "pl", local));
+
+        // Pełna ścieżka sama odczytała nieaktualny wpis i pokazała go zamiast błędu.
+        Assert.Equal("Porozmawiaj z\nkowalem o mieczu.", full.TranslatedText);
+    }
 }

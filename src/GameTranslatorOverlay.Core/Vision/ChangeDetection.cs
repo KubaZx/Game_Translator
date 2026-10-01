@@ -639,22 +639,20 @@ public sealed class ChangeStabilizer(TimeSpan stabilityDelay, TimeSpan? maxDirty
     /// okno stabilności liczy się od chwili zmiany, a nie od końca oczekiwania — napis, który
     /// pojawił się w trakcie długiego tłumaczenia i od tamtej pory stoi, nie czeka drugi raz
     /// pełnych 250 ms. Czas z przyszłości przycinamy do <paramref name="now"/>.
-    /// Gdy stabilizator już był brudny, zostaje wcześniejszy początek brudu (limit
-    /// <c>maxDirtyDuration</c> nie może się odnawiać), a termin stabilności nie cofa się
-    /// przed późniejszą, już znaną zmianę.
+    /// Gdy stabilizator już był brudny, termin stabilności nie cofa się przed późniejszą,
+    /// już znaną zmianę.
+    /// Limit ciągłych zmian (<c>maxDirtyDuration</c>) liczy się natomiast od <paramref name="now"/>,
+    /// tak jak po <see cref="ForceDirty"/>: kontrole sceny w trakcie pracy widzą tylko
+    /// pojedyncze próbki, nie ciągły ruch. Stara zmiana i cisza potem to nowa, odosobniona
+    /// zmiana — cofnięty limit wymusiłby OCR pierwszej klatki, która jeszcze się rysuje
+    /// (maszyna do pisania, pojawianie się dymka), i wysłał do dostawcy pół napisu.
     /// </summary>
     public void MarkDirty(TimeSpan lastChangeAt, TimeSpan now)
     {
         var changedAt = lastChangeAt < now ? lastChangeAt : now;
-        if (!_dirty)
-        {
-            _dirty = true;
-            _dirtySince = changedAt;
-            _lastChangeAt = changedAt;
-            return;
-        }
-        if (changedAt < _dirtySince) _dirtySince = changedAt;
-        if (changedAt > _lastChangeAt) _lastChangeAt = changedAt;
+        _dirtySince = now;
+        if (!_dirty || changedAt > _lastChangeAt) _lastChangeAt = changedAt;
+        _dirty = true;
     }
 
     public void Reset() => _dirty = false;

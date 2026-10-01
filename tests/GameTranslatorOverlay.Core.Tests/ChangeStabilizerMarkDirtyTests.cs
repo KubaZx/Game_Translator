@@ -95,15 +95,28 @@ public class ChangeStabilizerMarkDirtyTests
     }
 
     [Fact]
-    public void Limit_ciaglych_zmian_liczy_sie_od_zaobserwowanej_zmiany()
+    public void Stara_zmiana_i_cisza_nie_wymuszaja_OCR_klatki_ktora_dalej_sie_rysuje()
     {
         var stabilizer = Create();
 
         stabilizer.MarkDirty(Ms(500), Ms(2000));
 
-        // Tekst czeka od 500 ms, a obraz dalej się zmienia — limit 600 ms już minął,
-        // więc animowane tło nie odracza przetworzenia o kolejne 600 ms.
-        Assert.True(stabilizer.Update(frameChanged: true, Ms(2010)));
+        // Kontrola sceny widziała zmianę przy 500 ms, a potem obraz stał — to nie jest
+        // ciągła animacja. Klatka, która znowu się zmienia (pisany napis, pojawiający się
+        // dymek), czeka na stabilność albo na pełny limit liczony od końca oczekiwania.
+        Assert.False(stabilizer.Update(frameChanged: true, Ms(2010)));
+        Assert.False(stabilizer.Update(frameChanged: true, Ms(2599)));
+        Assert.True(stabilizer.Update(frameChanged: true, Ms(2600)));
+    }
+
+    [Fact]
+    public void Stara_zmiana_bez_kolejnych_jest_gotowa_przy_najblizszej_spokojnej_probce()
+    {
+        var stabilizer = Create();
+
+        stabilizer.MarkDirty(Ms(500), Ms(2000));
+
+        Assert.True(stabilizer.Update(frameChanged: false, Ms(2010)));
     }
 
     [Fact]
@@ -113,22 +126,28 @@ public class ChangeStabilizerMarkDirtyTests
 
         stabilizer.MarkDirty(Ms(1900), Ms(2000));
 
+        // Limit ciągłych zmian liczy się od końca oczekiwania (2000 ms), jak po ForceDirty.
         Assert.False(stabilizer.Update(frameChanged: true, Ms(2100)));
-        Assert.False(stabilizer.Update(frameChanged: true, Ms(2499)));
-        Assert.True(stabilizer.Update(frameChanged: true, Ms(2500)));
+        Assert.False(stabilizer.Update(frameChanged: true, Ms(2599)));
+        Assert.True(stabilizer.Update(frameChanged: true, Ms(2600)));
     }
 
     [Fact]
-    public void Juz_brudny_stabilizator_zachowuje_wczesniejszy_poczatek_brudu()
+    public void Juz_brudny_stabilizator_odnawia_limit_jak_ForceDirty()
     {
         var stabilizer = Create();
         Assert.False(stabilizer.Update(frameChanged: true, Ms(0)));
-
-        stabilizer.MarkDirty(Ms(300), Ms(400));
-
-        // Limit 600 ms liczy się nadal od 0 ms — MarkDirty go nie odnawia.
-        Assert.False(stabilizer.Update(frameChanged: true, Ms(599)));
+        // Wymuszony przebieg (limit ciągłych zmian) zostawia stabilizator brudnym.
         Assert.True(stabilizer.Update(frameChanged: true, Ms(600)));
+
+        // Długie OCR/tłumaczenie: koniec przy 2000 ms, zmiana zauważona przy 900 ms.
+        stabilizer.MarkDirty(Ms(900), Ms(2000));
+
+        // Początek brudu sprzed oczekiwania nie wymusza OCR pierwszej zmienionej klatki —
+        // limit liczy się od nowa, tak jak po ForceDirty przed tą zmianą.
+        Assert.False(stabilizer.Update(frameChanged: true, Ms(2010)));
+        Assert.False(stabilizer.Update(frameChanged: true, Ms(2599)));
+        Assert.True(stabilizer.Update(frameChanged: true, Ms(2600)));
     }
 
     [Fact]
@@ -157,16 +176,16 @@ public class ChangeStabilizerMarkDirtyTests
     }
 
     [Fact]
-    public void Wczesniejsza_zmiana_moze_przyspieszyc_limit_juz_brudnego_stabilizatora()
+    public void Wczesniejsza_zmiana_nie_przyspiesza_limitu_juz_brudnego_stabilizatora()
     {
         var stabilizer = Create();
         stabilizer.ForceDirty(Ms(1000));
 
         stabilizer.MarkDirty(Ms(500), Ms(1000));
 
-        // Początek brudu to najwcześniejsza znana zmiana (500 ms), więc limit 600 ms
-        // mija przy 1100 ms, a termin stabilności z ForceDirty (1250 ms) zostaje.
-        Assert.False(stabilizer.Update(frameChanged: false, Ms(1100)));
-        Assert.True(stabilizer.Update(frameChanged: true, Ms(1100)));
+        // Termin stabilności z ForceDirty (1250 ms) zostaje, limit 600 ms liczy się od 1000 ms.
+        Assert.False(stabilizer.Update(frameChanged: true, Ms(1100)));
+        Assert.False(stabilizer.Update(frameChanged: true, Ms(1599)));
+        Assert.True(stabilizer.Update(frameChanged: true, Ms(1600)));
     }
 }

@@ -108,13 +108,32 @@ public sealed class TranslationPipeline(
     public ITranslationProvider Provider => provider;
     public TranslationPipelineOptions Options => options;
 
+    public Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken = default) =>
+        TranslateAsync(texts, sourceLanguage, targetLanguage, knownLocal: null, cancellationToken);
+
+    /// <summary>
+    /// Jak <see cref="TranslateAsync(IReadOnlyList{string}, string, string, CancellationToken)"/>,
+    /// ale z wynikiem wcześniejszego <see cref="TranslateLocalAsync"/> dla tych samych tekstów.
+    /// Znane już lokalnie teksty nie są szukane w cache drugi raz: odczyt z trwałej bazy podbija
+    /// jej licznik użyć (use_count), więc częściowo znana klatka live liczyłaby każdy znany
+    /// tekst podwójnie, a każde pudło kosztowałoby drugie zapytanie. Trafienia z próby liczymy
+    /// tutaj (próba częściowo znanej partii ich nie liczy). Teksty null z próby (brak, wpis
+    /// nieaktualny) przechodzą pełną ścieżkę — w międzyczasie mogły trafić do cache.
+    /// Lista o innej długości niż <paramref name="texts"/> jest ignorowana.
+    /// </summary>
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
         IReadOnlyList<string> texts,
         string sourceLanguage,
         string targetLanguage,
+        IReadOnlyList<TranslationOutcome?>? knownLocal,
         CancellationToken cancellationToken = default)
     {
         if (texts.Count == 0) return [];
+        if (knownLocal is not null && knownLocal.Count != texts.Count) knownLocal = null;
 
         var normalizedInputs = texts
             .Select(static text => (Source: text, Normalized: TextNormalizer.Normalize(text)))
@@ -123,13 +142,22 @@ public sealed class TranslationPipeline(
         var outcomes = new Dictionary<string, TranslationOutcome>(StringComparer.Ordinal);
         var pending = new List<(string Source, string Normalized)>();
 
-        foreach (var (source, normalized) in normalizedInputs)
+        for (var index = 0; index < normalizedInputs.Count; index++)
         {
+            var (source, normalized) = normalizedInputs[index];
             if (outcomes.ContainsKey(normalized) || pending.Any(p => p.Normalized == normalized)) continue;
 
             if (normalized.Length == 0)
             {
                 outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, "Pusty tekst.");
+                continue;
+            }
+
+            if (knownLocal?[index] is { } known && known.NormalizedText == normalized)
+            {
+                if (known.Origin == TranslationOrigin.Glossary) usage.RecordGlossaryHit();
+                else if (known.Origin == TranslationOrigin.Cache) usage.RecordCacheHit();
+                outcomes[normalized] = known;
                 continue;
             }
 
