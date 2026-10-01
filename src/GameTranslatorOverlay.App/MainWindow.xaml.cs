@@ -57,6 +57,10 @@ public partial class MainWindow : Window
     private bool _liveHotkeyRegistered;
     private bool _liveHotkeyBusy;
 
+    // Programowe zaznaczenie zapamiętanej gry po odświeżeniu listy NIE jest wyborem użytkownika:
+    // nie może przełączać profilu (zapis settings.json + przebudowa pipeline'u bez kliknięcia).
+    private bool _preselectingRememberedGame;
+
     // Gra zapamiętana w trybie prywatnym — tylko w pamięci, nigdy w settings.json.
     private string? _privateGameProcess;
     private string? _privateGameTitle;
@@ -317,14 +321,25 @@ public partial class MainWindow : Window
     {
         var windows = await Task.Run(WindowEnumerator.GetOpenWindows);
         WindowsList.ItemsSource = windows;
-        SetStatus($"Znaleziono {windows.Count} okien. Wybierz okno gry albo od razu użyj Ctrl+Shift+T.");
+        var liveHotkey = _liveHotkeyRegistered ? _settings.LiveToggleHotkey : null;
+        SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: false, liveHotkey));
 
         // Zapamiętana gra jest tylko zaznaczana — start live zostaje decyzją użytkownika.
+        // Bez autodetekcji profilu: świadomy wybór „brak profilu” ma przetrwać restart
+        // i Odśwież; profil dobierze się dopiero przy kliknięciu okna albo tuż przed startem skrótem.
         if (FindRememberedGame(windows) is { } remembered)
         {
-            WindowsList.SelectedItem = remembered;
+            _preselectingRememberedGame = true;
+            try
+            {
+                WindowsList.SelectedItem = remembered;
+            }
+            finally
+            {
+                _preselectingRememberedGame = false;
+            }
             WindowsList.ScrollIntoView(remembered);
-            SetStatus($"Znaleziono {windows.Count} okien. Zaznaczono ostatnią grę — kliknij Start live albo wciśnij {_settings.LiveToggleHotkey} w grze.");
+            SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: true, liveHotkey));
         }
 
         // Diagnostyka dev: GTO_AUTOLIVE="fragment tytułu" od razu startuje tryb live na
@@ -850,7 +865,7 @@ public partial class MainWindow : Window
 
     private void OnWindowSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_loadingUi || WindowsList.SelectedItem is not TargetWindow window) return;
+        if (_loadingUi || _preselectingRememberedGame || WindowsList.SelectedItem is not TargetWindow window) return;
         ApplyProfileAutoSelection(window);
     }
 
@@ -900,7 +915,17 @@ public partial class MainWindow : Window
     {
         if (_liveSession is not null)
         {
-            OnStopLiveClick(this, new RoutedEventArgs());
+            // Zadanie ze skrótu/zasobnika jest odrzucane (`_ =`), więc wyjątek z zamykania sesji
+            // przepadłby bez śladu — łapiemy go i logujemy jak przy starcie.
+            try
+            {
+                OnStopLiveClick(this, new RoutedEventArgs());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Błąd zatrzymywania trybu live skrótem");
+                SetStatus("Nie udało się zatrzymać trybu live — szczegóły w logu diagnostycznym.");
+            }
             return;
         }
         if (_liveHotkeyBusy) return;
@@ -915,7 +940,6 @@ public partial class MainWindow : Window
             // W międzyczasie użytkownik mógł kliknąć Start — nie uruchamiamy drugiej sesji.
             if (_liveSession is not null) return;
 
-            WindowsList.ItemsSource = windows;
             var resolution = LiveTargetResolver.Resolve(
                 windows.Select(static w => w.ToCandidate()).ToList(),
                 foreground,
@@ -935,6 +959,10 @@ public partial class MainWindow : Window
                 ShowTrayNotification(message);
                 return;
             }
+
+            // Listę podmieniamy dopiero, gdy jest cel — inaczej skrót wciśnięty z pulpitu
+            // skasowałby ręczne zaznaczenie gry na liście.
+            WindowsList.ItemsSource = windows;
 
             // Zaznaczenie na liście uruchamia autodetekcję profilu; wywołanie wprost jest
             // idempotentne i gwarantuje, że ewentualna przebudowa pipeline'u nastąpi PRZED startem.
