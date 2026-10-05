@@ -280,3 +280,57 @@ zakres produktu; **zatwierdzona przez właściciela projektu 2026-09-29**.
 - **Jedno SDK OpenAI dla wszystkich modeli** — lokalne serwery obsługują różne podzbiory API.
 - **Słowniki DeepL (glossary API)** — wymagają zarządzania słownikami po stronie DeepL;
   możliwe w przyszłości; kontekst dla modeli językowych nie wymaga stanu na serwerze.
+
+## ADR-014: Odczyt tekstów z plików gry przez osobne narzędzie offline (2026-10-05)
+
+**Kontekst.** Badanie z 2026-10-05 (`GTO Diagnostics/20261005-natywne-spolszczenie`) zmierzyło,
+że znany tekst (cache, słownik) daje gotowy napis po ok. 0,33 s, a nowy tekst po 0,50–0,59 s
+z DeepL i 1,0–1,3 s z modelem językowym. W Escape Academy teksty interfejsu, dialogi i napisy
+leżą w plikach gry jako czytelne tabele (ok. 7,6 tys. unikalnych tekstów EN). Znajomość tekstów
+źródłowych pozwala przetłumaczyć je z wyprzedzeniem (bez presji czasu, z kontekstem sceny
+i mówcy) i poprawiać błędy OCR przez dopasowanie odczytu do znanego zdania. Dotąd
+`PRIVACY.md` obiecywał, że program nie czyta plików gry, a `SECURITY.md` ograniczał działanie
+do obrazu z ekranu.
+
+**Decyzja.** Dopuszczamy **odczyt plików gry wyłącznie przez osobne narzędzie offline**
+(`tools/`), uruchamiane jawnie przez użytkownika. Nakładka nadal nie czyta plików gry — dostaje
+tylko dane wytworzone przez narzędzie (lokalny korpus i wpisy pamięci tłumaczeń).
+
+Warunki, wszystkie obowiązkowe:
+
+1. **Tylko odczyt.** Narzędzie nigdy nie zapisuje, nie zmienia, nie blokuje ani nie tworzy
+   plików w folderze gry (otwiera je z `FileShare.ReadWrite | FileShare.Delete`).
+2. **Gra wyłączona.** Narzędzie odmawia pracy, gdy proces gry działa.
+3. **Bez gier online i z anti-cheatem.** Twarda blokada: foldery EasyAntiCheat / BattlEye,
+   podpisane lub zaszyfrowane kontenery (`.sig`, szyfrowany indeks pak/utoc) oraz jawna lista
+   wykluczeń, w tym Path of Exile 1/2 (regulamin GGG zakazuje aplikacji, które „interact with
+   the game or game files”).
+4. **Bez obchodzenia zabezpieczeń.** Żadnych kluczy AES, deszyfrowania ani inżynierii wstecznej
+   kodu gry. Czytamy tylko kontenery, które da się otworzyć bez klucza.
+5. **Bez dodatkowego ruchu sieciowego.** Narzędzie niczego nie pobiera (np. bibliotek
+   dekompresji); jedyny możliwy ruch to świadomie wybrane przez użytkownika tłumaczenie
+   korpusu u wskazanego dostawcy.
+6. **Tylko lokalnie.** Korpus i jego tłumaczenia trafiają do `%LOCALAPPDATA%\GameTranslatorOverlay`
+   (albo `eval/private/` przy pomiarach). Nigdy do repozytorium ani do paczki aplikacji —
+   teksty gier i ich tłumaczenia są chronione prawem autorskim.
+7. **Tryb prywatny.** Gdy w aplikacji jest włączony tryb prywatny, wpisy z wyprzedzeniem nie są
+   zapisywane do bazy.
+8. **Specyfika gry jako dane.** Które tabele i kolumny są tekstem dla gracza, opisuje „recepta”
+   w profilu gry (`profiles/<id>/`); kod czytnika jest wspólny dla rodziny formatów (np. Unity
+   TextAsset), nie pisany pod konkretną grę.
+
+Niezmienione: zakaz modyfikacji plików gry, instalowania paczek i modów, wstrzykiwania DLL,
+hooków, czytania pamięci procesu i wysyłania inputu do gry (`SECURITY.md`).
+
+**Prywatność dostawców.** Przy tłumaczeniu korpusu u dostawcy obowiązuje świadomy wybór:
+DeepL API Free przetwarza teksty „przez ograniczony czas” do trenowania modeli, DeepL Pro nie;
+DeepSeek przechowuje dane w ChRL. Do API trafia wyłącznie tekst, nigdy obraz.
+
+**Odrzucone alternatywy.**
+- **Odczyt plików przez samą nakładkę w trakcie gry** — miesza warstwy, ryzyko blokady plików
+  przy aktualizacji i konfliktu z anti-cheatem; korzyść ta sama co z narzędzia offline.
+- **Paczki językowe instalowane w grze** — modyfikacja plików gry (zakaz), a 6 z 9 zainstalowanych
+  gier offline ma już oficjalny polski.
+- **Dodatki w procesie gry (BepInEx, UE4SS)** — wstrzykiwanie DLL (zakaz).
+
+**Zatwierdzona przez właściciela projektu 2026-10-05.**

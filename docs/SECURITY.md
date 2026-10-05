@@ -19,6 +19,12 @@ na ekranie**. Program:
 Z perspektywy gry program jest nieodróżnialny od użytkownika patrzącego na ekran. Nie komunikuje
 się z procesem gry w żaden sposób i nie wpływa na jej działanie.
 
+**Wyjątek (ADR-014):** osobne narzędzie offline z `tools/` może — na polecenie użytkownika
+i przy wyłączonej grze — czytać pliki gry **wyłącznie do odczytu**, żeby zbudować lokalny korpus
+tekstów źródłowych. Nie dotyczy gier online ani gier z anti-cheatem, zaszyfrowanych lub
+podpisanych kontenerów, nie obejmuje żadnego zapisu w folderze gry ani obchodzenia zabezpieczeń.
+Sama nakładka plików gry nie czyta.
+
 ## Techniki ZABRONIONE
 
 Poniższe techniki są bezwzględnie zakazane w całym kodzie projektu — w rdzeniu, w profilach gier,

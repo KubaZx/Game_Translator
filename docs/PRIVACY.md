@@ -139,7 +139,13 @@ Usunięcie folderu `%LOCALAPPDATA%\GameTranslatorOverlay` usuwa wszystkie dane p
 ## Czego program nie robi
 
 - Nie zbiera telemetrii ani statystyk użycia i niczego nie wysyła „do producenta"
-  (jedyny ruch sieciowy to zapytania do wybranego przez użytkownika API tłumaczeniowego).
+  (jedyny ruch sieciowy to zapytania do wybranego przez użytkownika API tłumaczeniowego;
+  to samo dotyczy narzędzia korpusu z ADR-014, które tłumaczy korpus tylko na wyraźne polecenie).
 - Nie zapisuje ani nie wysyła screenshotów.
-- Nie czyta danych innych aplikacji, plików gry ani pamięci procesów.
+- Aplikacja (nakładka) nie czyta danych innych aplikacji, plików gry ani pamięci procesów.
+  Wyjątek opisuje ADR-014: osobne narzędzie offline, uruchamiane przez użytkownika przy
+  wyłączonej grze, czyta wyłącznie do odczytu teksty z plików wybranej gry offline (bez
+  anti-cheata, bez szyfrowania) i zapisuje lokalny korpus w `%LOCALAPPDATA%\GameTranslatorOverlay`.
+  Korpus i jego tłumaczenia nigdy nie opuszczają komputera, chyba że użytkownik sam zleci
+  ich tłumaczenie u wybranego dostawcy.
 - Nie tworzy kont, nie wymaga logowania, nie profiluje użytkownika.
