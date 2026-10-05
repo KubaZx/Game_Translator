@@ -27,11 +27,23 @@ public sealed class SqliteUsageFlushFailureTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
-        foreach (var suffix in new[] { "", "-wal", "-shm" })
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (true)
         {
-            var path = _databasePath + suffix;
-            if (File.Exists(path)) File.Delete(path);
+            SqliteConnection.ClearAllPools();
+            try
+            {
+                foreach (var suffix in new[] { "", "-wal", "-shm" })
+                {
+                    var path = _databasePath + suffix;
+                    if (File.Exists(path)) File.Delete(path);
+                }
+                return;
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(50);
+            }
         }
     }
 
