@@ -165,6 +165,8 @@ public sealed class LiveSessionOptions
     public double TrackMaxShiftPx { get; init; } = 72;
 
     public double MotionFps { get; init; } = 10;
+
+    public TimeSpan TrackedMotionPause { get; init; } = TimeSpan.FromMilliseconds(900);
 }
 
 /// <summary>
@@ -213,6 +215,10 @@ public sealed class LiveTranslationSession(
     private readonly Dictionary<string, TrackState> _tracks = new(StringComparer.Ordinal);
     private TimeSpan _lastTrackedMotion = TimeSpan.MinValue;
     private readonly HashSet<string> _presentByTracking = new(StringComparer.Ordinal);
+    private bool _frameCapturedInMotion;
+
+    private TimeSpan MotionPause =>
+        options.TrackCoveredBlocks && options.BuildGlyphCovers() ? options.TrackedMotionPause : options.MaxMotionPause;
     private readonly Dictionary<string, HeldPrefix> _heldPrefixes = new(StringComparer.Ordinal);
 
     private const double JitterSimilarityThreshold = 0.5;
@@ -637,7 +643,7 @@ public sealed class LiveTranslationSession(
             var frameChanged = analysis.SignificantFraction > options.ChangeThreshold;
             var isMoving = analysis.StrongChangedFraction >= options.MotionThreshold;
             var motionNow = clock.Elapsed;
-            var forceProcess = _motionDeadline.Observe(isMoving, motionNow);
+            var forceProcess = _motionDeadline.Observe(isMoving, motionNow, MotionPause);
 
             // Scena w ruchu (bieg, przesuw kamery): każdy wynik OCR wylądowałby w miejscu,
             // z którego tekst już odpłynął. Ruch poznajemy po MOCNYCH zmianach pikseli —
@@ -655,6 +661,7 @@ public sealed class LiveTranslationSession(
                 // Deadline zostanie odnowiony dopiero, gdy klatka rzeczywiscie
                 // trafi do OCR; blad przygotowania obrazu nie kupuje nowej pauzy.
             }
+            _frameCapturedInMotion = isMoving;
 
             if (frameChanged && analysis.SignificantRegion is { } changedNow)
             {
@@ -1229,7 +1236,7 @@ public sealed class LiveTranslationSession(
             // four-second rescan even though we already observed its appearance.
             if (analysis.SignificantFraction > options.ChangeThreshold)
                 _refreshAfterBusyChanges = true;
-            _motionDeadline.Observe(analysis.StrongChangedFraction >= options.MotionThreshold, clock.Elapsed);
+            _motionDeadline.Observe(analysis.StrongChangedFraction >= options.MotionThreshold, clock.Elapsed, MotionPause);
             if (_pendingTextAreas.Count > 0)
             {
                 var covered = _pendingTextAreas.Where(area => ScreenCapture.IsTextAreaClearlyEmpty(
@@ -1697,10 +1704,37 @@ public sealed class LiveTranslationSession(
             }
         }
 
+        System.Drawing.Bitmap? confirmFrame = null;
+        var confirmTried = false;
+        bool ConfirmStaticInMotion(GlyphCover? candidate)
+        {
+            if (candidate?.Track is not { } track) return false;
+            if (!confirmTried)
+            {
+                confirmTried = true;
+                var (fresh, freshFallback) = ScreenCapture.CaptureWindowEx(gameWindowHandle);
+                if (freshFallback) fresh?.Dispose();
+                else confirmFrame = fresh;
+            }
+            if (confirmFrame is null) return false;
+            var confirmRect = new RectPx(0, 0, confirmFrame.Width, confirmFrame.Height);
+            var area = track.SearchArea(8).Intersect(confirmRect);
+            if (ScreenCapture.CopyRegion(confirmFrame, area) is not { } region) return false;
+            var found = GlyphTracker.Locate(track, region, area.X, area.Y, 8);
+            return found is { IsConfident: true } f && Math.Abs(f.WindowDx) <= 8 && Math.Abs(f.WindowDy) <= 8;
+        }
+
         for (var i = 0; i < keyed.Count; i++)
         {
             var outcome = outcomes[i];
             if (outcome.TranslatedText is not { } translated) continue;
+
+            if (covers is not null && _frameCapturedInMotion && !_displayed.ContainsKey(keyed[i].Key)
+                && !ConfirmStaticInMotion(i < covers.Count ? covers[i] : null))
+            {
+                _pendingDirtyRegion = _pendingDirtyRegion?.Union(keyed[i].Block.Box) ?? keyed[i].Block.Box;
+                continue;
+            }
 
             // Kolor tekstu próbkujemy z oryginalnych pikseli (np. kolor rzadkości przedmiotu).
             var box = keyed[i].Block.Box;
@@ -1800,6 +1834,7 @@ public sealed class LiveTranslationSession(
                 freshKeys.Add(key);
             }
         }
+        confirmFrame?.Dispose();
 
         // Okres łaski: bloki, których ten przebieg nie widział, nie znikają od razu —
         // Windows OCR miewa puste przebiegi na niezmienionej scenie, a bez łaski każde
