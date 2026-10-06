@@ -16,6 +16,7 @@
     <Project Path="tools/GameTranslatorOverlay.CorpusEval/GameTranslatorOverlay.CorpusEval.csproj" />
     <Project Path="tools/GameTranslatorOverlay.CorpusTool/GameTranslatorOverlay.CorpusTool.csproj" />
     <Project Path="tools/GameTranslatorOverlay.LiveDiag/GameTranslatorOverlay.LiveDiag.csproj" />
+    <Project Path="tools/GameTranslatorOverlay.MotionLab/GameTranslatorOverlay.MotionLab.csproj" />
     <Project Path="tools/GameTranslatorOverlay.OcrLab/GameTranslatorOverlay.OcrLab.csproj" />
     <Project Path="tools/GameTranslatorOverlay.OverlayPreview/GameTranslatorOverlay.OverlayPreview.csproj" />
     <Project Path="tools/GameTranslatorOverlay.ProviderEval/GameTranslatorOverlay.ProviderEval.csproj" />
