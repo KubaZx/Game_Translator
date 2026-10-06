@@ -61,7 +61,20 @@ public sealed class AppSettings
     public double OverlayFontSize { get; set; }
 
     /// <summary>Krój czcionki nakładki (nazwa czcionki systemowej).</summary>
-    public string OverlayFontFamily { get; set; } = "Segoe UI";
+    public string OverlayFontFamily { get; set; } = AutoFontFamily;
+
+    public const string AutoFontFamily = "auto";
+
+    public int OverlayFontRevision { get; set; } = CurrentOverlayFontRevision;
+
+    public const int CurrentOverlayFontRevision = 1;
+
+    public void MigrateOverlayFont()
+    {
+        if (OverlayFontRevision >= CurrentOverlayFontRevision) return;
+        if (string.Equals(OverlayFontFamily, "Segoe UI", StringComparison.OrdinalIgnoreCase)) OverlayFontFamily = AutoFontFamily;
+        OverlayFontRevision = CurrentOverlayFontRevision;
+    }
 
     public double OverlayBackgroundOpacity { get; set; } = 0.85;
     public int ResultAutoHideSeconds { get; set; } = 30;
@@ -101,7 +114,7 @@ public sealed class AppSettings
     private static readonly string[] PresentationOnly =
     [
         nameof(ResultDisplayMode), nameof(LiveDisplayMode), nameof(OverlayPlacement),
-        nameof(OverlayBackgroundOpacity), nameof(OverlayFontSize), nameof(OverlayFontFamily),
+        nameof(OverlayBackgroundOpacity), nameof(OverlayFontSize), nameof(OverlayFontFamily), nameof(OverlayFontRevision),
         nameof(ResultAutoHideSeconds), nameof(SubtitleSeconds), nameof(ShowOverlayNotices),
         nameof(TranslateHotkey), nameof(ToggleOverlayHotkey), nameof(LiveToggleHotkey),
         nameof(LastGameProcess), nameof(LastGameTitle), nameof(DisclaimerAcknowledged),
@@ -139,7 +152,10 @@ public sealed class JsonSettingsStore(AppPaths paths)
         try
         {
             var json = File.ReadAllText(paths.SettingsPath);
-            return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+            if (!json.Contains("\"overlayFontRevision\"", StringComparison.OrdinalIgnoreCase)) settings.OverlayFontRevision = 0;
+            settings.MigrateOverlayFont();
+            return settings;
         }
         catch (Exception ex) when (ex is JsonException or IOException)
         {

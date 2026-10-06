@@ -143,10 +143,13 @@ public class CorpusSnapperTests
     }
 
     [Fact]
-    public void Krotkie_etykiety_tylko_dokladnie()
+    public void Krotkie_etykiety_bez_tolerancji_ocr_tylko_dokladnie()
     {
-        Assert.Null(Snapper().Snap("Opem Door"));
-        Assert.Equal("Open Door", Snapper().Snap("open door")?.Entry.En);
+        var exactOnly = Snapper(new CorpusSnapOptions { AllowLabels = false });
+
+        Assert.Null(exactOnly.Snap("Opem Door"));
+        Assert.Equal("Open Door", exactOnly.Snap("open door")?.Entry.En);
+        Assert.Equal("Open Door", Snapper().Snap("Opem Door")?.Entry.En);
     }
 
     [Fact]

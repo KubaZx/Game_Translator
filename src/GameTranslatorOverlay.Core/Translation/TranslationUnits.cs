@@ -10,7 +10,7 @@ public sealed record TranslationOutcomePart(string ScreenText, string? CacheKey,
     public bool IsLiteral => CacheKey is null;
 }
 
-internal sealed record TranslationUnit(string Key, string ScreenText, string Separator, bool Literal, bool FromCorpus, bool ExactMatch = false);
+internal sealed record TranslationUnit(string Key, string ScreenText, string Separator, bool Literal, bool FromCorpus, bool ExactMatch = false, bool Prefix = false);
 
 internal sealed class UnitPlan(IReadOnlyList<TranslationUnit> units)
 {
@@ -35,7 +35,7 @@ internal static partial class TranslationUnitPlanner
     {
         if (normalized.Length == 0) return null;
         var lines = normalized.Split('\n');
-        var builder = new Builder(lines, splitParagraphs);
+        var builder = new Builder(lines, splitParagraphs, corpus is { Index.IsEmpty: false } ? corpus : null);
         if (corpus is { Index.IsEmpty: false }) builder.AddCorpus(corpus, corpus.SnapBlock(normalized));
         else builder.AddRun(0, lines.Length);
         var units = builder.Build();
@@ -60,7 +60,9 @@ internal static partial class TranslationUnitPlanner
     internal static string Display(TranslationUnit unit, string translation)
     {
         if (!unit.FromCorpus || string.Equals(unit.Key, unit.ScreenText, StringComparison.Ordinal)) return translation;
-        var laidOut = ToScreenLayout(translation, unit.Key, unit.ScreenText);
+        var laidOut = unit.Prefix
+            ? ToPrefixLayout(translation, unit.Key, unit.ScreenText)
+            : ToScreenLayout(translation, unit.Key, unit.ScreenText);
         return IsUpperCase(unit.ScreenText) && !IsUpperCase(unit.Key) ? laidOut.ToUpperInvariant() : laidOut;
     }
 
@@ -75,6 +77,17 @@ internal static partial class TranslationUnitPlanner
         if (parts.Length == screenPlan.ParagraphLineCounts.Count) return TextReflow.Rewrap(paragraphs, screenPlan);
         var joined = string.Join(' ', parts.Select(static p => p.Trim()).Where(static p => p.Length > 0));
         return TextReflow.WrapBalanced(joined, Math.Max(1, screenPlan.ParagraphLineCounts.Sum()));
+    }
+
+    internal static string ToPrefixLayout(string translation, string key, string screenText)
+    {
+        if (string.IsNullOrWhiteSpace(translation)) return translation;
+        var screenLines = screenText.Split('\n').Select(static l => l.Trim()).Where(static l => l.Length > 0).ToArray();
+        if (screenLines.Length < 2 || key.Contains('\n')) return ToScreenLayout(translation, key, screenText);
+        var width = screenLines[..^1].Max(static l => l.Length);
+        var lineCount = Math.Max(screenLines.Length, (int)Math.Ceiling((double)key.Length / Math.Max(1, width)));
+        var joined = string.Join(' ', translation.Split('\n').Select(static p => p.Trim()).Where(static p => p.Length > 0));
+        return TextReflow.WrapBalanced(joined, lineCount);
     }
 
     internal static bool IsUpperCase(string text)
@@ -100,7 +113,7 @@ internal static partial class TranslationUnitPlanner
         return true;
     }
 
-    private sealed class Builder(string[] lines, bool splitParagraphs)
+    private sealed class Builder(string[] lines, bool splitParagraphs, CorpusSnapper? corpus)
     {
         private List<TranslationUnit> Units { get; } = [];
         private readonly List<int> _junk = [];
@@ -152,7 +165,7 @@ internal static partial class TranslationUnitPlanner
             foreach (var count in plan.ParagraphLineCounts)
             {
                 var text = string.Join('\n', lines[first..(first + count)]);
-                if (!JunkFilter.IsMeaningful(text)) _junk.Add(Units.Count);
+                if (!JunkFilter.IsMeaningful(text) || corpus?.LooksLikeNoise(text) == true) _junk.Add(Units.Count);
                 Add(first, text, text, literal: false, fromCorpus: false);
                 _lastLine = first + count - 1;
                 first += count;
@@ -246,7 +259,7 @@ internal static partial class TranslationUnitPlanner
             var units = new List<(int, TranslationUnit)>(2);
             if (literal is not null) units.Add((0, new TranslationUnit(literal, literal, string.Empty, Literal: true, FromCorpus: false)));
             units.Add((offset, new TranslationUnit(key, screenText, string.Empty, Literal: false, FromCorpus: true,
-                ExactMatch: segment.Match.Kind == CorpusMatchKind.Exact)));
+                ExactMatch: segment.Match.Kind == CorpusMatchKind.Exact, Prefix: segment.Match.IsPrefix)));
             return units;
         }
 

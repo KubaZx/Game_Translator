@@ -11,7 +11,7 @@ public sealed record KeyedTextBlock(string Key, TextBlock Block, string Normaliz
 /// </summary>
 public static class LiveBlockKeyer
 {
-    public static IReadOnlyList<KeyedTextBlock> AssignKeys(IReadOnlyList<TextBlock> blocks)
+    public static IReadOnlyList<KeyedTextBlock> AssignKeys(IReadOnlyList<TextBlock> blocks, Func<string, string?>? identity = null)
     {
         var ordered = blocks
             .OrderBy(static b => b.Box.Y)
@@ -23,7 +23,7 @@ public static class LiveBlockKeyer
         foreach (var block in ordered)
         {
             var normalized = TextNormalizer.Normalize(block.Text);
-            var hash = TextHasher.Sha256Hex(normalized);
+            var hash = TextHasher.Sha256Hex(identity?.Invoke(normalized) ?? normalized);
             var index = occurrences.TryGetValue(hash, out var seen) ? seen : 0;
             occurrences[hash] = index + 1;
             result.Add(new KeyedTextBlock($"{hash[..16]}#{index}", block, normalized));

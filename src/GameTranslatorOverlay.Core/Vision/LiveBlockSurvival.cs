@@ -18,7 +18,8 @@ public sealed record LiveOverlayBlock(
     BackgroundTexture? Texture = null,
     string SourceText = "",
     int PendingBackgroundRgb = -1,
-    KnownTextReference? Probe = null)
+    KnownTextReference? Probe = null,
+    GlyphCover? Cover = null)
 {
     public int ProbeTextRgb => Probe?.TextRgb ?? ColorRgb;
     public int ProbeBackgroundRgb => Probe?.BackgroundRgb ?? BackgroundRgb;

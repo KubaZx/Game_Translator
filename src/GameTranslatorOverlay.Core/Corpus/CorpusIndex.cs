@@ -12,6 +12,10 @@ public sealed class CorpusIndex
         public CorpusEntry Representative { get; } = representative;
         public int EntryCount { get; set; } = 1;
         public int TrigramCount { get; set; }
+        public bool Spoken { get; set; }
+        public bool Label { get; set; }
+        public string? SortedCanonical { get; set; }
+        public uint CanonicalMask { get; set; }
     }
 
     internal sealed class Scratch
@@ -29,10 +33,15 @@ public sealed class CorpusIndex
     private readonly Dictionary<string, int> _loose;
     private readonly Dictionary<long, int[]> _postings;
     private readonly HashSet<string> _speakers;
+    private readonly HashSet<string> _words;
+    private readonly int[][] _shortTexts;
+    private readonly int[] _byLoose;
     private readonly int _maxPostingLength;
 
+    internal const int MaxShortTextLength = 24;
+
     private CorpusIndex(IReadOnlyList<CorpusEntry> entries, IndexedText[] texts, Dictionary<string, int> exact,
-        Dictionary<string, int> loose, Dictionary<long, int[]> postings, HashSet<string> speakers)
+        Dictionary<string, int> loose, Dictionary<long, int[]> postings, HashSet<string> speakers, HashSet<string> words)
     {
         Entries = entries;
         _texts = texts;
@@ -40,7 +49,19 @@ public sealed class CorpusIndex
         _loose = loose;
         _postings = postings;
         _speakers = speakers;
+        _words = words;
         _maxPostingLength = Math.Max(1000, texts.Length / 16);
+        var buckets = new List<int>[MaxShortTextLength + 1];
+        foreach (var text in texts)
+        {
+            if (text.Loose.Length > MaxShortTextLength) continue;
+            text.SortedCanonical = OcrEditDistance.SortedCanonical(text.Loose);
+            text.CanonicalMask = OcrEditDistance.Mask(text.SortedCanonical);
+            (buckets[text.Loose.Length] ??= []).Add(text.Id);
+        }
+        _shortTexts = buckets.Select(static bucket => bucket?.ToArray() ?? []).ToArray();
+        _byLoose = texts.Select(static text => text.Id).ToArray();
+        Array.Sort(_byLoose, (a, b) => string.CompareOrdinal(texts[a].Loose, texts[b].Loose));
     }
 
     public static CorpusIndex Empty { get; } = Build([]);
@@ -60,6 +81,7 @@ public sealed class CorpusIndex
         var exact = new Dictionary<string, int>(StringComparer.Ordinal);
         var loose = new Dictionary<string, int>(StringComparer.Ordinal);
         var speakers = new HashSet<string>(StringComparer.Ordinal);
+        var words = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var entry in list)
         {
@@ -71,12 +93,15 @@ public sealed class CorpusIndex
 
             var key = CorpusText.MatchKey(entry.En);
             if (CorpusText.LetterOrDigitCount(key) == 0) continue;
+            foreach (var word in CorpusText.Words(key)) words.Add(word);
             if (exact.TryGetValue(key, out var existing))
             {
                 texts[existing].EntryCount++;
+                Mark(texts[existing], entry.Kind);
                 continue;
             }
             var text = new IndexedText(texts.Count, key, entry);
+            Mark(text, entry.Kind);
             texts.Add(text);
             exact[key] = text.Id;
             if (loose.TryGetValue(text.Loose, out var other))
@@ -110,8 +135,58 @@ public sealed class CorpusIndex
         var postings = new Dictionary<long, int[]>(building.Count);
         foreach (var (gram, posting) in building) postings[gram] = posting.ToArray();
 
-        return new CorpusIndex(list, texts.ToArray(), exact, loose, postings, speakers);
+        return new CorpusIndex(list, texts.ToArray(), exact, loose, postings, speakers, words);
     }
+
+    private static void Mark(IndexedText text, CorpusEntryKind kind)
+    {
+        if (kind is CorpusEntryKind.Dialog or CorpusEntryKind.Subtitle) text.Spoken = true;
+        else text.Label = true;
+    }
+
+    public bool IsWord(string lowerWord) => _words.Contains(lowerWord);
+
+    internal bool AnyLongerStartingWith(string loose, int exceptId)
+    {
+        var low = 0;
+        var high = _byLoose.Length;
+        while (low < high)
+        {
+            var middle = (low + high) / 2;
+            if (string.CompareOrdinal(_texts[_byLoose[middle]].Loose, loose) < 0) low = middle + 1;
+            else high = middle;
+        }
+        for (var i = low; i < _byLoose.Length; i++)
+        {
+            var text = _texts[_byLoose[i]];
+            if (!text.Loose.StartsWith(loose, StringComparison.Ordinal)) break;
+            if (text.Id != exceptId && text.Loose.Length > loose.Length) return true;
+        }
+        return false;
+    }
+
+    internal bool StartsLongerSpokenText(string loose, int minExtraLetters)
+    {
+        var low = 0;
+        var high = _byLoose.Length;
+        while (low < high)
+        {
+            var middle = (low + high) / 2;
+            if (string.CompareOrdinal(_texts[_byLoose[middle]].Loose, loose) < 0) low = middle + 1;
+            else high = middle;
+        }
+        var letters = CorpusText.LetterOrDigitCount(loose);
+        for (var i = low; i < _byLoose.Length; i++)
+        {
+            var text = _texts[_byLoose[i]];
+            if (!text.Loose.StartsWith(loose, StringComparison.Ordinal)) break;
+            if (text.Spoken && CorpusText.LetterOrDigitCount(text.Loose) - letters >= minExtraLetters) return true;
+        }
+        return false;
+    }
+
+    internal ReadOnlySpan<int> ShortTexts(int looseLength) =>
+        looseLength >= 0 && looseLength <= MaxShortTextLength ? _shortTexts[looseLength] : [];
 
     public bool TryGetExact(string key, out CorpusEntry entry)
     {

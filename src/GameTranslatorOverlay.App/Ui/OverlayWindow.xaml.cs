@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.App.Services;
@@ -10,6 +9,7 @@ using GameTranslatorOverlay.Core.Ocr;
 using GameTranslatorOverlay.Core.Usage;
 using GameTranslatorOverlay.Core.Vision;
 using GameTranslatorOverlay.Infrastructure.Settings;
+using static GameTranslatorOverlay.App.Ui.OverlayBlockRenderer;
 
 namespace GameTranslatorOverlay.App.Ui;
 
@@ -28,6 +28,7 @@ public partial class OverlayWindow : Window
     private readonly Dictionary<string, BackgroundTexture> _liveTextures = [];
     private readonly Dictionary<string, (int Color, int Background, int Outline)> _liveColors = [];
     private readonly Dictionary<string, string> _liveFit = [];
+    private readonly Dictionary<string, GlyphCover> _liveCovers = [];
     private readonly List<Border> _manualElements = [];
     private Border? _subtitleElement;
     private MonitorArea? _monitor;
@@ -43,6 +44,12 @@ public partial class OverlayWindow : Window
 
     /// <summary>Czy okno jest realnie wykluczone z przechwytywania ekranu.</summary>
     public bool IsCaptureExclusionActive { get; private set; }
+
+    public string? ProfileFontFamily
+    {
+        get => OverlayFonts.ProfileFont;
+        set => OverlayFonts.ProfileFont = value;
+    }
 
     public OverlayWindow()
     {
@@ -119,394 +126,22 @@ public partial class OverlayWindow : Window
         RootCanvas.Visibility = Visibility.Visible;
     }
 
-    private static bool IsCoverPlacement(AppSettings settings) =>
-        settings.OverlayPlacement.Equals("cover", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsBackgroundless(AppSettings settings) =>
-        settings.OverlayBackgroundOpacity < 0.05;
-
-    /// <summary>
-    /// Rozmiar czcionki: jawny z ustawień albo (przy 0 = auto) dopasowany do wysokości
-    /// oryginalnej linii tekstu z OCR — tłumaczenie wygląda wtedy jak tekst gry.
-    /// </summary>
-    private static double ResolveFontSize(AppSettings settings, int lineHeightPx, double scale)
-    {
-        // Zakrywanie ZASTĘPUJE napis gry — rozmiar musi wynikać z oryginału, inaczej
-        // ręczne „15” zmienia 60-pikselowy tytuł w drobny druk w rogu wielkiej łatki.
-        // Ręczny rozmiar obowiązuje w panelu, pod oryginałem i w napisach.
-        if (settings.OverlayFontSize >= 9 && !(IsCoverPlacement(settings) && lineHeightPx > 0))
-        {
-            return settings.OverlayFontSize;
-        }
-        if (lineHeightPx > 0) return Math.Clamp(lineHeightPx / scale * 0.75, 9, 72);
-        return 15;
-    }
-
-    /// <summary>Łatka jako rozmyta kopia tła spod tekstu (mini-siatka rozciągnięta z interpolacją).</summary>
-    private static Brush CreateTextureBrush(BackgroundTexture texture, double opacity)
-    {
-        var bitmap = BitmapSource.Create(
-            texture.Columns, texture.Rows, 96, 96, PixelFormats.Rgb24, null, texture.Rgb, texture.Columns * 3);
-        bitmap.Freeze();
-        var brush = new ImageBrush(bitmap)
-        {
-            Stretch = Stretch.Fill,
-            Opacity = opacity,
-        };
-        brush.Freeze();
-        return brush;
-    }
-
-    private static double Luminance(int rgb) =>
-        0.299 * ((rgb >> 16) & 0xFF) + 0.587 * ((rgb >> 8) & 0xFF) + 0.114 * (rgb & 0xFF);
-
-    /// <summary>Podmiana koloru tekstu/konturu istniejącego dymka bez jego odtwarzania.</summary>
-    private static void ApplyTextColors(Border element, AppSettings settings, int colorRgb, int backgroundRgb, int outlineRgb)
-    {
-        var sampledCover = IsCoverPlacement(settings) && !IsBackgroundless(settings) && backgroundRgb >= 0;
-        var foreground = ResolveForeground(colorRgb, sampledCover ? backgroundRgb : -1);
-        switch (Inner(element))
-        {
-            case OutlinedTextBlock outlined:
-                outlined.Primary.Foreground = foreground;
-                if (outlineRgb >= 0)
-                {
-                    outlined.SetOutlineColor(Color.FromRgb((byte)(outlineRgb >> 16), (byte)(outlineRgb >> 8), (byte)outlineRgb));
-                }
-                break;
-            case TextBlock text:
-                text.Foreground = foreground;
-                break;
-        }
-    }
-
-    private static Brush ResolveForeground(int colorRgb, int backgroundRgb)
-    {
-        Brush foreground = Brushes.White;
-        if (colorRgb >= 0 && backgroundRgb >= 0)
-        {
-            if (Math.Abs(Luminance(colorRgb) - Luminance(backgroundRgb)) >= 60)
-            {
-                foreground = new SolidColorBrush(Color.FromRgb(
-                    (byte)(colorRgb >> 16), (byte)(colorRgb >> 8), (byte)colorRgb));
-            }
-            else
-            {
-                foreground = Luminance(backgroundRgb) >= 128 ? Brushes.Black : Brushes.White;
-            }
-        }
-        else if (colorRgb >= 0 && Luminance(colorRgb) >= 90)
-        {
-            foreground = new SolidColorBrush(Color.FromRgb(
-                (byte)(colorRgb >> 16), (byte)(colorRgb >> 8), (byte)colorRgb));
-        }
-        return foreground;
-    }
-
-    private static TextBlock CreateBlockText(
-        string text, AppSettings settings, double fontSize, int colorRgb = -1, int backgroundRgb = -1)
-    {
-        Brush foreground = Brushes.White;
-        if (colorRgb >= 0 && backgroundRgb >= 0)
-        {
-            // Znamy tło łatki: kolor z próbkowania zostaje, o ile realnie kontrastuje —
-            // dzięki temu ciemny tekst na jasnym oknie (visual novele) też jest wierny.
-            if (Math.Abs(Luminance(colorRgb) - Luminance(backgroundRgb)) >= 60)
-            {
-                foreground = new SolidColorBrush(Color.FromRgb(
-                    (byte)(colorRgb >> 16), (byte)(colorRgb >> 8), (byte)colorRgb));
-            }
-            else
-            {
-                foreground = Luminance(backgroundRgb) >= 128 ? Brushes.Black : Brushes.White;
-            }
-        }
-        else if (colorRgb >= 0)
-        {
-            var r = (byte)(colorRgb >> 16);
-            var g = (byte)(colorRgb >> 8);
-            var b = (byte)colorRgb;
-            // Zbyt ciemny kolor (nieudane próbkowanie) psułby czytelność — zostaje biały.
-            if (0.299 * r + 0.587 * g + 0.114 * b >= 90)
-            {
-                foreground = new SolidColorBrush(Color.FromRgb(r, g, b));
-            }
-        }
-
-        var textBlock = new TextBlock
-        {
-            Text = text,
-            Foreground = foreground,
-            FontSize = fontSize,
-            TextWrapping = TextWrapping.Wrap,
-        };
-
-        if (!string.IsNullOrWhiteSpace(settings.OverlayFontFamily))
-        {
-            textBlock.FontFamily = new FontFamily(settings.OverlayFontFamily);
-        }
-
-        // Bez tła tekst dostaje czarną poświatę — inaczej ginąłby na jasnych scenach.
-        if (IsBackgroundless(settings))
-        {
-            textBlock.Effect = new System.Windows.Media.Effects.DropShadowEffect
-            {
-                Color = Colors.Black,
-                BlurRadius = 5,
-                ShadowDepth = 0,
-                Opacity = 1.0,
-            };
-        }
-
-        return textBlock;
-    }
-
-    /// <summary>Właściwy element tekstowy dymka (z pominięciem hosta łatki, jeśli jest).</summary>
-    private static UIElement? Inner(Border element) => element.Child is CoverPatchHost host ? host.Content : element.Child;
-
-    private static double GetFontSize(Border element) => Inner(element) switch
-    {
-        OutlinedTextBlock outlined => outlined.FontSize,
-        TextBlock text => text.FontSize,
-        _ => 0,
-    };
-
-    private static void SetFontSize(Border element, double fontSize)
-    {
-        switch (Inner(element))
-        {
-            case OutlinedTextBlock outlined: outlined.FontSize = fontSize; break;
-            case TextBlock text: text.FontSize = fontSize; break;
-        }
-    }
-
-    private static string GetText(Border element) => Inner(element) switch
-    {
-        OutlinedTextBlock outlined => outlined.Text,
-        TextBlock text => text.Text,
-        _ => string.Empty,
-    };
-
-    private static void SetText(Border element, string value)
-    {
-        switch (Inner(element))
-        {
-            case OutlinedTextBlock outlined: outlined.Text = value; break;
-            case TextBlock text: text.Text = value; break;
-        }
-    }
-
-    private static void SetLineHeight(Border element, double lineHeight)
-    {
-        switch (Inner(element))
-        {
-            case OutlinedTextBlock outlined:
-                outlined.SetLineHeight(lineHeight, LineStackingStrategy.BlockLineHeight);
-                break;
-            case TextBlock text:
-                text.LineHeight = lineHeight;
-                text.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
-                break;
-        }
-    }
-
-    private static void SetPatchFill(Border element, Brush fill)
-    {
-        if (element.Child is CoverPatchHost host) host.SetFill(fill);
-        else element.Background = fill;
-    }
-
     private Border CreateBlockElement(
         string text, AppSettings settings, double scale, int lineHeightPx, int colorRgb = -1, int backgroundRgb = -1,
-        int outlineRgb = -1, BackgroundTexture? texture = null)
+        int outlineRgb = -1, BackgroundTexture? texture = null, bool fadeIn = true)
     {
-        var cover = IsCoverPlacement(settings);
-        var sampledCover = cover && !IsBackgroundless(settings) && (backgroundRgb >= 0 || texture is not null);
-
-        Brush background;
-        if (IsBackgroundless(settings))
-        {
-            background = Brushes.Transparent;
-        }
-        else if (sampledCover && texture is not null)
-        {
-            // Wtapianie: łatka to rozmyta kopia tła spod tekstu — na grafice podąża za
-            // gradientem, na oknie dialogowym jest płaska; oryginał znika pod nią.
-            background = CreateTextureBrush(texture, 1.0);
-        }
-        else if (sampledCover)
-        {
-            background = new SolidColorBrush(Color.FromArgb(
-                (byte)Math.Clamp(Math.Max(settings.OverlayBackgroundOpacity, 0.97) * 255, 0, 255),
-                (byte)(backgroundRgb >> 16), (byte)(backgroundRgb >> 8), (byte)backgroundRgb));
-        }
-        else
-        {
-            // W trybie zakrywania tło musi realnie schować oryginalny tekst pod spodem.
-            var opacity = cover
-                ? Math.Max(settings.OverlayBackgroundOpacity, 0.95)
-                : settings.OverlayBackgroundOpacity;
-            background = new SolidColorBrush(Color.FromArgb(
-                (byte)Math.Clamp(opacity * 255, 0, 255), 0x0B, 0x0E, 0x11));
-        }
-
-        var textBlock = CreateBlockText(text, settings, ResolveFontSize(settings, lineHeightPx, scale), colorRgb, sampledCover ? backgroundRgb : -1);
-        var multiLine = text.Contains('\n');
-        if (cover)
-        {
-            // Jednoliniowy tekst centruje się w polu oryginału; wieloliniowy trzyma górę,
-            // bo jego wiersze dostają wysokość linii oryginału (PositionBlockElement).
-            textBlock.VerticalAlignment = multiLine ? VerticalAlignment.Top : VerticalAlignment.Center;
-        }
-
-        // Kontur w kolorze z gry — to on robi „natywność” czcionki. Zastępuje rozmytą
-        // czarną poświatę trybu bez tła, a nad światem 3D pozwala w ogóle zrezygnować z łatki.
-        // W zakrywaniu dłuższy polski tekst wystaje poza łatkę nad grafikę — bez konturu
-        // z gry dostaje domyślny (czarny pod jasnym tekstem, biały pod ciemnym).
-        if (outlineRgb < 0 && sampledCover)
-        {
-            var textLum = colorRgb >= 0 ? Luminance(colorRgb) : 255;
-            outlineRgb = textLum >= 128 ? 0x000000 : 0xFFFFFF;
-        }
-        FrameworkElement content = textBlock;
-        if (outlineRgb >= 0)
-        {
-            textBlock.Effect = null;
-            content = new OutlinedTextBlock(textBlock, Color.FromRgb(
-                (byte)(outlineRgb >> 16), (byte)(outlineRgb >> 8), (byte)outlineRgb));
-        }
-
-        // Wtapianie: miękka łatka wyłącznie pod boxem oryginału; tekst może wystawać.
-        UIElement child = content;
-        if (sampledCover)
-        {
-            child = new CoverPatchHost(content, background);
-            background = Brushes.Transparent;
-        }
-
-        var element = new Border
-        {
-            Background = background,
-            // Wtopiona łatka ma udawać tekst gry: bez dymkowych rogów i grubego paddingu.
-            CornerRadius = new CornerRadius(sampledCover ? 0 : 4),
-            Padding = IsBackgroundless(settings) || sampledCover ? new Thickness(0) : new Thickness(7, 4, 7, 4),
-            Child = child,
-        };
-
-        // Mini-siatka tła rozciąga się z interpolacją liniową — gradient, nie kafelki.
-        RenderOptions.SetBitmapScalingMode(element, BitmapScalingMode.Linear);
+        var element = OverlayBlockRenderer.CreateBlockElement(
+            text, settings, scale, lineHeightPx, colorRgb, backgroundRgb, outlineRgb, texture);
 
         // Płynne pojawianie zamiast wyskakiwania.
-        element.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
+        if (fadeIn)
+            element.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
         return element;
     }
 
-    /// <summary>Szerokość tekstu w DIP dla danej czcionki — bez udziału układu WPF (deterministycznie).</summary>
-    private double MeasureTextWidth(string text, AppSettings settings, double fontSize)
-    {
-        var family = string.IsNullOrWhiteSpace(settings.OverlayFontFamily)
-            ? new FontFamily("Segoe UI")
-            : new FontFamily(settings.OverlayFontFamily);
-        var formatted = new FormattedText(
-            text, System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-            new Typeface(family, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal),
-            fontSize, Brushes.Black, VisualTreeHelper.GetDpi(this).PixelsPerDip);
-        // Kontur (8 kopii przesuniętych o grubość) poszerza tekst o 2× grubość.
-        var outline = 2 * Math.Max(1, Math.Round(fontSize / 14.0));
-        return formatted.WidthIncludingTrailingWhitespace + outline;
-    }
-
-    private void PositionBlockElement(Border element, RectPx box, MonitorArea monitor, AppSettings settings, string? fitKey = null)
-    {
-        var scale = monitor.Scale;
-        var cover = IsCoverPlacement(settings);
-        var monitorHeightDip = monitor.Bounds.Height / scale;
-
-        // Zapas zakrycia: krawędzie antyaliasingu oryginalnych glifów wystają poza
-        // box OCR — bez niego spod łatki prześwituje obwódka starego tekstu. Miękka
-        // (rozmyta) łatka potrzebuje większego zapasu, bo jej brzeg wygasa.
-        var coverInsetPx = element.Child is CoverPatchHost ? 8.0 : 3.0;
-        var inset = cover ? coverInsetPx / scale : 0;
-
-        if (cover)
-        {
-            // Dymek ma pokryć cały prostokąt oryginalnego tekstu; polski tekst bywa
-            // dłuższy, więc blok może urosnąć w dół — nie ściskamy go na siłę.
-            element.MinWidth = Math.Max(0, box.Width / scale + 2 * inset);
-            element.MinHeight = Math.Max(0, box.Height / scale + 2 * inset);
-            if (element.Child is CoverPatchHost host)
-            {
-                host.SetPatchSize(element.MinWidth, element.MinHeight);
-            }
-        }
-        else
-        {
-            element.MinWidth = 0;
-            element.MinHeight = 0;
-        }
-
-        element.MaxWidth = Math.Max(140, (monitor.Bounds.Right - box.X) / scale - 12);
-
-        // Wtapianie: polski bywa ~20% dłuższy — zmniejszamy czcionkę, ale najwyżej do 85%
-        // oryginału (dalej tekst wystaje poza łatkę, czytelny dzięki konturowi).
-        // Szerokość tekstu liczymy DETERMINISTYCZNIE (FormattedText), nie przez Measure
-        // elementu — wynik Measure zależał od stanu układu z poprzedniej aktualizacji
-        // i ten sam blok raz wychodził duży, raz mały. Rozmiar przeliczamy tylko, gdy
-        // zmieni się tekst, box albo wysokość linii; w innym razie czcionki nie ruszamy.
-        if (cover && element.Tag is int coverLineHeight && coverLineHeight > 0)
-        {
-            var text = GetText(element);
-            var signature = $"{text}|{coverLineHeight}|{box.Width}|{box.Height}|{settings.OverlayFontFamily}";
-            if (fitKey is null || !_liveFit.TryGetValue(fitKey, out var previousSignature) || previousSignature != signature)
-            {
-                var lineCount = Math.Max(1, text.Count(static c => c == '\n') + 1);
-                var fontSize = ResolveFontSize(settings, coverLineHeight, scale);
-                if (lineCount > 1)
-                {
-                    var pitch = box.Height / scale / lineCount;
-                    fontSize = Math.Min(fontSize, Math.Max(9, pitch / 1.25));
-                    SetLineHeight(element, pitch);
-                }
-
-                var floor = Math.Max(9, fontSize * 0.85);
-                var limit = element.MinWidth * 1.08;
-                for (var i = 0; i < 8 && fontSize > floor; i++)
-                {
-                    if (MeasureTextWidth(text, settings, fontSize) <= limit) break;
-                    fontSize = Math.Max(floor, fontSize * 0.93);
-                }
-                SetFontSize(element, fontSize);
-                if (fitKey is not null) _liveFit[fitKey] = signature;
-            }
-        }
-
-        element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-
-        var left = (box.X - monitor.Bounds.X) / scale - inset;
-        double top;
-
-        if (cover)
-        {
-            // Dokładnie na oryginale; przy dolnej krawędzi dosuwamy w górę, żeby nie uciąć.
-            top = (box.Y - monitor.Bounds.Y) / scale - inset;
-            if (top + element.DesiredSize.Height > monitorHeightDip)
-            {
-                top = Math.Max(0, monitorHeightDip - element.DesiredSize.Height);
-            }
-        }
-        else
-        {
-            // Tłumaczenie pojawia się pod oryginałem; przy dolnej krawędzi — nad nim.
-            top = (box.Bottom - monitor.Bounds.Y) / scale + 4;
-            if (top + element.DesiredSize.Height > monitorHeightDip)
-            {
-                top = Math.Max(0, (box.Y - monitor.Bounds.Y) / scale - element.DesiredSize.Height - 4);
-            }
-        }
-
-        Canvas.SetLeft(element, Math.Max(0, left));
-        Canvas.SetTop(element, top);
-    }
+    private void PositionBlockElement(Border element, RectPx box, MonitorArea monitor, AppSettings settings, string? fitKey = null) =>
+        OverlayBlockRenderer.PositionBlockElement(
+            element, box, monitor, settings, VisualTreeHelper.GetDpi(this).PixelsPerDip, _liveFit, fitKey);
 
     /// <summary>Jednorazowe wyświetlenie bloków z tłumaczenia ręcznego (auto-ukrywane).</summary>
     public void ShowBlocks(IReadOnlyList<(RectPx Box, string Text, int LineHeight, int ColorRgb)> blocks, AppSettings settings)
@@ -558,19 +193,44 @@ public partial class OverlayWindow : Window
         var overall = blocks.Aggregate(default(RectPx), static (acc, b) => acc.Union(b.ScreenBox));
         _monitor = Displays.FromRect(overall);
         var monitor = _monitor;
+        _liveBlocksForLayout = blocks;
 
-        var incomingKeys = blocks.Select(static b => b.Key).ToHashSet(StringComparer.Ordinal);
+        var hideIdentical = HidesIdenticalText(settings);
+        var incomingKeys = blocks
+            .Where(b => !(hideIdentical && b.SameAsSource))
+            .Select(static b => b.Key)
+            .ToHashSet(StringComparer.Ordinal);
         foreach (var staleKey in _liveElements.Keys.Where(key => !incomingKeys.Contains(key)).ToList())
         {
-            RootCanvas.Children.Remove(_liveElements[staleKey]);
-            _liveElements.Remove(staleKey);
-            _liveTextures.Remove(staleKey);
-            _liveColors.Remove(staleKey);
-            _liveFit.Remove(staleKey);
+            RemoveLiveElement(staleKey);
         }
 
         foreach (var block in blocks)
         {
+            if (incomingKeys.Contains(block.Key) && block.Cover is { } voteCover)
+                VoteNativeWeight(voteCover, block.TranslatedText, settings, ProfileFontFamily, monitor.Scale);
+        }
+
+        foreach (var block in blocks)
+        {
+            if (!incomingKeys.Contains(block.Key)) continue;
+            if (UsesNativeCover(settings, block.Cover))
+            {
+                UpdateNativeBlock(block, settings, monitor);
+                continue;
+            }
+            if (_liveElements.TryGetValue(block.Key, out var existing) && IsNative(existing))
+            {
+                ReplaceLiveElement(block.Key, CreateBlockElement(
+                    block.TranslatedText, settings, monitor.Scale, block.LineHeight,
+                    block.ColorRgb, block.BackgroundRgb, block.OutlineRgb, block.Texture, fadeIn: false));
+                _liveElements[block.Key].Tag = block.LineHeight;
+                if (block.Texture is not null) _liveTextures[block.Key] = block.Texture;
+                _liveColors[block.Key] = (block.ColorRgb, block.BackgroundRgb, block.OutlineRgb);
+                PositionBlockElement(_liveElements[block.Key], block.ScreenBox, monitor, settings, block.Key);
+                continue;
+            }
+
             // Istniejący dymek aktualizujemy W MIEJSCU — także przy zmianie rozmiaru oryginału
             // (najechany element menu rośnie): czcionka i łatka skalują się jak napis w grze,
             // bez odtwarzania i fade-inu. Fade-in dostają tylko naprawdę nowe bloki.
@@ -617,6 +277,79 @@ public partial class OverlayWindow : Window
 
         CoverMonitor(monitor);
         ShowIfAllowed();
+    }
+
+    private void UpdateNativeBlock(LiveDisplayBlock block, AppSettings settings, MonitorArea monitor)
+    {
+        var cover = block.Cover!;
+        if (_liveElements.TryGetValue(block.Key, out var element) && IsNative(element))
+        {
+            if (!_liveCovers.TryGetValue(block.Key, out var shown) || !ReferenceEquals(shown, cover))
+            {
+                ApplyNativeCover(element, cover, monitor.Scale);
+                _liveCovers[block.Key] = cover;
+            }
+            if (GetText(element) != block.TranslatedText) SetText(element, block.TranslatedText);
+        }
+        else
+        {
+            var created = CreateNativeElement(block.TranslatedText, cover, monitor.Scale);
+            if (element is not null)
+            {
+                ReplaceLiveElement(block.Key, created);
+            }
+            else
+            {
+                created.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
+                _liveElements[block.Key] = created;
+                RootCanvas.Children.Add(created);
+            }
+            _liveCovers[block.Key] = cover;
+            _liveTextures.Remove(block.Key);
+            _liveColors.Remove(block.Key);
+            _liveFit.Remove(block.Key);
+            element = created;
+        }
+        LayoutNativeElement(element, block.ScreenBox, monitor, settings, ProfileFontFamily, FreeSpaceRight(block, monitor));
+    }
+
+    private double FreeSpaceRight(LiveDisplayBlock block, MonitorArea monitor)
+    {
+        var box = block.ScreenBox;
+        var free = (double)(monitor.Bounds.Right - box.Right);
+        foreach (var other in _liveBlocksForLayout)
+        {
+            if (ReferenceEquals(other, block)) continue;
+            var o = other.ScreenBox;
+            var overlap = Math.Min(o.Bottom, box.Bottom) - Math.Max(o.Y, box.Y);
+            if (overlap < box.Height * 0.3 || o.X < box.Right - 2) continue;
+            free = Math.Min(free, o.X - box.Right);
+        }
+        return Math.Max(0, free);
+    }
+
+    private IReadOnlyList<LiveDisplayBlock> _liveBlocksForLayout = [];
+
+    private void ReplaceLiveElement(string key, Border replacement)
+    {
+        var index = _liveElements.TryGetValue(key, out var old) ? RootCanvas.Children.IndexOf(old) : -1;
+        if (old is not null) RootCanvas.Children.Remove(old);
+        if (index >= 0 && index <= RootCanvas.Children.Count) RootCanvas.Children.Insert(index, replacement);
+        else RootCanvas.Children.Add(replacement);
+        _liveElements[key] = replacement;
+        _liveCovers.Remove(key);
+        _liveTextures.Remove(key);
+        _liveColors.Remove(key);
+        _liveFit.Remove(key);
+    }
+
+    private void RemoveLiveElement(string key)
+    {
+        if (_liveElements.Remove(key, out var element)) RootCanvas.Children.Remove(element);
+        _liveTextures.Remove(key);
+        _liveColors.Remove(key);
+        _liveFit.Remove(key);
+        _liveCovers.Remove(key);
     }
 
     /// <summary>Pasek napisów na dole okna gry (tryb Subtitle) — pokazuje najnowszy tekst.</summary>
@@ -841,6 +574,7 @@ public partial class OverlayWindow : Window
         _liveTextures.Clear();
         _liveColors.Clear();
         _liveFit.Clear();
+        _liveCovers.Clear();
         HideIfEmpty();
     }
 
@@ -853,6 +587,7 @@ public partial class OverlayWindow : Window
         _liveTextures.Clear();
         _liveColors.Clear();
         _liveFit.Clear();
+        _liveCovers.Clear();
         _manualElements.Clear();
         _subtitleElement = null;
         if (!preserveUserHidden)

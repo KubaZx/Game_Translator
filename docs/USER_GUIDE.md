@@ -114,7 +114,12 @@ nie są nadpisywane; w Cache-only i przy błędzie dostawcy zostaje stary wynik.
 ## Tłumaczenie ręczne (podstawowy tryb)
 
 1. Uruchom grę w trybie **okienkowym** lub **borderless fullscreen** (pełny ekran
-   „wyłączny” nie jest obsługiwany).
+   „wyłączny” nie jest obsługiwany). Zalecane: **okno bez ramki** (w ustawieniach grafiki gry
+   zwykle „Borderless”, „Windowed fullscreen” albo „Pełny ekran w oknie”). Na wyłącznym pełnym
+   ekranie gra często nie daje się przechwycić jako okno — aplikacja przechodzi wtedy na zrzut
+   ekranu (w kadrze mogą się znaleźć inne okna), a nakładka może migać albo chować się pod grą.
+   Gdy tak się stanie, w nakładce pojawi się komunikat „⚠ Pełny ekran utrudnia nakładkę —
+   przełącz na okno bez ramki”.
 2. Wciśnij **Ctrl+Shift+T** — ekran przyciemni się; zaznacz myszą fragment z tekstem
    (tooltip, dialog). **Esc** albo ponowne **Ctrl+Shift+T** anuluje zaznaczanie.
 3. Tłumaczenie pojawi się w panelu obok zaznaczenia (albo w nakładce — do wyboru
@@ -205,6 +210,17 @@ w oknie aplikacji.
 
 - Do opisów i menu wybierz **Przy oryginale**. Opcja **Na oryginale (zakrywa)**
   umieszcza tłumaczenie nad tekstem gry; **Pod oryginałem** pokazuje je poniżej.
+- **Na oryginale (zakrywa)** działa jak spolszczenie: z obrazu gry znikają same litery
+  oryginału (ich piksele są wypełniane kolorami tła spod spodu, reszta obrazu zostaje żywa),
+  a polski tekst dostaje kolor, kontur, cień, wysokość liter i linię bazową zmierzone
+  z napisu gry. Ikony klawiszy przed napisem (np. „X Hint”) i ikonka za nim zostają.
+  Gdy tło pod napisem się rusza, łatka staje się miękka (rozmyta), dopóki obraz nie stanie.
+  Tłumaczenie identyczne z oryginałem (nazwy, „OK”, logo) nie jest rysowane — widać grę.
+- **Krój czcionki → Jak w grze (krój z profilu)** (domyślnie) bierze krój z profilu gry —
+  profil Escape Academy używa dołączonego kroju Lexend Deca (licencja OFL), gruby lub cienki
+  wariant jest dobierany do grubości liter w grze. Bez profilu jest to Segoe UI. Wybór innej
+  czcionki z listy ma pierwszeństwo przed profilem. Ustawienia z poprzednich wersji
+  z domyślnym Segoe UI przechodzą raz na „Jak w grze”.
 - Do dialogów możesz wybrać **Napisy na dole**. Jest to wspólny pasek świeżych
   tekstów rozpoznanych przez live, bez automatycznego rozpoznawania rodzaju wypowiedzi.
 - Po ruchu kamery daj obrazowi na chwilę się zatrzymać. Silny ruch nadal może
@@ -388,6 +404,8 @@ Skróty można zmienić w pliku `settings.json` w folderze danych (`translateHot
 | „Brak pakietu językowego OCR” | doinstaluj język w ustawieniach Windows (patrz wyżej) |
 | OCR nie widzi tekstu | zaznacz większy fragment; zwiększ rozmiar czcionki w grze; unikaj mocno ozdobnych fontów |
 | Czarny podgląd okna | gra blokuje przechwytywanie okna — przełącz na borderless; tryb regionu (Ctrl+Shift+T) zwykle działa mimo to |
+| „⚠ Pełny ekran utrudnia nakładkę” | gra działa na wyłącznym pełnym ekranie — przełącz ją w ustawieniach grafiki na okno bez ramki (borderless) |
+| Polski napis ma inny krój niż gra | wybierz **Krój czcionki → Jak w grze**; gra bez profilu z krojem dostaje Segoe UI |
 | „DeepL odrzucił klucz” | sprawdź klucz (darmowy kończy się na `:fx`) i czy plan API jest aktywny |
 | „Azure Translator odrzucił klucz” | sprawdź klucz i **region** zasobu; dla zasobu globalnego zostaw region pusty |
 | „Cloud Translation API nie jest włączone” | włącz Cloud Translation API w projekcie Google, do którego należy klucz |

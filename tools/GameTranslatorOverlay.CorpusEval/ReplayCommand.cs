@@ -50,6 +50,9 @@ internal sealed class ReplayStats
     public bool PrefilledCache { get; init; }
     public int BlockCount { get; set; }
     public long Characters { get; set; }
+    public int BlocksRejected { get; set; }
+    public long CharactersRejected { get; set; }
+    public long OccurrencesRejected { get; set; }
     public int BlocksLocal { get; set; }
     public long CharactersLocal { get; set; }
     public int BlocksPartlyLocal { get; set; }
@@ -93,7 +96,8 @@ internal static class ReplayCommand
 
         var corpus = CorpusJsonl.ReadFile(corpusPath);
         var watch = Stopwatch.StartNew();
-        var snapper = new CorpusSnapper(CorpusIndex.Build(corpus));
+        var snapper = new CorpusSnapper(CorpusIndex.Build(corpus),
+            CorpusFeatures.Off(args) ? CorpusFeatures.Disabled(CorpusSnapOptions.Default) : CorpusSnapOptions.Default);
         var indexMs = watch.Elapsed.TotalMilliseconds;
         var blocks = ReadBlocks(cachePath);
         var ea = blocks.Where(static b => EvalData.EaDays.Contains(b.Day)).ToList();
@@ -184,6 +188,14 @@ internal static class ReplayCommand
             stats.BlockCount++;
             stats.Characters += letters;
             stats.Occurrences += Math.Max(1, block.UseCount);
+
+            if (pipeline.IsCorpusNoise(block.Text) && !pipeline.IsExactCorpusText(block.Text))
+            {
+                stats.BlocksRejected++;
+                stats.CharactersRejected += letters;
+                stats.OccurrencesRejected += Math.Max(1, block.UseCount);
+                continue;
+            }
 
             var started = Stopwatch.GetTimestamp();
             var local = pipeline.TranslateLocalAsync([block.Text], Source, Target).GetAwaiter().GetResult();
@@ -277,12 +289,12 @@ internal static class ReplayCommand
         builder.AppendLine();
         builder.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Korpus: {entries} wpisów, {texts} unikalnych tekstów. Każdy blok raz, w kolejności created_at, ścieżką live (TranslateLocalAsync, potem TranslateAsync z wynikiem próby). Liczby bez tekstów gry."));
         builder.AppendLine();
-        builder.AppendLine("| Bloki | Wariant | Bloki lokalnie | Znaki lokalnie | Wystąpienia lokalnie (waga use_count) | Zapytania do dostawcy | Teksty / znaki do dostawcy | Bloki przyciągnięte (zmieniona treść / tylko wielkość liter) | Układ wierszy zachowany | Próba lokalna p50/p95 ms |");
-        builder.AppendLine("|---|---|---|---|---|---|---|---|---|---|");
+        builder.AppendLine("| Bloki | Wariant | Bloki lokalnie | Znaki lokalnie | Wystąpienia lokalnie (waga use_count) | Zapytania do dostawcy | Teksty / znaki do dostawcy | Bloki przyciągnięte (zmieniona treść / tylko wielkość liter) | Odrzucone jako szum (bloki / znaki / wystąpienia) | Układ wierszy zachowany | Próba lokalna p50/p95 ms |");
+        builder.AppendLine("|---|---|---|---|---|---|---|---|---|---|---|");
         foreach (var r in results)
         {
             builder.AppendLine(string.Create(CultureInfo.InvariantCulture,
-                $"| {r.Blocks} | {r.Variant} | {r.BlocksLocal}/{r.BlockCount} ({r.BlocksLocalPct:0.0}%) | {r.CharactersLocal}/{r.Characters} ({r.CharactersLocalPct:0.0}%) | {r.OccurrencesLocal}/{r.Occurrences} ({r.OccurrencesLocalPct:0.0}%) | {r.ProviderRequests} | {r.ProviderTexts} / {r.ProviderCharacters} | {r.BlocksSnapped} ({r.BlocksSnappedChangedText} / {r.BlocksSnappedOtherCase}) | {r.BlocksLayoutKept}/{r.BlocksTranslated} ({r.LayoutKeptPct:0.0}%) | {r.LocalProbeP50Ms:0.###}/{r.LocalProbeP95Ms:0.###} |"));
+                $"| {r.Blocks} | {r.Variant} | {r.BlocksLocal}/{r.BlockCount} ({r.BlocksLocalPct:0.0}%) | {r.CharactersLocal}/{r.Characters} ({r.CharactersLocalPct:0.0}%) | {r.OccurrencesLocal}/{r.Occurrences} ({r.OccurrencesLocalPct:0.0}%) | {r.ProviderRequests} | {r.ProviderTexts} / {r.ProviderCharacters} | {r.BlocksSnapped} ({r.BlocksSnappedChangedText} / {r.BlocksSnappedOtherCase}) | {r.BlocksRejected} / {r.CharactersRejected} / {r.OccurrencesRejected} | {r.BlocksLayoutKept}/{r.BlocksTranslated} ({r.LayoutKeptPct:0.0}%) | {r.LocalProbeP50Ms:0.###}/{r.LocalProbeP95Ms:0.###} |"));
         }
         builder.AppendLine();
         builder.AppendLine("JunkFilter na tekstach korpusu: " + JsonSerializer.Serialize(junk));

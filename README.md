@@ -130,7 +130,7 @@ dotnet run --project src/GameTranslatorOverlay.App
 | `src/GameTranslatorOverlay.Infrastructure` | dostawcy API, SQLite, DPAPI |
 | `src/GameTranslatorOverlay.App` | WPF, przechwytywanie, OCR, nakładka |
 | `tests/` | testy xUnit |
-| `tools/` | LiveDiag, SceneReplay, OcrLab, SmokeTest, ProviderEval |
+| `tools/` | LiveDiag, SceneReplay, OcrLab, SmokeTest, ProviderEval, CorpusTool, CorpusEval, OverlayPreview |
 | `benchmarks/` | benchmarki BenchmarkDotNet (poza `dotnet test`) |
 | `eval/` | korpus EN→PL do ProviderEval |
 | `profiles/`, `glossaries/` | profile gier i słowniki |

@@ -25,7 +25,25 @@ CorpusEval bench --corpus … --ocr … --cache KOPIA/cache.db --out LICZBY --fu
 #    B — jak B0 na bazie wypełnionej wcześniej przez `CorpusTool translate --provider mock`.
 #    Każdy wariant na dniach EA i na sesji PoE2 (kontrola: korpus EA przy innej grze).
 CorpusEval replay --corpus … --cache KOPIA/cache.db --prefilled PRYWATNY/b/cache.db --work PRYWATNY/robocze --out LICZBY
+
+# 5. Odczyty jednej sesji gracza (wpisy cache od --since, czyli to, co poszło do dostawcy) przez
+#    bramkę live (ShouldTranslateLive) i TranslationPipeline (Mock): przed (dopasowanie jak dotąd)
+#    i po (etykiety z pomyłkami OCR, dialog pisany literami, odrzucanie szumu). Cache = kopia bazy
+#    bez tych wpisów (VACUUM INTO + DELETE), więc tłumaczenia z wyprzedzeniem działają jak w sesji.
+CorpusEval session --corpus … --cache KOPIA_SESJI/cache.db --since 2026-10-06T06:28 --work PRYWATNY/sesja --out LICZBY
+
+# 6. Progi dialogu pisanego literami: ucięte odczyty OCR linii dialogu, ucięte linie korpusu
+#    i bloki PoE2 (całe i ucięte) przy różnych minimalnych długościach, liczbie słów, odsetku
+#    pomyłek i marginesie; --only L,W,e,m zapisuje błędne przyciągnięcia do --private.
+CorpusEval prefixes --corpus … --ocr … --cache KOPIA/cache.db --out LICZBY --private PRYWATNE
+
+# 7. Dialog pisany literami przez pipeline: każda linia dopisywana co 3 znaki albo w przerwach po
+#    interpunkcji — ile zapytań po pierwszym trafieniu, ile zmian klucza nakładki i tekstu.
+CorpusEval typing --corpus … --ocr … --out LICZBY --private PRYWATNE
 ```
+
+`--features off` (evaluate, bench, replay) wyłącza etykiety, prefiksy dialogu i odrzucanie szumu —
+stan dopasowania sprzed rundy 2026-10-06 (4), do porównań przed/po na tych samych danych.
 
 `evaluate` liczy klucz prawdy przy ocenie z pola `truth` bieżącym `CorpusText.MatchKey`, a nie
 bierze go z próbki (`truthKey` zapisany przy renderze jest nieaktualny po zmianie klucza, np. po

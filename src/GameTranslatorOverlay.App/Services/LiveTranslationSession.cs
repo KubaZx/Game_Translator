@@ -13,7 +13,12 @@ namespace GameTranslatorOverlay.App.Services;
 
 public sealed record LiveDisplayBlock(
     string Key, RectPx ScreenBox, string TranslatedText, int LineHeight = 0, int ColorRgb = -1,
-    int BackgroundRgb = -1, int OutlineRgb = -1, BackgroundTexture? Texture = null);
+    int BackgroundRgb = -1, int OutlineRgb = -1, BackgroundTexture? Texture = null)
+{
+    public GlyphCover? Cover { get; init; }
+
+    public bool SameAsSource { get; init; }
+}
 
 /// <summary>
 /// Lokalne metryki jednego zakonczonego OCR, bez tekstu i pikseli. CaptureToUpdateMs
@@ -31,6 +36,8 @@ public sealed record LiveFrameDiagnostics(
     // It includes OCR setup/continuation scheduling, not only the native engine.
     public double? OcrOperationMs { get; init; }
     public int OcrSceneChecks { get; init; }
+    public double GlyphCoverMs { get; init; }
+    public double GlyphCoverWaitMs { get; init; }
     public double OcrSceneCheckMs { get; init; }
     public int TranslationSceneChecks { get; init; }
     public double TranslationSceneCheckMs { get; init; }
@@ -142,6 +149,16 @@ public sealed class LiveSessionOptions
     /// do niego własne komunikaty i odrzuca ich odczyty OCR (filtr anty-sprzężeniowy).
     /// </summary>
     public OverlayNoticeEcho? NoticeEcho { get; init; }
+
+    public Func<bool> BuildGlyphCovers { get; init; } = static () => true;
+
+    public Func<bool> HoldTypingPrefixes { get; init; } = static () => true;
+
+    public Func<bool> IdentityEchoSafe { get; init; } = static () => true;
+
+    public TimeSpan TypingPrefixSettleTime { get; init; } = TimeSpan.FromMilliseconds(900);
+
+    public TimeSpan TypingPrefixHoldLimit { get; init; } = TimeSpan.FromSeconds(8);
 }
 
 /// <summary>
@@ -185,6 +202,8 @@ public sealed class LiveTranslationSession(
     private readonly LiveReadingStabilizer _readings = new();
     private readonly LiveSubtitleContent _subtitleContent = new();
     private bool _readingRetryRequested;
+    private sealed record HeldPrefix(int Letters, TimeSpan LettersSince, TimeSpan FirstSeen);
+    private readonly Dictionary<string, HeldPrefix> _heldPrefixes = new(StringComparer.Ordinal);
 
     private const double JitterSimilarityThreshold = 0.5;
     private const double JitterOverlapFraction = 0.5;
@@ -303,6 +322,22 @@ public sealed class LiveTranslationSession(
             Notice = AcceptNotice(OverlayNotices.LiveStopped(), clock.Elapsed),
         });
 
+    private void EmitScreenFallbackWarning(string statusLine, Stopwatch clock, CancellationToken cancellationToken)
+    {
+        var window = ScreenCapture.GetWindowBounds(gameWindowHandle);
+        var fullscreen = !window.IsEmpty && OverlayNotices.CoversWholeMonitor(window, Displays.FromRect(window).Bounds);
+        if (!fullscreen)
+        {
+            Emit(new LiveUpdate(statusLine), cancellationToken);
+            return;
+        }
+        logger.LogWarning("Gra zajmuje cały monitor i nie wspiera PrintWindow — zalecany tryb okna bez ramki");
+        Emit(new LiveUpdate("⚠ Przełącz grę na okno bez ramki — pełny ekran utrudnia nakładkę. " + statusLine, WindowBounds: window)
+        {
+            Notice = AcceptNotice(OverlayNotices.ExclusiveFullscreen(), clock.Elapsed),
+        }, cancellationToken);
+    }
+
     private void Emit(LiveUpdate update, CancellationToken cancellationToken)
     {
         // Po zatrzymaniu sesji żadna aktualizacja nie może już malować po nakładce.
@@ -320,8 +355,87 @@ public sealed class LiveTranslationSession(
                 kv.Value.ColorRgb,
                 kv.Value.BackgroundRgb,
                 kv.Value.OutlineRgb,
-                kv.Value.Texture))
+                kv.Value.Texture)
+            {
+                Cover = kv.Value.Cover,
+                SameAsSource = IsIdentity(kv.Value),
+            })
             .ToList();
+
+    private bool HoldsTypingPrefix(KeyedTextBlock candidate)
+    {
+        if (!options.HoldTypingPrefixes() || !orchestrator.IsCorpusPrefix(candidate.NormalizedText))
+        {
+            _heldPrefixes.Remove(candidate.Key);
+            return false;
+        }
+        var letters = candidate.NormalizedText.Count(char.IsLetterOrDigit);
+        if (_heldPrefixes.TryGetValue(candidate.Key, out var held))
+        {
+            var settled = letters <= held.Letters && _cycleTime - held.LettersSince >= options.TypingPrefixSettleTime;
+            if (settled || _cycleTime - held.FirstSeen >= options.TypingPrefixHoldLimit)
+            {
+                _heldPrefixes.Remove(candidate.Key);
+                return false;
+            }
+            if (letters > held.Letters) _heldPrefixes[candidate.Key] = held with { Letters = letters, LettersSince = _cycleTime };
+        }
+        else
+        {
+            _heldPrefixes[candidate.Key] = new HeldPrefix(letters, _cycleTime, _cycleTime);
+        }
+        _readingRetryRequested = true;
+        _pendingDirtyRegion = _pendingDirtyRegion?.Union(candidate.Block.Box) ?? candidate.Block.Box;
+        return true;
+    }
+
+    private static bool IsIdentity(LiveOverlayBlock block) =>
+        block.SourceText.Length > 0
+        && string.Equals(block.NormalizedTranslation, block.SourceText, StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<GlyphCover?> BuildCovers(
+        OcrBitmap frame, IReadOnlyList<KeyedTextBlock> keyed, RectPx ocrRegion, double scaleBack,
+        IReadOnlyList<(RectPx Box, GlyphCover? Cover)?> previous)
+    {
+        var frameRect = new RectPx(0, 0, frame.Width, frame.Height);
+        var covers = new GlyphCover?[keyed.Count];
+        var parallel = new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 4) };
+        Parallel.For(0, keyed.Count, parallel, i =>
+        {
+            try
+            {
+                var block = keyed[i].Block;
+                var sampleBox = GlyphCoverBuilder.ToSampleBox(block.Box, ocrRegion, scaleBack);
+                var sampleLines = block.Lines.Select(l => GlyphCoverBuilder.ToSampleBox(l.Box, ocrRegion, scaleBack)).ToList();
+                var region = GlyphCoverBuilder.SignatureRegion(sampleBox, sampleLines, frameRect);
+                var signature = GlyphCoverBuilder.Signature(frame, region);
+                var soft = false;
+                if (previous[i] is { Cover: { } old } prior)
+                {
+                    var sameSize = Math.Abs(old.PatchWidth - region.Width * scaleBack) <= 3 * scaleBack
+                        && Math.Abs(old.PatchHeight - region.Height * scaleBack) <= 3 * scaleBack;
+                    var sameAnchor = Math.Abs(prior.Box.X - block.Box.X) <= 2 && Math.Abs(prior.Box.Y - block.Box.Y) <= 2
+                        && Math.Abs(prior.Box.Right - block.Box.Right) <= 2 && Math.Abs(prior.Box.Bottom - block.Box.Bottom) <= 2;
+                    var difference = GlyphCover.SignatureDifference(old.Signature, signature);
+                    var settled = sameSize && sameAnchor && difference < GlyphCoverBuilder.StaticSignatureTolerance;
+                    if (settled && !old.Soft)
+                    {
+                        covers[i] = old;
+                        return;
+                    }
+                    soft = !settled && sameSize && sameAnchor && difference < 40;
+                }
+                covers[i] = GlyphCoverBuilder.BuildForBlock(frame, block, ocrRegion, scaleBack, soft) is { } built
+                    ? built with { Signature = signature, Anchor = block.Box }
+                    : null;
+            }
+            catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or InvalidOperationException or OverflowException)
+            {
+                covers[i] = null;
+            }
+        });
+        return covers;
+    }
 
     private async Task LoopAsync(CancellationToken cancellationToken)
     {
@@ -365,6 +479,7 @@ public sealed class LiveTranslationSession(
                         _sceneValidity.Reset();
                         _ghosts.Clear();
                         _readings.Clear();
+                        _heldPrefixes.Clear();
                         _subtitleContent.Clear();
                         _readingRetryRequested = false;
                         _invalidatedTranslations.Clear();
@@ -490,9 +605,9 @@ public sealed class LiveTranslationSession(
             {
                 _warnedAboutScreenFallback = true;
                 logger.LogWarning("Okno gry nie wspiera PrintWindow — tryb live używa zrzutu ekranu (możliwe obce okna w kadrze)");
-                Emit(new LiveUpdate(
+                EmitScreenFallbackWarning(
                     "⚠ To okno wymaga przechwytywania ekranu: fragmenty innych okien nachodzących na grę mogą być tłumaczone. " +
-                    "Zamknij poufne okna znad gry albo zatrzymaj tryb live."), cancellationToken);
+                    "Zamknij poufne okna znad gry albo zatrzymaj tryb live.", clock, cancellationToken);
             }
 
             bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
@@ -794,6 +909,7 @@ public sealed class LiveTranslationSession(
         _ghosts.Clear();
         _absenceSuspects.Clear();
         _readings.Clear();
+        _heldPrefixes.Clear();
         _readingRetryRequested = false;
         _whiffRetries = 0;
         _whiffRetryRequested = false;
@@ -1007,9 +1123,8 @@ public sealed class LiveTranslationSession(
             {
                 _warnedAboutScreenFallback = true;
                 logger.LogWarning("Kontrola sceny wymaga przechwytywania ekranu");
-                Emit(new LiveUpdate(
-                    "⚠ To okno wymaga przechwytywania ekranu: inne okna nad grą mogą znaleźć się w kadrze."),
-                    cancellationToken);
+                EmitScreenFallbackWarning(
+                    "⚠ To okno wymaga przechwytywania ekranu: inne okna nad grą mogą znaleźć się w kadrze.", clock, cancellationToken);
             }
             var frameRect = new RectPx(0, 0, bitmap.Width, bitmap.Height);
             var analysis = ObserveCapturedFrame(bitmap, frameRect, usedScreenFallback, sampledAt, cancellationToken);
@@ -1175,9 +1290,9 @@ public sealed class LiveTranslationSession(
         if (options.NoticeEcho is { } lineEcho) lines = lineEcho.RemoveEchoLines(lines);
 
         var blocks = TextBlockGrouper.Group(lines)
-            .Where(block => JunkFilter.IsMeaningful(block.Text) || orchestrator.IsExactCorpusText(block.Text))
+            .Where(block => orchestrator.ShouldTranslateLive(block.Text))
             .ToList();
-        var keyed = LiveBlockKeyer.AssignKeys(blocks);
+        var keyed = LiveBlockKeyer.AssignKeys(blocks, orchestrator.CorpusIdentity);
 
         // Diagnostyka whiffów OCR (tylko narzędzia dev): pełny przebieg nie widzi NIC,
         // choć nakładka ma bloki — zapisujemy klatkę, żeby odróżnić zepsuty capture
@@ -1207,7 +1322,9 @@ public sealed class LiveTranslationSession(
         // zawiedzie): blok, którego tekst jest naszym własnym wyświetlanym tłumaczeniem
         // albo komunikatem nakładki („⚠ Brak klucza DeepL”), nie wraca do tłumaczenia —
         // komunikat wysłany do dostawcy kosztowałby znaki i wrócił jako „napis z gry”.
+        var identityEchoSafe = options.IdentityEchoSafe();
         var displayedTranslations = _displayed.Values
+            .Where(d => !identityEchoSafe || !IsIdentity(d))
             .Select(static d => d.NormalizedTranslation)
             .Concat(_invalidatedTranslations)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1235,10 +1352,13 @@ public sealed class LiveTranslationSession(
         var replacedKeys = new HashSet<string>(StringComparer.Ordinal);
         var confirmedBoxes = new Dictionary<string, RectPx>(StringComparer.Ordinal);
         var restoredSubtitleKeys = new List<string>();
+        foreach (var stale in _heldPrefixes.Where(h => _cycleTime - h.Value.FirstSeen > options.TypingPrefixHoldLimit * 2).Select(h => h.Key).ToList())
+            _heldPrefixes.Remove(stale);
         foreach (var candidate in keyed)
         {
             if (_displayed.ContainsKey(candidate.Key))
             {
+                _heldPrefixes.Remove(candidate.Key);
                 observedReadingKeys.Add(candidate.Key);
                 _readings.Reset(candidate.Key);
                 accepted.Add(candidate);
@@ -1248,6 +1368,7 @@ public sealed class LiveTranslationSession(
             var match = FindOverlapping(candidate, _displayed, reused);
             if (match is null)
             {
+                if (HoldsTypingPrefix(candidate)) continue;
                 // Miejsce po duchu: podobny albo brudniejszy odczyt wskrzesza ducha
                 // (jego tłumaczenie i styl), czysta nowa treść dziedziczy tylko styl.
                 var ghost = FindOverlapping(candidate, _ghosts.ToDictionary(g => g.Key, g => g.Value.Block), reused);
@@ -1289,6 +1410,7 @@ public sealed class LiveTranslationSession(
             if (decision == LiveReadingDecision.Replace)
             {
                 if (!LiveReadingStabilizer.IsVariantOf(old.SourceText, candidate.NormalizedText)) replacedKeys.Add(oldKey);
+                if (HoldsTypingPrefix(candidate)) continue;
                 inheritFrom[candidate.Key] = old;
                 accepted.Add(candidate);
                 continue;
@@ -1359,6 +1481,23 @@ public sealed class LiveTranslationSession(
                 colors.TextRgb, colors.BackgroundRgb));
         }
 
+        Task<IReadOnlyList<GlyphCover?>>? coverTask = null;
+        var coverWatch = Stopwatch.StartNew();
+        double coverBuildMs = 0;
+        if (keyed.Count > 0 && options.BuildGlyphCovers())
+        {
+            var previousCovers = keyed
+                .Select(k => _displayed.TryGetValue(k.Key, out var p) ? ((RectPx, GlyphCover?)?)(p.WindowRelativeBox, p.Cover) : null)
+                .ToList();
+            var coverKeyed = keyed.ToList();
+            coverTask = Task.Run(() =>
+            {
+                var result = BuildCovers(frame, coverKeyed, ocrRegion, scaleBack, previousCovers);
+                coverBuildMs = coverWatch.Elapsed.TotalMilliseconds;
+                return result;
+            }, CancellationToken.None);
+        }
+
         var translateWatch = Stopwatch.StartNew();
         var translationChecksBefore = _diagnosticSceneChecks;
         var translationCheckMsBefore = _diagnosticSceneCheckMs;
@@ -1418,6 +1557,21 @@ public sealed class LiveTranslationSession(
             return;
         }
         var translateMs = translateWatch.ElapsedMilliseconds;
+        IReadOnlyList<GlyphCover?>? covers = null;
+        double coverWaitMs = 0;
+        if (coverTask is not null)
+        {
+            var waitWatch = Stopwatch.StartNew();
+            try
+            {
+                covers = await coverTask.ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogDebug(ex, "Łatka napisu nie powstała");
+            }
+            coverWaitMs = waitWatch.Elapsed.TotalMilliseconds;
+        }
 
         if (cancellationToken.IsCancellationRequested) return;
         if (!_sceneValidity.IsCurrent(generation))
@@ -1456,6 +1610,7 @@ public sealed class LiveTranslationSession(
             var sampled = sampledStyles[i];
             var (colorRgb, backgroundRgb, outlineRgb) = sampled;
             var texture = sampled.Texture;
+            var cover = covers is not null && i < covers.Count ? covers[i] : null;
             var pendingBackgroundRgb = -1;
 
             var key = keyed[i].Key;
@@ -1507,6 +1662,15 @@ public sealed class LiveTranslationSession(
                 {
                     texture = previous.Texture;
                 }
+
+                if (cover is null && covers is not null && previous.Cover is not null && _displayed.ContainsKey(key))
+                {
+                    cover = previous.Cover;
+                }
+            }
+            if (cover is not null && cover.Anchor != box)
+            {
+                cover = cover.AnchorTo(box);
             }
 
             next[key] = new LiveOverlayBlock(
@@ -1520,7 +1684,8 @@ public sealed class LiveTranslationSession(
                 Texture: texture,
                 SourceText: keyed[i].NormalizedText,
                 PendingBackgroundRgb: pendingBackgroundRgb,
-                Probe: ProbeReference(frame, keyed[i].Block.Box, ocrRegion, scaleBack, sampled));
+                Probe: ProbeReference(frame, keyed[i].Block.Box, ocrRegion, scaleBack, sampled),
+                Cover: cover);
             // Reference the source box, not the presentation box stabilized above.
             // A rescaled OCR image cannot prove equality with future native pixels.
             // A small complete margin also notices adjacent glyphs added to a label.
@@ -1673,6 +1838,8 @@ public sealed class LiveTranslationSession(
             {
                 OcrOperationMs = ocrOperationMs,
                 OcrSceneChecks = ocrSceneChecks,
+                GlyphCoverMs = coverBuildMs,
+                GlyphCoverWaitMs = coverWaitMs,
                 OcrSceneCheckMs = ocrSceneCheckMs,
                 TranslationSceneChecks = _diagnosticSceneChecks - translationChecksBefore,
                 TranslationSceneCheckMs = _diagnosticSceneCheckMs - translationCheckMsBefore,

@@ -6,17 +6,24 @@ using GameTranslatorOverlay.Core.Text;
 
 namespace GameTranslatorOverlay.CorpusEval;
 
-internal sealed record SweepConfig(double Fuzzy, double Margin, int MinLength, int MinExactLength = 0)
+internal sealed record SweepConfig(double Fuzzy, double Margin, int MinLength, int MinExactLength = 0, bool Features = true)
 {
-    public CorpusSnapOptions Options => new()
+    public CorpusSnapOptions Options
     {
-        MinExactLength = MinExactLength,
-        FuzzyThreshold = Fuzzy,
-        FragmentThreshold = Fuzzy,
-        Margin = Margin,
-        MinFuzzyLength = MinLength,
-        MinFragmentLength = Math.Max(15, MinLength),
-    };
+        get
+        {
+            var options = new CorpusSnapOptions
+            {
+                MinExactLength = MinExactLength,
+                FuzzyThreshold = Fuzzy,
+                FragmentThreshold = Fuzzy,
+                Margin = Margin,
+                MinFuzzyLength = MinLength,
+                MinFragmentLength = Math.Max(15, MinLength),
+            };
+            return Features ? options : CorpusFeatures.Disabled(options);
+        }
+    }
 
     public string Label => string.Create(CultureInfo.InvariantCulture,
         $"T={Fuzzy:0.00} m={Margin:0.00} L={MinLength}{(MinExactLength > 0 ? $" E={MinExactLength}" : "")}");
@@ -91,16 +98,17 @@ internal static class EvaluateCommand
         var eaPoeDay = cache.Where(static b => b.IsEaOnPoeDay).ToList();
         Console.WriteLine($"Korpus: {corpus.Count} wpisów, {index.TextCount} unikalnych tekstów; próbki OCR: {samples.Count}; bloki EA: {ea.Count} (w tym 09-04: {ea0904.Count}); bloki PoE2 (sesja do 12:00 UTC): {poe.Count}; bloki EA z 08-06 po 12:00: {eaPoeDay.Count}");
 
+        var features = !CorpusFeatures.Off(args);
         var configs = new List<SweepConfig>();
         foreach (var fuzzy in new[] { 0.75, 0.80, 0.85, 0.88, 0.90, 0.93, 0.95 })
             foreach (var margin in new[] { 0.03, 0.05, 0.08, 0.12 })
                 foreach (var minLength in new[] { 8, 10, 12, 16 })
                     foreach (var minExact in new[] { 0, 8, 10, 12 })
-                        configs.Add(new SweepConfig(fuzzy, margin, minLength, minExact));
+                        configs.Add(new SweepConfig(fuzzy, margin, minLength, minExact, features));
         if (args.Optional("only") is { } only)
         {
             var parts = only.Split(',').Select(static p => double.Parse(p, CultureInfo.InvariantCulture)).ToArray();
-            configs = [new SweepConfig(parts[0], parts[1], (int)parts[2], parts.Length > 3 ? (int)parts[3] : 0)];
+            configs = [new SweepConfig(parts[0], parts[1], (int)parts[2], parts.Length > 3 ? (int)parts[3] : 0, features)];
         }
 
         var results = new List<SweepResult>();

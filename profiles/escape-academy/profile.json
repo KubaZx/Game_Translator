@@ -8,6 +8,9 @@
   "windowTitles": ["Escape Academy"],
   "sourceLanguage": "en",
   "online": false,
+  "overlay": {
+    "fontFamily": "Lexend Deca"
+  },
   "corpus": {
     "format": "unity-textasset",
     "container": "Escape Academy_Data/data.unity3d",

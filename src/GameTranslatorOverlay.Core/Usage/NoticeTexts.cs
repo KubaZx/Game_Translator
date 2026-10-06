@@ -20,6 +20,7 @@ public static class NoticeTexts
     public const string LiveStopped = "■ Tłumaczenie na żywo zatrzymane";
     public const string NoTextFound = "ℹ Nie rozpoznano tekstu w zaznaczeniu";
     public const string TranslationFailed = "⚠ Tłumaczenie nie powiodło się";
+    public const string ExclusiveFullscreen = "⚠ Pełny ekran utrudnia nakładkę — przełącz na okno bez ramki";
 
     /// <summary>Komunikat dla rodzaju błędu dostawcy (pełny opis zostaje w oknie aplikacji).</summary>
     public static string For(TranslationFailureKind kind, string? providerName)
@@ -132,6 +133,14 @@ public static class OverlayNotices
 
     public static OverlayNotice TranslationFailed() =>
         new("manual:failed", NoticeSeverity.Warning, NoticeTexts.TranslationFailed, WarningDuration);
+
+    public static OverlayNotice ExclusiveFullscreen() =>
+        new("capture:fullscreen", NoticeSeverity.Warning, NoticeTexts.ExclusiveFullscreen, TimeSpan.FromSeconds(8));
+
+    public static bool CoversWholeMonitor(GameTranslatorOverlay.Core.Ocr.RectPx window, GameTranslatorOverlay.Core.Ocr.RectPx monitor) =>
+        !window.IsEmpty && !monitor.IsEmpty
+        && window.X <= monitor.X + 2 && window.Y <= monitor.Y + 2
+        && window.Right >= monitor.Right - 2 && window.Bottom >= monitor.Bottom - 2;
 
     /// <summary>
     /// Komunikat dla pierwszego problemu w wynikach (błąd dostawcy, limit sesji, pusty

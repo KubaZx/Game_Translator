@@ -28,6 +28,19 @@ public sealed record CorpusSnapOptions
     public bool AllowFragments { get; init; } = true;
     public bool AllowPartialLines { get; init; } = true;
     public bool AllowAssembly { get; init; } = true;
+    public bool AllowLabels { get; init; } = true;
+    public int MinLabelLength { get; init; } = 3;
+    public double LabelMargin { get; init; } = 0.5;
+    public bool AllowPrefixes { get; init; } = true;
+    public int MinPrefixLetters { get; init; } = 12;
+    public int MinPrefixWords { get; init; } = 3;
+    public double PrefixErrorRate { get; init; } = 0.10;
+    public double PrefixMargin { get; init; } = 1.0;
+    public bool RejectNoise { get; init; } = true;
+    public double NoiseKnownShare { get; init; } = 0.5;
+    public double NoiseQuality { get; init; } = 0.75;
+    public int NoiseShortLetters { get; init; } = 16;
+    public double NoiseSimilarity { get; init; } = 0.7;
 
     public static IReadOnlySet<string> DefaultGlyphTokens { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -42,6 +55,8 @@ public sealed record CorpusMatch(CorpusEntry Entry, double Score, CorpusMatchKin
 {
     public int SameTextEntries { get; init; } = 1;
     public string CorpusKey { get; init; } = string.Empty;
+    public bool IsLabel { get; init; }
+    public bool IsPrefix { get; init; }
     internal int TextId { get; init; } = -1;
 }
 
@@ -110,7 +125,104 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
     {
         if (Index.IsEmpty) return null;
         var key = CorpusText.MatchKey(text);
-        return SnapLine(key, Options.AllowFragments);
+        return SnapLine(key, Options.AllowFragments, allowPrefix: true);
+    }
+
+    public bool StartsSpokenLine(string text)
+    {
+        if (Index.IsEmpty) return false;
+        var key = CorpusText.MatchKey(text);
+        if (Index.TryGetExact(key, out _)) return false;
+        var speaker = SpeakerPrefixLength(key);
+        var body = speaker > 0 ? key[speaker..].TrimStart() : key;
+        var loose = CorpusText.LooseKey(body);
+        return CorpusText.LetterOrDigitCount(loose) >= 4 && Index.StartsLongerSpokenText(loose, 3);
+    }
+
+    public bool LooksLikeNoise(string text)
+    {
+        if (!Options.RejectNoise || Index.IsEmpty) return false;
+        var normalized = TextNormalizer.Normalize(text);
+        if (normalized.Length == 0 || !IsLowQualityReading(normalized)) return false;
+        return !SnapBlock(normalized).HasAnyMatch && !ResemblesCorpus(normalized);
+    }
+
+    public bool ResemblesCorpus(string normalized)
+    {
+        var texts = normalized.Split('\n').Append(normalized).ToList();
+        var keys = texts
+            .Concat(texts.Select(static text => new string(text.Where(static ch => !char.IsAsciiDigit(ch)).ToArray())))
+            .Select(static text => CorpusText.LooseKey(CorpusText.MatchKey(text)))
+            .Where(static key => key.Any(char.IsLetter))
+            .Distinct(StringComparer.Ordinal);
+        foreach (var key in keys)
+        {
+            if (key.Length <= CorpusIndex.MaxShortTextLength ? ResemblesShortText(key) : SharesTrigrams(key)) return true;
+        }
+        return false;
+    }
+
+    private bool ResemblesShortText(string loose)
+    {
+        var tolerance = 1.0 - Options.NoiseSimilarity;
+        var hardEdits = loose.Count(char.IsLetter) / 4;
+        var cap = OcrEditDistance.Unit * hardEdits + 2 * OcrEditDistance.Spacing;
+        var canonical = OcrEditDistance.SortedCanonical(loose);
+        var mask = OcrEditDistance.Mask(canonical);
+        var window = cap / Math.Min(OcrEditDistance.Spacing, OcrEditDistance.EdgeStroke);
+        for (var candidateLength = Math.Max(1, loose.Length - window);
+             candidateLength <= Math.Min(CorpusIndex.MaxShortTextLength, loose.Length + window);
+             candidateLength++)
+        {
+            var limit = Math.Min(cap, (int)Math.Floor(tolerance * OcrEditDistance.Unit * Math.Max(loose.Length, candidateLength) + 1e-9));
+            foreach (var id in Index.ShortTexts(candidateLength))
+            {
+                var text = Index[id];
+                if (!OcrEditDistance.MaskWithin(mask, text.CanonicalMask, hardEdits + 2)
+                    || OcrEditDistance.BagGap(canonical, text.SortedCanonical) > hardEdits + 2) continue;
+                if (OcrEditDistance.Distance(loose, text.Loose, limit) <= limit) return true;
+            }
+        }
+        return false;
+    }
+
+    private bool SharesTrigrams(string loose)
+    {
+        var grams = new HashSet<long>();
+        CorpusIndex.AddTrigrams(loose, grams);
+        if (grams.Count == 0) return false;
+        var best = Index.TopCandidates(loose, static _ => true, 1);
+        return best.Count > 0 && best[0].Shared >= grams.Count * Options.NoiseSimilarity;
+    }
+
+    public bool IsLowQualityReading(string text)
+    {
+        var letters = 0;
+        var known = 0;
+        foreach (var word in CorpusText.Words(text))
+        {
+            var count = word.Count(char.IsLetter);
+            letters += count;
+            if (CountsAsWord(word, count) && Index.IsWord(word)) known += count;
+        }
+        if (letters == 0) return true;
+        var unknownWords = known < letters * Options.NoiseKnownShare;
+        var unclean = ReadingQuality.Score(text) < Options.NoiseQuality;
+        return letters <= Options.NoiseShortLetters ? unknownWords || unclean : unknownWords && unclean;
+    }
+
+    private static bool CountsAsWord(string word, int letters) => letters >= 2 || word is "a" or "i";
+
+    private bool AllKnownWords(string text)
+    {
+        var any = false;
+        foreach (var word in CorpusText.Words(text))
+        {
+            if (!CountsAsWord(word, word.Count(char.IsLetter))) continue;
+            if (!Index.IsWord(word)) return false;
+            any = true;
+        }
+        return any;
     }
 
     public CorpusBlockSnap SnapBlock(string text)
@@ -136,7 +248,7 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
 
         if (lines.Count > 1)
         {
-            var whole = SnapFull(string.Join(' ', lines.Select(static l => l.Key)));
+            var whole = SnapFull(string.Join(' ', lines.Select(static l => l.Key)), allowPrefix: true);
             if (whole is not null)
             {
                 segments.Add(new CorpusSegment(0, lines.Count, JoinKeys(lines, 0, lines.Count), whole));
@@ -157,7 +269,7 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
                             lines[i].InProseParagraph = Enumerable.Range(first, count)
                                 .Any(k => k != self && CorpusText.WordCount(lines[k].Key) >= 3);
                         }
-                        var paragraph = SnapFull(JoinKeys(lines, first, count));
+                        var paragraph = SnapFull(JoinKeys(lines, first, count), allowPrefix: first + count == lines.Count);
                         if (paragraph is not null)
                         {
                             segments.Add(new CorpusSegment(first, count, JoinKeys(lines, first, count), paragraph));
@@ -173,7 +285,7 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
         {
             var line = lines[i];
             if (line.Covered) continue;
-            var match = SnapLine(line.Key, allowFragment: false);
+            var match = SnapLine(line.Key, allowFragment: false, allowPrefix: i == lines.Count - 1);
             if (match is not null && line.InProseParagraph && IsShort(match.CorpusKey)) match = null;
             var partial = match is null or { Kind: CorpusMatchKind.Fuzzy } && Options.AllowPartialLines
                 ? SegmentLine(i, line.Key)
@@ -218,13 +330,13 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
 
     private bool IsShort(string corpusKey) => CorpusText.LooseKey(corpusKey).Length < Options.MinFuzzyLength;
 
-    private CorpusMatch? SnapFull(string key)
+    private CorpusMatch? SnapFull(string key, bool allowPrefix)
     {
-        var match = SnapLine(key, allowFragment: false);
+        var match = SnapLine(key, allowFragment: false, allowPrefix);
         return match is { Kind: not CorpusMatchKind.Fragment } ? match : null;
     }
 
-    private CorpusMatch? SnapKey(string key, bool allowFragment)
+    private CorpusMatch? SnapKey(string key, bool allowFragment, bool allowPrefix)
     {
         if (key.Length == 0) return null;
         var loose = CorpusText.LooseKey(key);
@@ -238,14 +350,118 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
                 ? Make(id, 1.0, CorpusMatchKind.Exact)
                 : null;
         }
-        return FindFuzzy(loose) ?? (allowFragment ? FindFragment(loose) : null);
+        return FindFuzzy(loose)
+            ?? FindLabel(loose)
+            ?? (allowPrefix ? FindPrefix(loose) : null)
+            ?? (allowFragment ? FindFragment(loose) : null);
     }
 
-    private CorpusMatch? SnapLine(string key, bool allowFragment)
+    private CorpusMatch? SnapLine(string key, bool allowFragment, bool allowPrefix)
     {
         var prefix = SpeakerPrefixLength(key);
-        if (prefix > 0 && SnapKey(key[prefix..].TrimStart(), allowFragment) is { } withoutSpeaker) return withoutSpeaker;
-        return SnapKey(key, allowFragment);
+        if (prefix > 0 && SnapKey(key[prefix..].TrimStart(), allowFragment, allowPrefix) is { } withoutSpeaker) return withoutSpeaker;
+        return SnapKey(key, allowFragment, allowPrefix);
+    }
+
+    private const int MaxCanonicalGap = 4;
+
+    private static int LabelBudget(int length) =>
+        length <= 4 ? 50 : length <= 6 ? 80 : Math.Min(175, 15 * length + 30);
+
+    private CorpusMatch? FindLabel(string loose)
+    {
+        if (!Options.AllowLabels) return null;
+        var length = loose.Length;
+        if (length < Options.MinLabelLength || length >= Options.MinFuzzyLength) return null;
+        if (CorpusText.LetterOrDigitCount(loose) < Options.MinLabelLength || loose.Count(char.IsLetter) < 2) return null;
+
+        var margin = (int)Math.Round(Options.LabelMargin * OcrEditDistance.Unit);
+        var digits = CorpusText.DigitSignature(loose);
+        var canonical = OcrEditDistance.SortedCanonical(loose);
+        var mask = OcrEditDistance.Mask(canonical);
+        var window = (LabelBudget(CorpusIndex.MaxShortTextLength) + margin) / Math.Min(OcrEditDistance.Spacing, OcrEditDistance.EdgeStroke);
+        var bestId = -1;
+        var best = int.MaxValue;
+        var second = int.MaxValue;
+        for (var candidateLength = Math.Max(1, length - window);
+             candidateLength <= Math.Min(CorpusIndex.MaxShortTextLength, length + window);
+             candidateLength++)
+        {
+            foreach (var id in Index.ShortTexts(candidateLength))
+            {
+                var text = Index[id];
+                if (text.Digits != digits || !OcrEditDistance.MaskWithin(mask, text.CanonicalMask, MaxCanonicalGap)
+                    || OcrEditDistance.BagGap(canonical, text.SortedCanonical) > MaxCanonicalGap) continue;
+                var limit = LabelBudget(Math.Max(length, candidateLength)) + margin;
+                var cost = OcrEditDistance.Distance(loose, text.Loose, limit, strictEdges: true);
+                if (cost < best)
+                {
+                    second = best;
+                    best = cost;
+                    bestId = id;
+                }
+                else if (cost < second)
+                {
+                    second = cost;
+                }
+            }
+        }
+
+        if (bestId < 0) return null;
+        var target = Index[bestId];
+        var longest = Math.Max(length, target.Loose.Length);
+        if (!target.Label || best > LabelBudget(longest) || (second != int.MaxValue && second - best < margin)) return null;
+        if (CorpusText.LetterOrDigitCount(target.Loose) < Options.MinExactLetters || target.Loose.Length < Options.MinExactLength) return null;
+        if (AllKnownWords(loose) && CorpusText.LettersOnly(loose) != CorpusText.LettersOnly(target.Loose)) return null;
+        if (CorpusText.WordCount(loose) > CorpusText.WordCount(target.Loose)) return null;
+        if (Index.AnyLongerStartingWith(loose, bestId)) return null;
+        return Make(bestId, 1.0 - (double)best / (OcrEditDistance.Unit * longest), CorpusMatchKind.Fuzzy) with { IsLabel = true };
+    }
+
+    private CorpusMatch? FindPrefix(string loose)
+    {
+        if (!Options.AllowPrefixes) return null;
+        if (CorpusText.LetterOrDigitCount(loose) < Options.MinPrefixLetters || CorpusText.WordCount(loose) < Options.MinPrefixWords) return null;
+
+        var length = loose.Length;
+        var budget = (int)Math.Floor(Options.PrefixErrorRate * OcrEditDistance.Unit * length + 1e-9);
+        var margin = (int)Math.Round(Options.PrefixMargin * OcrEditDistance.Unit);
+        var limit = budget + margin;
+        var digits = CorpusText.DigitSignature(loose);
+        var shortest = length - limit / OcrEditDistance.Spacing;
+        var candidates = Index.TopCandidates(loose, text => text.Loose.Length >= shortest, Options.MaxCandidates);
+        var grams = new HashSet<long>();
+        CorpusIndex.AddTrigrams(loose, grams);
+        var minimumShared = grams.Count / 2;
+
+        var bestId = -1;
+        var bestEnd = 0;
+        var best = int.MaxValue;
+        var second = int.MaxValue;
+        foreach (var (id, shared) in candidates)
+        {
+            if (shared < minimumShared) break;
+            var target = Index[id].Loose;
+            if (OcrEditDistance.Prefix(loose, target, limit) is not { } alignment) continue;
+            var valid = !CutsNumber(target, 0, alignment.End)
+                && CorpusText.DigitSignature(target[..alignment.End]) == digits;
+            if (valid && alignment.Cost < best)
+            {
+                if (bestId >= 0) second = Math.Min(second, best);
+                best = alignment.Cost;
+                bestId = id;
+                bestEnd = alignment.End;
+            }
+            else if (alignment.Cost < second)
+            {
+                second = alignment.Cost;
+            }
+        }
+
+        if (bestId < 0 || best > budget || (second != int.MaxValue && second - best < margin)) return null;
+        var text = Index[bestId];
+        if (!text.Spoken || CorpusText.LetterOrDigitCount(text.Loose[bestEnd..]) == 0) return null;
+        return Make(bestId, 1.0 - (double)best / (OcrEditDistance.Unit * length), CorpusMatchKind.Fuzzy) with { IsPrefix = true };
     }
 
     public int SpeakerPrefixLength(string key)
@@ -529,7 +745,7 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
                 {
                     if (end - first < 2) continue;
                     var joined = JoinKeys(lines, first, end - first);
-                    var match = SnapFull(joined);
+                    var match = SnapFull(joined, allowPrefix: end == lines.Count);
                     if (match is null || match.TextId != fragment.TextId) continue;
                     if (bestMatch is null || end - first > bestCount || match.Score > bestMatch.Score)
                     {

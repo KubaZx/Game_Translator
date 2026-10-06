@@ -26,6 +26,7 @@ tools/
   GameTranslatorOverlay.CorpusTool            (konsola net10.0, ADR-014: extract — korpus z plików gry;
                                                translate — tłumaczenie korpusu do cache z profilem)
   GameTranslatorOverlay.CorpusEval            (Windows: pomiary przyciągania OCR do korpusu)
+  GameTranslatorOverlay.OverlayPreview        (Windows: render nakładki na zapisanych klatkach — galeria wyglądu)
 benchmarks/
   GameTranslatorOverlay.Benchmarks            (BenchmarkDotNet, poza dotnet test; docs/BENCHMARKS.md)
 ```
@@ -244,6 +245,9 @@ zadanie dostaje `CancellationToken.Cancel()` i jego wynik nigdzie nie trafia.
 | `LiveBlockGeometry`, `LiveSubtitleContent` | niezależna stabilizacja położenia/rozmiaru i źródła paska napisów | Core |
 | `TextPresenceProbe` | konserwatywna ocena całego jednolitego pola starego tekstu | Core |
 | `OverlayWindow` | prezentacja bloków/paska, click-through, DPI i ręczne ukrywanie | App |
+| `OverlayBlockRenderer` | wygląd i pozycja bloku (łatka, kontur, dopasowanie czcionki) — wspólny dla `OverlayWindow` i OverlayPreview | App |
+| `GlyphCoverBuilder` / `GlyphCover` / `InkProfile` | łatka „natywna”: maska liter (odchylenie od tła z pierścienia + top-hat), wypełnienie pikseli liter z otoczenia (push-pull), kolor tekstu, kontur, cień, linia bazowa, wysokość, wyrównanie, ikony klawiszy; liczona w tle przy OCR | Core.Vision |
+| `GameTextElement` / `OverlayFonts` | tekst z geometrii (kontur piórem, cień), łatka jako obraz; krój z profilu (dołączony Lexend Deca), grubość i rozmiar z profilu tuszu oryginału | App |
 
 Tryb ręczny, live w blokach i pasek napisów są zaimplementowane. Automatyczne
 wydzielanie tooltipów, History Mode i wyjaśnianie przez LLM pozostają poza obecną
@@ -290,6 +294,10 @@ rdzeń aplikacji jest uniwersalny. Konwencja pól: camelCase.
 
 - `ocr.upscale`: brak pola = ustawienia aplikacji (automatyczne 2× dla małych regionów),
   `1.0` = bez powiększania, `1.0`–`4.0` = stały współczynnik.
+- `overlay.fontFamily` (opcjonalne, np. `"Lexend Deca"`): krój napisów nakładki, gdy w ustawieniach
+  wybrano „Jak w grze”. Najpierw szukany wśród krojów dołączonych do aplikacji (`App/Fonts`, licencja
+  OFL), potem wśród czcionek systemowych; grubość (Regular/Medium/SemiBold/Bold) dobiera nakładka.
+  Nazwa kroju, nie ścieżka (do 64 znaków). Starsze wersje aplikacji pole pomijają.
 - `minAppVersion` (SemVer, np. `0.2.2`; przyrostek `-beta` jest pomijany): profil wymagający
   nowszej aplikacji nie jest wczytywany, a problem trafia do logu.
 

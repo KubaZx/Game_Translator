@@ -28,6 +28,7 @@ internal static class BenchCommand
             MinFuzzyLength = minLength,
             MinFragmentLength = Math.Max(15, minLength),
         };
+        if (CorpusFeatures.Off(args)) options = CorpusFeatures.Disabled(options);
         Directory.CreateDirectory(outDir);
 
         var queries = cache.Where(static b => EvalData.EaDays.Contains(b.Day) || b.Day == EvalData.PoeDay).Select(static b => b.Text)

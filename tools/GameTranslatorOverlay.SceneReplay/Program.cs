@@ -50,7 +50,7 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink] [--ocr scripted|windows]\n" +
+            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink|typing|typing-nohold] [--ocr scripted|windows]\n" +
                 "  [--provider-delay-ms 0..5000] [--phase-ms 0..200] [--ocr-delay-ms 100..600 only ocr-timing]\n" +
                 "  [--assets KATALOG_Z_inspect_crop.png] [--texture OBRAZ] [--texture-origin X,Y] [--bright-spot-px 4..14] only stale-*\n" +
                 "  [--fade-ms 100..1000 only stale-fade] [--dim-percent 10..90 only stale-dim] [--junk-run 1..3 only stale-present-junk]\n" +
@@ -145,6 +145,12 @@ internal static class Program
                 if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "windows"))
                     throw new ArgumentException("HUD motion uses Windows OCR and Mock 200; optional timing overrides are not supported.");
                 return StaticHudReplay.Run(output, scenario != "hud-motion", scenario == "hud-motion-small-whiff");
+            }
+            if (scenario is "typing" or "typing-nohold")
+            {
+                if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
+                    throw new ArgumentException("Typing uses scripted OCR, Mock 0 and a synthetic corpus; timing overrides are not supported.");
+                return TypingReplay.Run(output, scenario == "typing");
             }
             if (scenario == "ocr-timing")
             {
@@ -599,7 +605,7 @@ internal static class Program
                     retainedBlocks = update.Diagnostics?.RetainedBlocks, reusedBlocks = update.Diagnostics?.ReusedBlocks,
                     captureToUpdateMs = update.Diagnostics?.CaptureToUpdateMs,
                     captureMs = update.Diagnostics?.CaptureMs, ocrMs = update.Diagnostics?.OcrMs,
-                    translateMs = update.Diagnostics?.TranslateMs,
+                    translateMs = update.Diagnostics?.TranslateMs, glyphCoverMs = update.Diagnostics?.GlyphCoverMs, glyphCoverWaitMs = update.Diagnostics?.GlyphCoverWaitMs,
                 });
             }
         }

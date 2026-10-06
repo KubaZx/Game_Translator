@@ -477,4 +477,13 @@ public sealed class TranslationOrchestrator(
 
     public bool IsExactCorpusText(string text) =>
         Volatile.Read(ref _pipelineState)?.Pipeline.IsExactCorpusText(text) == true;
+
+    public bool ShouldTranslateLive(string text) =>
+        Volatile.Read(ref _pipelineState)?.Pipeline.ShouldTranslateLive(text) ?? JunkFilter.IsMeaningful(text);
+
+    public string? CorpusIdentity(string text) =>
+        Volatile.Read(ref _pipelineState)?.Pipeline.CorpusIdentity(text);
+
+    public bool IsCorpusPrefix(string text) =>
+        Volatile.Read(ref _pipelineState)?.Pipeline.IsCorpusPrefix(text) == true;
 }

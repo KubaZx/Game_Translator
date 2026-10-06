@@ -43,6 +43,26 @@ produktu; status implementacji nie zastępuje testów wizualnych na kolejnych gr
     powtórzonych w innych blokach) i decyzja o włączeniu domyślnie — runda 2026-10-06 (3).
 14. Tryb prywatny: czytanie (bez zapisu) tłumaczeń korpusu z wyprzedzeniem z bazy na dysku.
 15. Odświeżenie korpusu po nowym `extract`/`translate` bez restartu aplikacji.
+16. Szerokość okna dialogu dla jednowierszowego początku kwestii (geometria bloku z nakładki),
+    żeby pełne tłumaczenie od pierwszego odczytu miało docelową liczbę wierszy w trybach z tekstem
+    obok oryginału (w trybie zakrywania kwestia czeka na koniec pisania) — rundy 2026-10-06 (4), (6).
+17. Etykieta korpusu z liczbą albo datą obok („…: <data>”) jako tekst korpusu + okruch dosłowny,
+    bez zapytania do dostawcy — runda 2026-10-06 (4).
+18. Łatka „Na oryginale” na ruchomym tle: dopasowanie wypełnienia liter do bieżącego tła między
+    przebiegami OCR (dziś miękka i nieruchoma do następnego odczytu) — runda 2026-10-06 (5).
+19. Wierniejszy krój: kursywa, szerokość (np. Lexend zamiast Lexend Deca), osobny krój dla
+    rodzajów tekstu w profilu (etykiety szeryfowe), kerning — runda 2026-10-06 (5).
+20. Rama przycisku jako granica dopasowania jednoliniowego napisu (dziś wolne miejsce liczone
+    tylko do następnego bloku albo krawędzi monitora) — runda 2026-10-06 (5).
+21. Smugi po wypełnianiu liter: ciemne kleksy w miejscu ogonków („p”, „y”) i rozmyta granica dwóch
+    płaskich teł pod napisem (widoczne w powiększeniu 1:1) — runda 2026-10-06 (5).
+22. Pamięć budowy łatki: 21–58 MB na dialog w 4K (linie 36–89 px bez zmniejszania), pełne
+    odśmiecania przy kolejnych budowach — bufory wielokrotnego użytku albo niższy próg
+    zmniejszania — runda 2026-10-06 (5).
+23. Praca na wątku UI: rozgrzanie krojów (ok. 212 ms przy starcie live) i pomiar grubości nowego
+    tekstu (4 rendery) poza wątkiem UI — runda 2026-10-06 (5).
+24. Odróżnienie wyłącznego pełnego ekranu od okna bez ramki w komunikacie o pełnym ekranie
+    (dziś liczy się tylko zajęcie całego monitora przy braku PrintWindow) — runda 2026-10-06 (5).
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -1122,3 +1142,319 @@ CorpusTool 166/166 (+19). SceneReplay nie był powtarzany: bez korpusu pipeline 
 próbek) — świadomie, precyzja przed zasięgiem. Lista znaków liczb i mylnych liter jest stała (bez
 np. `2/Z`, `6/G`, `|`, `!`). Katalog główny gry poza bibliotekami Steam/Epic/GOG jest rozpoznawany
 tylko po pliku z `processNames` profilu.
+
+### Runda 2026-10-06 (4) — etykiety, dialog, śmieci
+
+**Punkt wyjścia (pomiar).** Pierwsza sesja gracza na wersji z korpusem (kopia bazy po sesji,
+`sesja-2026-10-06\ANALIZA.md`): 36 tekstów poszło do DeepL, choć ich pełne wersje są w korpusie —
+ok. 12 krótkich etykiet źle odczytanych przez OCR (dopasowanie krótkich tekstów tylko dokładne),
+ok. 9 niedokończonych linii dialogu wpisywanego litera po literze, ok. 12 śmieci z ikon i tekstur,
+2 teksty dynamiczne (data ostatniej gry). Trzy poprawki zaakceptowane przez gracza:
+
+- **Etykiety (`CorpusSnapper.FindLabel`).** Odczyt o luźnym kluczu 3–15 znaków bez dopasowania
+  dokładnego jest porównywany z krótkimi tekstami korpusu (≤ 24 znaki, kubełki po długości,
+  wstępny filtr: maska i worek znaków w postaci kanonicznej) odległością ważoną pomyłkami OCR
+  (`OcrEditDistance`, jednostka 100): kreski I/l/|/!/' między sobą 25, cyfra odczytu za mylną literę
+  korpusu (1/l/I/', 0/O, 5/S, 8/B) 25, h↔n 40, c↔e 50, rn↔m / cl↔d / vv↔w 30, spacja
+  i interpunkcja 30, kreska dopisana albo zgubiona na brzegu 30, każda inna zmiana 100. Strażnik
+  cyfr jak w `BoundedGuarded` (cyfra korpusu musi stać naprzeciw identycznej). Budżet: do 4 znaków
+  50, do 6 znaków 80, dalej min(175, 15·L+30) — czyli najwyżej jedna „zwykła” zmiana i tylko od
+  7 znaków. Warunki: cel jest etykietą (`ui`) aktywnego korpusu; drugi kandydat (dowolnego rodzaju)
+  co najmniej 50 dalej; zgodna sygnatura liczb; na brzegach tylko tanie zmiany (zwykła litera
+  dopisana albo ucięta na brzegu = obcięty tekst, nie pomyłka OCR); odczyt nie ma więcej słów niż
+  etykieta; odczyt złożony wyłącznie ze słów słownika korpusu musi mieć te same litery co cel
+  (prawdziwe inne słowo nie jest pomyłką); odczyt nie jest dosłownym początkiem innego, dłuższego
+  tekstu korpusu. Wynik: `CorpusMatch.IsLabel`, rodzaj `Fuzzy`, tłumaczenie z klucza kanonicznego.
+- **Dialog pisany literami (`CorpusSnapper.FindPrefix`).** Odczyt od 12 liter i 3 słów (próg
+  z przeglądu niżej), który jest początkiem linii korpusu z dopasowaniem z wolnym końcem
+  (`OcrEditDistance.Prefix`, te same wagi, budżet 10% długości odczytu), przy czym cel jest
+  linią `dialog`/`subtitle`, drugi kandydat (dowolnego rodzaju, także pełna krótsza linia) co
+  najmniej 1,0 zmiany dalej, cięcie nie wypada w środku liczby, a za nim zostaje jeszcze tekst.
+  Tylko dla bloku, akapitu albo wiersza kończącego blok (wiersz w środku bloku nie jest prefiksem).
+  Jednostka planu dostaje `Prefix`: gdy odczyt ma co najmniej 2 wiersze, tłumaczenie jest
+  od razu łamane na przewidywaną liczbę wierszy całej kwestii (długość klucza / szerokość pełnych
+  wierszy odczytu), więc pełny odczyt daje ten sam układ (`ToPrefixLayout` = `ToScreenLayout`
+  przy trafionej liczbie wierszy). Klucz tłumaczenia = pełna linia, więc wszystkie dłuższe
+  odczyty trafiają w ten sam wpis.
+- **Ten sam klucz nakładki.** `TranslationPipeline.CorpusIdentity` daje tożsamość bloku w pełni
+  obsłużonego korpusem (klucze kanoniczne + luźne klucze dosłownych okruchów); `LiveBlockKeyer`
+  (opcjonalnie) liczy klucz live z tej tożsamości zamiast z tekstu odczytu. Kolejne odczyty
+  tej samej kwestii i drżenie OCR etykiety („…ect”/„…cct”) to ten sam blok: aktualizacja
+  w miejscu (pozycja, rozmiar, tekst), bez stabilizatora podmian, bez ponownego fade-in i bez
+  nowego wpisu na pasku napisów. Bez korpusu tożsamość jest pusta — klucze jak dotąd.
+- **Śmieci (`CorpusSnapper.LooksLikeNoise`, `TranslationPipeline.ShouldTranslateLive`).** Bramka
+  live: dokładny tekst korpusu albo (`JunkFilter` i nie szum). Szum przy aktywnym korpusie =
+  odczyt niskiej jakości (brak liter; do 16 liter: mniej niż połowa liter w słowach znanych ze
+  słownika korpusu albo `ReadingQuality` < 0,75; dłuższy: oba warunki naraz), bez żadnego
+  dopasowania `SnapBlock` (także fragmentu) i bez podobieństwa do tekstu korpusu (krótki klucz:
+  odległość ważona najwyżej 1 zmiana na 4 litery + 60 i ≤ 30% długości, także bez cyfr; długi:
+  ≥ 70% trygramów wspólnych z jednym tekstem) i nie będący terminem słownika. Szum nie idzie do
+  dostawcy ani na nakładkę; wiersz-szum w bloku z prawdziwym tekstem jest dosłowny. Wynik
+  zapamiętany na pipeline (jak plany). Tłumaczenie regionu (ręczne) nadal używa dawnego filtra.
+  Opcje: `AllowLabels`, `AllowPrefixes`, `RejectNoise` i progi w `CorpusSnapOptions`.
+
+**Pomiar (a) — odczyty z sesji gracza** (`CorpusEval session`: 36 wpisów cache od 06:28Z jako
+wejście OCR, bramka live + `TranslationPipeline` z Mockiem, cache = kopia bazy gracza bez tych
+wpisów, profil `escape-academy`, korpus 8 341 wpisów):
+
+| | Odrzucone (szum) | Lokalnie | Do dostawcy | Znaki do dostawcy |
+|---|---:|---:|---:|---:|
+| Przed (dopasowanie jak w `008f39c`) | 0 | 0 | 36 | 571 |
+| **Po** | **11** | **15** (11 etykiet, 4 kwestie) | **10** | **171** |
+
+Przegląd ręczny: 15 z 15 lokalnych przyciągnięć poprawnych (1 etykieta z kreską po słowie oceniona
+jako „bardzo prawdopodobnie poprawna”), 0 błędnych. Z 11 odrzuconych 9 to śmieci bez tekstu,
+2 to tak zniekształcone odczyty prawdziwych napisów, że DeepL zwrócił je bez zmian — strata
+żadna. Do dostawcy dalej: 2 teksty dynamiczne (etykieta + data), 2 kwestie o wspólnym początku
+z inną linią (dwie wersje kwestii różnią się dopiero dalej — świadomie czekamy), 2 kawałki
+jednego napisu interfejsu (nie dialogu, więc bez prefiksu; jeden to środek linii), 4 krótkie
+odczyty (2 ze słowami słownika korpusu, 2 podobne do tekstu korpusu). 4 grupy różnych
+odczytów tej samej etykiety mają wspólny klucz nakładki.
+
+**Pomiar (b) — precyzja** (`CorpusEval evaluate`, te same 880 próbek OCR i kopia cache co
+w rundzie 2026-10-06; progi wydania T 0,80 / m 0,08 / L 16):
+
+| | Przed (HEAD `008f39c`) | Po |
+|---|---:|---:|
+| Syntetyczne: poprawne / błędne (z przyciągniętych) / brak | 690 / 1 (0,14%) / 177 | 698 / 1 (0,14%) / 170 |
+| Wariant ścisły (dokładne od 8 znaków): poprawne / błędne | 616 / 0 | 624 / 0 |
+| Cache EA 242: znaki / bloki obsłużone lokalnie | 59,44% / 48,76% | 74,63% / 60,33% |
+| Cache EA 217 (bez 09-04): znaki / bloki | 63,16% / 51,15% | 79,42% / 63,59% |
+| PoE2 247 (kontrola): bloki z trafieniem / ze zmianą tekstu | 8 / 0 (0%) | 8 / 0 (0%) |
+
+Błędne przyciągnięcie to wciąż to samo (OCR zgubił cenę przy etykiecie). Pełny przegląd 448
+konfiguracji po zmianie wybiera T 0,85 / L 12 (EA 75,15%, syntetyczne 687 / 2 = 0,29%) — progi
+wydania zostają. `--features off` na nowym kodzie odtwarza HEAD co do liczby (690/1/177, 59,44%).
+Przegląd ręczny nowych przyciągnięć w cache EA (18 etykiet, 12 początków dialogu): 0 błędnych.
+
+**Próg dialogu** (`CorpusEval prefixes`: 3 793 ucięte odczyty OCR linii dialogu, 12 919 uciętych
+linii korpusu bez błędów, 1 593 bloki PoE2 w całości i ucięte; cięcie po k literach). Błędne
+przyciągnięcia **przez prefiks: 0** we wszystkich 24 konfiguracjach. PoE2 przez prefiks: 3 przy
+L 8, 0 od L 10 / W 2 — wybrano L 12 / W 3 / 10% / margines 1,0 (zapas): poprawne 57,5% uciętych
+odczytów OCR (2 016 przez prefiks), 61,2% uciętych linii czystych. Pozostałe „błędne” w tych
+sondach (37 OCR, 111 czystych) to dokładne i przybliżone dopasowania uciętego tekstu do innego
+istniejącego tekstu (np. pierwsze słowa kwestii = osobna etykieta) — zachowanie sprzed rundy;
+przez nową etykietę: 1 (OCR) i 2 (ucięte PoE2).
+
+**Dialog pisany literami przez pipeline** (`CorpusEval typing`: 1 633 linie korpusu i 435
+odczytów OCR linii dialogu, dopisywane co 3 znaki albo tylko w przerwach po interpunkcji, Mock,
+pusty cache na linię):
+
+| | Przed: trafione przed końcem / średnio wpisane | Po | Teksty do dostawcy przed → po |
+|---|---:|---:|---:|
+| Korpus, co 3 znaki | 1 316 / 83% | 1 365 / 41% | 15 945 → 6 689 |
+| OCR, co 3 znaki | 330 / 85% | 364 / 40% | 5 188 → 2 214 |
+| Korpus, w przerwach | 107 / 88% | 592 / 51% | 1 574 → 1 261 |
+| OCR, w przerwach | 31 / 90% | 177 / 48% | 504 → 385 |
+
+Po pierwszym trafieniu: **0 zmian klucza nakładki** w każdym zbiorze, 0 nowych zapytań przy
+cięciu w przerwach; zmiany wyświetlanego tekstu to wyłącznie zmiana podziału wierszy (np. 128 / 0
+poza układem dla korpusu w przerwach; przy cięciu co 3 znaki 749 / 1). Przy cięciu co 3 znaki
+w 28 z 364 linii OCR któryś późniejszy odczyt (mocno zniekształcony) wypada z tolerancji —
+wtedy jest jak dotąd (osobny klucz, zapytanie).
+
+**Pomiar (c) — powtórka sesji EA** (`CorpusEval replay`, wariant B: korpus + baza wypełniona
+`CorpusTool translate --provider mock`; HEAD i po na tych samych kopiach):
+
+| Bloki | | Znaki lokalnie | Bloki lokalnie | Zapytania | Teksty / znaki do dostawcy | Odrzucone jako szum (bloki / znaki) |
+|---|---|---:|---:|---:|---:|---:|
+| EA 242 | przed | 2 075 / 3 437 (60,4%) | 120 (49,6%) | 122 | 128 / 1 678 | — |
+| EA 242 | **po** | **2 613 (76,0%)** | **150 (62,0%)** | **57** | **58 / 737** | 35 / 218 |
+| EA 217 | przed | 2 024 / 3 154 (64,2%) | 113 (52,1%) | 104 | 110 / 1 393 | — |
+| EA 217 | **po** | **2 553 (80,9%)** | **142 (65,4%)** | **42** | **43 / 475** | 33 / 210 |
+| PoE2 247 (korpus EA przy innej grze) | przed | 1 569 / 7 139 (22,0%) | 36 | 211 | 265 / 6 843 | — |
+| PoE2 247 | po | 1 760 (24,7%) | 41 | 155 | 190 / 6 181 | 51 / 364 |
+
+Przyciągnięcia PoE2 do korpusu EA bez zmian (6, w tym 1 zmiana treści — ta sama co dotąd).
+Wyświetlane tłumaczenie ma tyle wierszy co odczyt w 205 z 207 bloków EA (2 to kwestie
+z prefiksu, łamane na przewidywaną liczbę wierszy całej kwestii — celowo).
+
+**Czas** (`CorpusEval bench`, 2 przebiegi): `SnapBlock` EA p50 0,004 → 0,12 ms, p95 0,90–0,96 →
+1,09–1,21 ms, p99 2,2 → 2,4–2,6 ms (wyszukiwanie etykiet dla krótkich odczytów); budowa indeksu
+35 → 55 ms. Korpus syntetyczny 150 tys. tekstów: p95 4,1–5,0 → 5,5–5,8 ms, zapytania EA na nim
+p95 3,1–5,4 → 9,1–9,4 ms. Próba lokalna w powtórce (z regułą szumu): EA p95 0,66 → 1,8 ms.
+
+**Weryfikacja.** Build całego rozwiązania i App bez ostrzeżeń; Core 1 226/1 226 (+71: odległość
+OCR, etykiety, prefiksy, szum, tożsamość, klucz nakładki, układ wierszy — wyłącznie dane
+syntetyczne), Infrastructure 276/276, CorpusTool 166/166. SceneReplay nie był powtarzany: bez
+korpusu bramka = `JunkFilter`, tożsamość pusta, plan bez zmian. Liczby:
+`GTO Diagnostics\20261005-natywne-spolszczenie\krok-dopasowanie` (`sesja`, `ewaluacja`,
+`progi-prefiksu`, `pisanie`, `powtorka`, `czasy`, `PODSUMOWANIE.md`); teksty gry tylko
+w `krok-dopasowanie\private`.
+
+**Otwarte / ryzyka.** (1) Reguła szumu zależy od słownika korpusu: czysty napis z tekstury, którego
+słów nie ma w plikach gry, zostanie bez tłumaczenia (oryginał widoczny); przy korpusie innej gry
+odrzuciłaby 51 z 247 bloków PoE2 (21%), w tym prawdziwe nazwy — działa tylko z korpusem
+aktywnego profilu. (2) Prefiks dla jednowierszowego początku nie zna szerokości okna dialogu:
+pełne tłumaczenie stoi w jednym wierszu (może wyjść poza okno), dopóki gra nie zacznie drugiego
+wiersza. (3) Dwie wersje kwestii o wspólnym początku czekają, aż odczyt je rozróżni. (4) Krótki
+odczyt równy innemu tekstowi korpusu (pierwsze słowa kwestii = etykieta) nadal przyciąga się
+dokładnie, jak przed rundą. (5) Nie sprawdzone w oknie gry — tylko powtórki przez pipeline
+i testy jednostkowe; zachowanie nakładki (aktualizacja w miejscu przy rosnącym bloku) wynika
+z kodu `OverlayWindow.UpdateLiveBlocks`, bez pomiaru SceneReplay z korpusem.
+
+### Runda 2026-10-06 (5) — wygląd napisów w trybie „Na oryginale (zakrywa)”
+
+**Punkt wyjścia (pomiar).** Gracz: napisy „wyglądają mocno średnio” i „czasem się bugują”.
+Galeria stanu po rundzie (4) (`OverlayPreview` na 4 klatkach 4K z EA, DPI 144, kopia bazy gracza,
+`krok-wyglad\przed`) dała 13 wad: biały kontur pod białym tekstem dialogu (próbnik wziął
+kolor szuflady #2F3940 za kolor tekstu), tłumaczenie 0,54–0,58× wysokości oryginału, cienki Segoe UI
+zamiast grubego zaokrąglonego kroju gry, łatka ciemniejsza od tła o 11–19 poziomów i pusta smuga
+przy krótszym tekście, prześwitujący cień oryginału (6 px za boxem łatka kryła w 0,67), ikony
+klawiszy zjadane przez łatkę, kontur w kolorze półtonu, schodki konturu z 8 kopii tekstu,
+kolorowe plamy w teksturze łatki, zakrywane tłumaczenia identyczne z oryginałem, zły kolor
+dialogu, przesunięcie w pionie i przepełnienia.
+
+**Zmiany.**
+
+- **Wypełnienie liter zamiast prostokąta (`Core.Vision.GlyphCoverBuilder`).** Dla każdego bloku
+  na przechwyconej klatce: tło szacowane z pierścienia wokół boxu (push-pull w zmniejszonej
+  siatce), polaryzacja tekstu z odchylenia od tego tła (przy remisie: która grupa jest otoczona
+  przez drugą — wypełnienie vs kontur), maska liter = odchylenie we właściwą stronę ∧ białe/czarne
+  top-hat (cienkie struktury, nie duże obiekty tła), doprecyzowana progiem 50% kontrastu do
+  lokalnego tła; obwódka (kontur, cień, antyaliasing) = piksele w zasięgu 0,2 wysokości linii,
+  które różnią się od tła bardziej niż 4× szum tła. Maska poszerzona o 1–2 px, piksele pod nią
+  wypełniane z otoczenia (push-pull, interpolacja dwuliniowa). Łatka to obraz RGBA: krycie 1 tylko
+  na pikselach liter (brzeg 0,5), **reszta przezroczysta** — tło gry zostaje żywe i nietknięte.
+  Duże napisy (linia ≥ 90 px) liczone w połowie rozdzielczości, ≥ 150 px w 1/3.
+- **Pomiar stylu z tych samych pikseli:** kolor tekstu (rdzeń liter), kontur (kolor, grubość
+  z mediany odległości od krawędzi z pominięciem pasma antyaliasingu, kontur uznany przy ≥ 2 px
+  albo ≥ 1 px i różnicy jasności ≥ 30 od otoczenia), cień (różnica zasięgu w prawo/dół i w lewo/górę),
+  profil tuszu każdej linii (`InkProfile`: linia bazowa = ostatni wiersz ≥ 30% maksimum, góra = ciągły
+  tusz nad linią bazową — kropki i akcenty odcięte, gęstość tuszu), rozstaw linii, wyrównanie
+  (lewo/środek/prawo z co najmniej 2 linii), ikony: krótki token klawisza przed tekstem z odstępem
+  ≥ 0,45 wysokości linii (np. „X Hint”) i 1–2-znakowy token na końcu z odstępem ≥ 0,55 wysokości
+  słów albo ≥ 0,3 przy wyższym o 10% polu (np. ✓ czytany jako „to”) — ich piksele nie są ruszane,
+  a token znika z tłumaczenia, jeśli w nim jest.
+- **Liczone w tle przy OCR, pamiętane po kluczu i podpisie pola.** `LiveTranslationSession`
+  uruchamia budowę łatek (`Parallel.For`, do 4 wątków) równolegle z tłumaczeniem; po tłumaczeniu
+  czeka na wynik. Podpis pola (siatka 12×4 jasności) bez zmian i ten sam box (±2 px) = łatka
+  z poprzedniego przebiegu (bez obliczeń). Podpis zmieniony przy tym samym boxie (tło się rusza,
+  najechany wiersz) = **miękka łatka** (całe pole z wypełnieniem, wygaszony brzeg); gdy obraz stanie,
+  następny przebieg wraca do ostrej. Nieudana budowa zostawia łatkę poprzedniego przebiegu; bez
+  łatki działa dawna ścieżka (rozmyta tekstura). Opcja `LiveSessionOptions.BuildGlyphCovers`
+  (aplikacja: tylko „Na oryginale” i tryb przy oryginale).
+- **Tekst z geometrii (`App.Ui.GameTextElement`).** `FormattedText.BuildGeometry`, kontur piórem
+  2t z zaokrąglonymi łączeniami pod wypełnieniem, cień = przesunięta kopia konturu; jedna geometria
+  na tekst/krój/rozmiar, przesunięcie kotwicy i linii bazowej tylko transformacją. Łatka rysowana
+  jako obraz 1:1 z pikselami ekranu (najbliższy sąsiad bez skalowania).
+- **Krój z profilu (`overlay.fontFamily`) i dołączony Lexend Deca (OFL).** Napisy EA to rodzina
+  Lexend (porównanie glifów na klatkach). `App/Fonts`: Lexend Deca Regular/Medium/SemiBold/Bold
+  jako zasoby, licencja w `licenses/LexendDeca-OFL.txt`, `THIRD-PARTY-NOTICES`. Ustawienie kroju
+  „Jak w grze (krój z profilu)” (`auto`, domyślne; dawny domyślny Segoe UI przechodzi raz na `auto`,
+  `overlayFontRevision`), bez profilu Segoe UI. Grubość dobierana do gęstości tuszu oryginału
+  (ten sam tekst EN zrasteryzowany w każdej grubości, ten sam `InkProfile`).
+- **Rozmiar i położenie z linii bazowej.** em = wysokość tuszu oryginału nad linią bazową /
+  ta sama miara tekstu oryginału w wybranym kroju; pierwsza linia polskiego tekstu na linii bazowej
+  oryginału, lewa krawędź tuszu na lewej krawędzi tuszu oryginału (albo środek/prawa krawędź).
+  Dopasowanie: wieloliniowe — do 1,08× szerokości, potem mniejsza czcionka do 85%, potem zawijanie
+  w szerokości oryginału z jego rozstawem linii; jednoliniowe — do 1,25× szerokości, a gdy po prawej
+  jest wolne miejsce (do następnego bloku w tym pasie albo krawędzi monitora) do 3×, potem do 85%;
+  przed ikoną na końcu — do szerokości przed ikoną, najwyżej do 70%. Tekst nie wychodzi za krawędź
+  monitora.
+- **Usterki.** (1) Tłumaczenie identyczne z oryginałem (nazwy, „OK”, logo „ESCAPE”, fałszywe
+  „in”→„In”) nie jest rysowane w trybie zakrywania — widać grę. (2) Taki blok był też odrzucany
+  przez filtr anty-sprzężeniowy jako „nasze własne tłumaczenie” (`displayedTranslations`), więc przy
+  zmiennym tle wypadał po okresie łaski i wracał (miganie co kilka przebiegów) — filtr pomija teraz
+  bloki o tłumaczeniu równym oryginałowi. (3) Zmiana sposobu rysowania bloku (łatka pojawia się
+  lub znika) podmienia element w miejscu w kolejności warstw, bez ponownego fade-in. (4) Komunikat
+  w nakładce „⚠ Pełny ekran utrudnia nakładkę — przełącz na okno bez ramki” (8 s, raz na sesję),
+  gdy okno gry nie wspiera PrintWindow i zakrywa cały monitor; w oknie aplikacji pełne zdanie.
+  (5) Rozgrzanie krojów i budowy łatek przy starcie live (zimny pierwszy blok kosztował ok. 200 ms
+  WPF + ok. 30 ms JIT).
+
+**Pomiar wyglądu (OverlayPreview, te same klatki i ustawienia gracza co PRZED, `krok-wyglad\po`,
+pary `krok-wyglad\przed-po`).** Wysokość tuszu nad linią bazową polskiego tekstu względem
+oryginału 0,96–1,10× (PRZED 0,54–0,58× na tekstach identycznych, „Zbadaj” 38 px wobec 52 px),
+linia bazowa w 0–1 px od oryginału. Kolor dialogu #8C8D8E (gra ok. #8F9293; PRZED biały na białym
+konturze). Kontur czarny o grubości 5–6 px z cieniem w prawo/dół jak w grze (PRZED półton
+#616161–#985C52). Poza pikselami liter łatka jest przezroczysta (test jednostkowy), więc nie ma
+ciemnej plamy ani smugi; ikony „X” i ✓ zostają. Krój Lexend Deca, grubość Normal–Bold zależnie
+od napisu.
+
+**Koszt (ms, 4K, 32 wątki).** Budowa łatki na blok: etykiety menu 1,7–4,6, „Click to wishlist…”
+12, dialog 3126×199 px 22–24. Cała klatka z samymi nowymi napisami równolegle: menu (7 bloków)
+15, pokój 2,3, dialog 16; ponowne użycie (podpis pola) 0,03–0,11. Łatki liczą się w trakcie
+tłumaczenia; przy tłumaczeniu z dostawcy czekanie po tłumaczeniu 0 ms (SceneReplay
+`glyphCoverWaitMs` mediana 0, najwyżej 23,6 ms — pierwsza miękka łatka z JIT), przy tłumaczeniu
+lokalnym dochodzi czas budowy (≤ 16 ms dla klatki 4K). Wątek UI: układ WPF nowych napisów 5–21 ms
+na klatkę (pierwszy pomiar grubości nowego tekstu), rozgrzanie krojów raz 212 ms przy starcie live.
+
+**Regresje (SceneReplay przed → po, ten sam build bazowy skopiowany przed zmianami).** displayed:
+usunięcie starego 12,1 → 11,5 ms, gotowy opis 2 312 → 2 311 ms, 0 powrotów; local-occlusion:
+expectedBehavior true → true, menu bez strat, usunięcie Inspect 13,6 → 14,5 ms; hud-motion:
+true → true, 0 brakujących pomiarów menu, usunięcie 59/157 → 61/128 ms; stale-junk: true → true,
+czas życia starego 331 → 333 ms; stale-dim: true → true, 0 zniknięć; reading-jitter: B nigdy
+nie pokazany (0 → 0); ocr-timing: capture→update mediana 227–233 → 228–241 ms w trzech
+przebiegach naprzemiennych (szum ±7 ms, kontrola sceny 17–23 ms obu wersji). Testy: Core
+1 250 (+24: łatka, profil tuszu, ikony, kotwica, podpis, komunikat pełnego ekranu, `overlay.fontFamily`),
+Infrastructure 280 (+4: migracja kroju), CorpusTool 166 — zielone. Raporty:
+`GTO Diagnostics\20261005-natywne-spolszczenie\krok-wyglad\scenereplay`.
+
+**Otwarte / ryzyka.** (1) Napis na ruchomym tle: łatka liczona z klatki OCR, więc między przebiegami
+(ok. 0,6 s) wypełnione litery mogą odstawać od przesuwającego się tła; po zmianie podpisu łatka
+staje się miękka, ale nadal jest nieruchoma. (2) Tekst na gęstej teksturze, podobnej do koloru
+liter: maska może objąć elementy tła (wygładzone pod napisem) albo nie powstać (wtedy dawna
+łatka). (3) Kursywa, kerning i szerokość kroju gry nie są odwzorowane („The Headmaster” prosto;
+Lexend Deca jest węższy niż Lexend gry, polski wiersz dialogu bywa dłuższy). (4) Szeryfowy napis
+„Click to wishlist” dostaje Lexend (jeden krój na profil). (5) Pojedyncza linia bez wolnego
+miejsca: tekst dłuższy niż 1,25× schodzi do 85% i dalej wystaje; przy przyciskach z ramką może
+wyjść poza ramkę. (6) Grubość z gęstości: obrys gry wchodzący w lico liter daje cieńszy wariant
+(„Back” → Normal). (7) Nie sprawdzone w oknie gry na żywo ani na innych grach — tylko klatki
+EA i SceneReplay (bez prawdziwej nakładki).
+
+### Runda 2026-10-06 (6) — kwestia pisana literami, grubość, wyśrodkowanie
+
+**Punkt wyjścia (recenzja rund 4–5).** Połączenie przyciągania początku kwestii (runda 4) z łatką
+z wypełnionymi literami (runda 5) dawało przy dialogu pisanym literami polski tekst na
+dopisywanych angielskich literach: łatka zakrywa tylko litery z chwili odczytu, a pełne
+tłumaczenie stoi od razu w całej szerokości (OverlayPreview z blokiem obejmującym wpisaną część
+linii: polski tekst 2,95× szerokości łatki na widocznym angielskim). Do tego różna grubość liter
+w jednym menu (Graj Normal, Twórcy Medium, Ustawienia i Wyjdź z gry SemiBold), wyśrodkowany
+baner „Click to wishlist…” rosnący w prawo (+268 px) i wyłączony filtr anty-sprzężeniowy dla
+tłumaczeń identycznych z oryginałem także w trybach, które je rysują.
+
+**Zmiany.**
+- `LiveTranslationSession`: w trybie zakrywania (`LiveSessionOptions.HoldTypingPrefixes`) nowy
+  blok, którego odczyt jest niedokończoną kwestią korpusu, nie trafia na nakładkę, dopóki tekst
+  rośnie. Sesja prosi o kolejny odczyt pola (jak przy potwierdzeniu odczytu) i pokazuje pełne
+  tłumaczenie, gdy odczyt jest całą linią albo liczba liter nie rośnie przez 0,9 s
+  (`TypingPrefixSettleTime`); bezpiecznik 8 s (`TypingPrefixHoldLimit`). Blok już wyświetlany pod
+  tym samym kluczem nie jest wstrzymywany.
+- `TranslationPipeline.IsCorpusPrefix`: jednostka z przyciągnięcia początku linii, przybliżenie
+  całej linii z brakiem co najmniej 3 liter i 7% liter korpusu (długi początek kwestii mieści się
+  w progu przybliżenia 0,80) oraz krótki początek kwestii poniżej progów przyciągania
+  (`CorpusSnapper.StartsSpokenLine`: co najmniej 4 litery, początek dłuższej o 3 litery linii
+  dialogu lub napisów, sam nie jest tekstem korpusu) — ten ostatni nie idzie już do dostawcy.
+- `OverlayFonts.ChooseStyleWeight`: grubość wybierana z głosów bloków w tym samym stylu (krój,
+  wysokość liter ±20%, kolor tekstu, obecność obrysu; górna mediana), głosy wszystkich bloków
+  aktualizacji zbierane przed układem.
+- `OverlayBlockRenderer`: pojedyncza linia o nieznanym wyrównaniu, której środek tuszu leży
+  w 1% szerokości monitora od jego środka, jest wyśrodkowana (limit szerokości 1,6×).
+- `LiveSessionOptions.IdentityEchoSafe`: tłumaczenie identyczne z oryginałem jest wyłączone
+  z filtra anty-sprzężeniowego tylko wtedy, gdy nakładka go nie rysuje albo działa wykluczenie
+  nakładki z przechwytywania.
+- SceneReplay `typing` / `typing-nohold`: okno wpisujące dwie syntetyczne linie po 35 ms na znak
+  z pauzą 450 ms po interpunkcji, korpus syntetyczny, OCR ze skryptu odczytujący wpisaną część
+  z pikseli (tło koduje współrzędną x, więc wycinki OCR są czytane jak fragmenty).
+
+**Pomiar (SceneReplay typing, 2 linie).** Bez wstrzymywania: pełne tłumaczenie od ok. 4,2 s
+przed końcem pisania, 6 aktualizacji z polskim tekstem w trakcie pisania na linię, 2 mignięcia
+niepełnego tłumaczenia początku na linię, 4 zapytania do dostawcy. Ze wstrzymywaniem: 0
+aktualizacji z polskim tekstem w trakcie pisania, 0 niepełnych tłumaczeń, 0 podmian tekstu,
+napis 0,1–0,4 s po ostatniej literze, 2 zapytania (pełne linie; w aplikacji z tłumaczeniem
+korpusu z wyprzedzeniem 0). OverlayPreview (`krok-wyglad\po2`): menu jednolicie Lexend Deca
+Medium, dialog Normal, baner wyśrodkowany pod środkiem ekranu.
+
+**Regresje (SceneReplay po zmianach).** displayed: stary usunięty po 13 ms; local-occlusion:
+expected true, 0 strat menu; reading-jitter: B nie pokazany; hud-motion: expected true, 0 strat;
+ocr-timing: mediana capture→update 228,2 ms; stale-junk: usunięcie po 342 ms, 0 powrotów;
+stale-dim: 0 zniknięć. Testy: Core 1 251 (+1), Infrastructure 280, CorpusTool 166 — zielone.
+Raporty: `GTO Diagnostics\20261005-natywne-spolszczenie\krok-wyglad\typing` i
+`scenereplay-koncowe`.
+
+**Otwarte / ryzyka.** (1) Gra z bardzo długą pauzą w środku kwestii (ponad 0,9 s) pokaże pełne
+tłumaczenie w tej pauzie, a dopisywane potem litery wyjdą spod łatki do następnego odczytu.
+(2) Tekst spoza korpusu, który jest początkiem kwestii korpusu, czeka 0,9 s. (3) Wstrzymanie
+działa tylko w trybie zakrywania; w trybach z tekstem obok oryginału pełne tłumaczenie nadal
+pojawia się od początku kwestii. (4) Nie sprawdzone w oknie gry na żywo.

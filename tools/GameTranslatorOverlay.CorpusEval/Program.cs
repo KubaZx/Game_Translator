@@ -15,6 +15,15 @@ internal static class Program
           replay   --corpus KORPUS.jsonl --cache KOPIA_cache.db --prefilled BAZA_Z_KORPUSEM.db --work KATALOG_PRYWATNY --out KATALOG_LICZB [--profile escape-academy]
                    Powtórka bloków z cache przez TranslationPipeline (Mock): bez korpusu, z kluczami po akapitach,
                    z przyciąganiem do korpusu na pustym cache i na bazie wypełnionej przez CorpusTool translate.
+          session  --corpus KORPUS.jsonl --cache KOPIA_SESJI.db --since 2026-10-06T06:28 --work KATALOG_PRYWATNY --out KATALOG_LICZB [--profile escape-academy]
+                   Odczyty z sesji (wpisy cache od --since) przez bramkę live i TranslationPipeline (Mock): przed i po
+                   dopasowaniu etykiet, dialogu pisanego literami i odrzucaniu szumu; cache = kopia bazy bez tych wpisów.
+          prefixes --corpus KORPUS.jsonl --ocr PRYWATNY.jsonl --cache KOPIA_cache.db --out KATALOG_LICZB --private KATALOG_PRYWATNY
+                   Progi dialogu pisanego literami: ucięte odczyty OCR i ucięte linie korpusu, kontrola na blokach PoE2.
+          typing   --corpus KORPUS.jsonl --ocr PRYWATNY.jsonl --out KATALOG_LICZB --private KATALOG_PRYWATNY [--wrap 48]
+                   Dialog pisany literami: każda linia dopisywana co 3 znaki przez TranslationPipeline (Mock) — zapytania
+                   po pierwszym przyciągnięciu, zmiany klucza nakładki i wyświetlanego tekstu.
+          --features off (evaluate, bench, replay) wyłącza etykiety, prefiksy dialogu i odrzucanie szumu (stan sprzed rundy).
         Do katalogu liczb trafiają wyłącznie liczby, nigdy teksty gry.
         """;
 
@@ -36,6 +45,9 @@ internal static class Program
                 "evaluate" => EvaluateCommand.Run(options),
                 "bench" => BenchCommand.Run(options),
                 "replay" => ReplayCommand.Run(options),
+                "session" => SessionCommand.Run(options),
+                "prefixes" => PrefixCommand.Run(options),
+                "typing" => TypingCommand.Run(options),
                 _ => Fail($"Nieznane polecenie: {args[0]}"),
             };
         }

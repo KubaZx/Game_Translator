@@ -1407,7 +1407,7 @@ internal static class StaleLabelReplay
                     rawLines = update.Diagnostics?.RawLines, recognizedBlocks = update.Diagnostics?.RecognizedBlocks,
                     sceneCut = update.Diagnostics?.SceneCut, whiffSuspected = update.Diagnostics?.WhiffSuspected,
                     retainedBlocks = update.Diagnostics?.RetainedBlocks, reusedBlocks = update.Diagnostics?.ReusedBlocks,
-                    translateMs = update.Diagnostics?.TranslateMs, ocrMs = update.Diagnostics?.OcrMs,
+                    translateMs = update.Diagnostics?.TranslateMs, ocrMs = update.Diagnostics?.OcrMs, glyphCoverMs = update.Diagnostics?.GlyphCoverMs, glyphCoverWaitMs = update.Diagnostics?.GlyphCoverWaitMs,
                 });
             }
         }

@@ -47,7 +47,7 @@ Parametry pomiaru czasu: --provider-delay-ms przyjmuje całkowite 0–5000 (domy
 
 Niezerowa faza jest dostępna tylko dla displayed/inflight. Stop odrzuca opóźnienie inne niż 2000 lub fazę inną niż 0, bo ma stałe założenie dwóch oczekujących odpowiedzi. local-reading, reading-jitter i reading-whiff odrzucają samo podanie którejkolwiek nowej opcji, nawet z wartością domyślną. Przy zmianie Delay w ABA/churn/inflight trzeba uwzględnić, czy odpowiedź rzeczywiście nadal trwa podczas zmiany sceny; np. inflight przy Delay <250 ms może już nie przerywać oczekiwania.
 
-Każdy update z diagnostyką zawiera numeric captureMs, ocrMs i translateMs. Summary middleFirstOcrCompletedMs mierzy czas od Rendering sceny 2 do pierwszego zakończonego OCR rozpoznającego jej opis Archive; nie jest czasem rozpoczęcia OCR ani faktycznej prezentacji nakładki. middleReadyMs obejmuje także dalsze przetwarzanie/tłumaczenie. Gdy właściwego OCR/wyniku nie ma, odpowiedni pomiar pozostaje null.
+Każdy update z diagnostyką zawiera numeric captureMs, ocrMs i translateMs. Warianty displayed/inflight/aba/churn/stop/noisy (`Program.cs`) i stale-* zapisują też `glyphCoverMs` (budowa łatek z wypełnionymi literami w tle, od startu zadania do końca; 0 = łatki z poprzedniego przebiegu) i `glyphCoverWaitMs` (ile przetworzenie czekało na łatki po tłumaczeniu — to, co łatki dokładają do „zmiana → napis”). Sesja w SceneReplay buduje łatki zawsze (`BuildGlyphCovers` domyślnie true), choć narzędzie nie rysuje nakładki. Summary middleFirstOcrCompletedMs mierzy czas od Rendering sceny 2 do pierwszego zakończonego OCR rozpoznającego jej opis Archive; nie jest czasem rozpoczęcia OCR ani faktycznej prezentacji nakładki. middleReadyMs obejmuje także dalsze przetwarzanie/tłumaczenie. Gdy właściwego OCR/wyniku nie ma, odpowiedni pomiar pozostaje null.
 
 Scenariusze pozycji w osobnym MovingTextReplay.cs (wejście Run(output, scenario)):
 
@@ -177,6 +177,14 @@ mierzoną zmianą: bez niej zmiana wypada zawsze w tej samej fazie zegara przech
   `PreserveSubtitleLifetime`, czas paska 8 s jak domyślne `SubtitleSeconds`) i sprawdza, czy po
   powrocie etykiety jej tłumaczenie wraca także na pasek (`subtitleOldReturnedAfterSecondStepMs`),
   a nie tylko do bloków.
+- `typing` / `typing-nohold` (scripted OCR, `TypingReplay.cs`): okno wpisuje dwie syntetyczne
+  linie dialogu (35 ms na znak, 450 ms pauzy po interpunkcji), aktywny profil z syntetycznym
+  korpusem, Mock 0 ms. OCR czyta wpisaną część z pikseli: białe glify wyznaczają zasięg tuszu,
+  a tło koduje współrzędną x w kanałach RGB, więc wycinek OCR jest czytany od właściwej litery
+  (fragment, gdy wycinek nie obejmuje początku linii). Raport na linię: `shownAfterTypingEndMs`
+  (od zdarzenia końca pisania, po pauzie 450 ms za ostatnią kropką), `shownWhileTypingUpdates`,
+  `partialTranslationUpdates`, `textChanges`; w podsumowaniu zapytania do Mocka. `typing-nohold`
+  wyłącza `HoldTypingPrefixes` dla porównania.
 
 Geometria scripted OCR pochodzi wyłącznie z pikseli: znacznik #900090 8×8 px w środku
 starego pola glifów (rysowany we wszystkich wariantach scripted) wyznacza położenie i skalę także

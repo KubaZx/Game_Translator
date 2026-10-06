@@ -55,11 +55,31 @@ public class NoticeTextsTests
         string[] texts =
         [
             NoticeTexts.CacheDegraded, NoticeTexts.SessionLimit, NoticeTexts.LiveStarted, NoticeTexts.LiveStopped,
-            NoticeTexts.NoTextFound, NoticeTexts.TranslationFailed, NoticeTexts.EmptyResult("DeepL"),
+            NoticeTexts.NoTextFound, NoticeTexts.TranslationFailed, NoticeTexts.ExclusiveFullscreen, NoticeTexts.EmptyResult("DeepL"),
             NoticeTexts.EmptyResult(new string('x', 200)), NoticeTexts.CacheOnlyMisses(int.MaxValue),
         ];
 
         Assert.All(texts, text => Assert.True(text.Length <= NoticeTexts.MaxLength, text));
+    }
+
+    [Theory]
+    [InlineData(0, 0, 3840, 2160, true)]
+    [InlineData(-8, -8, 3856, 2176, true)]
+    [InlineData(0, 0, 3840, 2100, false)]
+    [InlineData(200, 120, 1920, 1080, false)]
+    public void Pelny_ekran_to_okno_zakrywajace_caly_monitor(int x, int y, int width, int height, bool expected)
+    {
+        var monitor = new GameTranslatorOverlay.Core.Ocr.RectPx(0, 0, 3840, 2160);
+        Assert.Equal(expected, OverlayNotices.CoversWholeMonitor(new GameTranslatorOverlay.Core.Ocr.RectPx(x, y, width, height), monitor));
+    }
+
+    [Fact]
+    public void Komunikat_o_pelnym_ekranie_jest_ostrzezeniem_bez_tresci_z_gry()
+    {
+        var notice = OverlayNotices.ExclusiveFullscreen();
+        Assert.Equal(NoticeSeverity.Warning, notice.Severity);
+        Assert.Contains("okno bez ramki", notice.Text);
+        Assert.False(notice.IsCritical);
     }
 
     [Theory]

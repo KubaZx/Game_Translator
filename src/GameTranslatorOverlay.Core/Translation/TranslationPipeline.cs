@@ -377,6 +377,60 @@ public sealed class TranslationPipeline(
         return corpus.Index.TryGetExact(key, out var entry) && TranslationUnitPlanner.IsUsable(entry, text);
     }
 
+    private const string IdentityPrefix = "\u0001korpus\u0001";
+    private const string IdentitySeparator = "\u0002";
+    private readonly ConcurrentDictionary<string, bool> _noise = new(StringComparer.Ordinal);
+
+    public bool ShouldTranslateLive(string text) =>
+        IsExactCorpusText(text) || (JunkFilter.IsMeaningful(text) && !IsCorpusNoise(text));
+
+    public bool IsCorpusNoise(string text)
+    {
+        if (options.Corpus is not { Index.IsEmpty: false } corpus || string.IsNullOrWhiteSpace(text)) return false;
+        var normalized = TextNormalizer.Normalize(text);
+        if (normalized.Length == 0) return false;
+        if (_noise.TryGetValue(normalized, out var known)) return known;
+        var noise = !glossary.TryTranslateExact(normalized, out _) && corpus.LooksLikeNoise(normalized);
+        if (_noise.Count >= MaxRememberedPlans) _noise.Clear();
+        _noise[normalized] = noise;
+        return noise;
+    }
+
+    public bool IsCorpusPrefix(string text)
+    {
+        if (options.Corpus is not { Index.IsEmpty: false } corpus || string.IsNullOrWhiteSpace(text)) return false;
+        var normalized = TextNormalizer.Normalize(text);
+        if (normalized.Length == 0) return false;
+        var plan = PlanFor(normalized);
+        if (plan is not null && plan.Units.Any(static unit => unit.Prefix || IsShortFuzzyRead(unit))) return true;
+        return (plan is null || !plan.Units.Any(static unit => unit.FromCorpus)) && corpus.StartsSpokenLine(normalized);
+    }
+
+    private static bool IsShortFuzzyRead(TranslationUnit unit)
+    {
+        if (!unit.FromCorpus || unit.ExactMatch || unit.Literal) return false;
+        var corpusLetters = CorpusText.LetterOrDigitCount(unit.Key);
+        var missing = corpusLetters - CorpusText.LetterOrDigitCount(unit.ScreenText);
+        return missing >= Math.Max(3, corpusLetters * 0.07);
+    }
+
+    public string? CorpusIdentity(string text)
+    {
+        if (options.Corpus is not { Index.IsEmpty: false } corpus || string.IsNullOrWhiteSpace(text)) return null;
+        var normalized = TextNormalizer.Normalize(text);
+        if (normalized.Length == 0) return null;
+        if (PlanFor(normalized) is not { } plan)
+        {
+            return corpus.Index.TryGetExact(CorpusText.MatchKey(normalized), out var entry) && TranslationUnitPlanner.IsUsable(entry, normalized)
+                ? IdentityPrefix + CorpusTranslationKey.For(entry)
+                : null;
+        }
+        var translatable = plan.Translatable.ToList();
+        if (translatable.Count == 0 || translatable.Any(static unit => !unit.FromCorpus)) return null;
+        return IdentityPrefix + string.Join(IdentitySeparator, plan.Units.Select(static unit =>
+            unit.Literal ? CorpusText.LooseKey(CorpusText.MatchKey(unit.ScreenText)) : unit.Key));
+    }
+
     private UnitPlan?[]? PlanAll((string Source, string Normalized)[] inputs)
     {
         if (!options.SplitParagraphs && options.Corpus is not { Index.IsEmpty: false }) return null;

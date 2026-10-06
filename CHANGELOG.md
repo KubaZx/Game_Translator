@@ -4,6 +4,40 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
+### Wygląd napisów „Na oryginale (zakrywa)”
+
+- **Tłumaczenie wygląda jak napis gry.** Zamiast rozmytego prostokąta z obrazu znikają same
+  litery oryginału — ich piksele są wypełniane kolorami tła z otoczenia, a reszta obrazu gry
+  zostaje nietknięta. Polski tekst dostaje kolor, kontur, cień, wysokość liter i linię bazową
+  zmierzone z napisu gry (na klatkach Escape Academy wysokość 0,96–1,10× oryginału, linia bazowa
+  w 0–1 px; wcześniej ok. 0,55×, biały kontur pod białym dialogiem, ciemne plamy i prześwitujący
+  cień oryginału). Gdy tło pod napisem się rusza, łatka jest miękka, dopóki obraz nie stanie.
+- **Krój jak w grze.** Nowa pozycja kroju **Jak w grze (krój z profilu)** (domyślna; dotychczasowy
+  domyślny Segoe UI przechodzi na nią raz). Profil Escape Academy używa dołączonego kroju
+  Lexend Deca (licencja SIL OFL 1.1), z grubością dobraną do liter w grze; bez profilu Segoe UI.
+  Profil gry może wskazać krój polem `overlay.fontFamily`.
+- **Ikony zostają.** Ikona klawisza przed napisem („X Hint” → ikona X + „Podpowiedź”) i ikonka
+  za napisem (np. ✓ obok języka) nie są zamazywane, a odczytana z nich litera nie trafia do
+  tłumaczenia na ekranie.
+- **Dłuższy polski tekst** w dialogu najpierw lekko się zmniejsza (najwyżej do 85%), potem łamie
+  się w szerokości oryginału z jego odstępem wierszy; pojedyncza etykieta może wejść w wolne
+  miejsce obok i nie wychodzi poza monitor.
+- **Mniej migania:** tłumaczenie identyczne z oryginałem (nazwy, „OK”, logo) nie jest rysowane
+  w trybie zakrywania — widać grę; taki napis nie był też już rozpoznawany jako „własne
+  tłumaczenie” nakładki, przez co przy zmiennym tle znikał i wracał co kilka odczytów.
+- **Kwestia pisana literami nie miesza języków.** W trybie zakrywania dialog, który gra wpisuje
+  litera po literze, zostaje po angielsku, dopóki tekst rośnie, a gdy gra skończy pisać, od
+  razu pojawia się całe polskie tłumaczenie kwestii (w teście 0,1–0,4 s po ostatniej literze;
+  wcześniej polski tekst stał na dopisywanych angielskich literach, a krótki początek kwestii
+  migał niepełnym tłumaczeniem z dostawcy).
+- **Jedna grubość liter w menu:** napisy w tym samym stylu (rozmiar, kolor, obrys) dostają tę
+  samą grubość kroju (wcześniej np. „Graj” cieńsze od „Ustawienia”).
+- **Wyśrodkowany napis zostaje na środku:** jednowierszowy napis wyśrodkowany na ekranie
+  (np. baner w menu Escape Academy) rośnie w obie strony zamiast w prawo.
+- **Komunikat o pełnym ekranie:** gdy gra działa na wyłącznym pełnym ekranie i nie daje się
+  przechwycić jako okno, nakładka pokazuje „⚠ Pełny ekran utrudnia nakładkę — przełącz na okno
+  bez ramki” (instrukcja: zalecany tryb okna bez ramki).
+
 ### Tryb live — poprawki błędów
 
 - **Tłumaczenie znika razem z napisem w grze** (zgłoszenie: „Zbadaj” zostawało na ekranie po
@@ -116,6 +150,38 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 - `PRIVACY.md` i ADR-014: przy dopasowaniu do korpusu do dostawcy może trafić pełne zdanie
   z korpusu, którego część dopiero pojawia się na ekranie (wcześniej dokument obiecywał „ten sam
   tekst, który jest na ekranie”).
+- **Etykiety źle odczytane przez OCR** (pierwsza sesja na nowej wersji: ok. 12 krótkich etykiet
+  w rodzaju „Ihspect” zamiast „Inspect” albo „Userltem” zamiast „Use Item” szło do DeepL i wracało
+  bez tłumaczenia). Krótki tekst (3–15 znaków) jest przyciągany do etykiety korpusu aktywnego
+  profilu, gdy różni się od niej tylko typowymi pomyłkami OCR — I/l/1/|/!/apostrof, rn↔m, cl↔d,
+  vv↔w, h↔n, c↔e, cyfra w miejscu podobnej litery, spacja, interpunkcja, kreska na brzegu — oraz
+  najwyżej jedną inną literą (od 7 znaków). Nakładka pokazuje tłumaczenie etykiety z korpusu (bez
+  zapytania, gdy jest przetłumaczona z wyprzedzeniem). Bez przyciągania: gdy drugi kandydat jest
+  prawie tak samo blisko, gdy odczyt składa się z samych innych słów gry („Exit” nie zostaje
+  „Edit”), gdy na brzegu brakuje albo przybywa zwykłej litery („The fir” nie zostaje „The Fire”),
+  gdy odczyt ma więcej słów niż etykieta, gdy jest początkiem dłuższego tekstu gry („Connecti” —
+  „Connecting…”) i gdy nie zgadzają się liczby (ochrona liczb jak dotąd).
+- **Dialog pisany literami:** odczyt, który jest początkiem dokładnie jednej linii dialogu albo
+  napisów korpusu (od 12 liter i 3 słów, do 10% pomyłek OCR), od razu dostaje tłumaczenie całej
+  kwestii — napis może pojawić się, zanim gra dopisze resztę. Kolejne, dłuższe odczyty tej samej
+  kwestii trafiają w ten sam wpis tłumaczenia (zero nowych zapytań) i w ten sam blok nakładki:
+  napis aktualizuje się w miejscu (rośnie razem z oryginałem), bez podmiany i bez ponownego
+  pojawiania się. Linie o wspólnym początku (np. ta sama kwestia w wersji dla jednego i dla dwóch
+  graczy) czekają, aż odczyt je rozróżni. Gdy na ekranie są już co najmniej dwa
+  wiersze, tłumaczenie od razu dostaje przewidywaną liczbę wierszy całej kwestii.
+- **Śmieci OCR przy aktywnym korpusie** (zlepki liter odczytane z ikon i tekstur, same liczby
+  typu „11/11”): krótki odczyt (do 16 liter), w którym większość liter nie tworzy słów znanych z tekstów
+  gry albo który ma dużo nietypowych znaków, bez żadnego dopasowania i bez podobieństwa do tekstu
+  korpusu, nie idzie do dostawcy ani na nakładkę (oryginał zostaje widoczny). Termin słownika nie
+  jest śmieciem. W bloku z prawdziwym tekstem taki wiersz zostaje bez tłumaczenia. Bez korpusu
+  filtr działa jak dotąd.
+- Ta sama etykieta odczytana raz poprawnie, raz z pomyłką OCR („Inspect”/„Ihspect”) jest dla
+  nakładki tym samym blokiem — napis nie jest podmieniany przy drżeniu odczytu.
+- Pomiar na odczytach z pierwszej sesji na nowej wersji (36 tekstów, które poszły do DeepL;
+  powtórka przez pipeline z Mockiem na kopii bazy gracza): lokalnie 15 (11 etykiet, 4 kwestie
+  dialogu — wszystkie poprawne w przeglądzie ręcznym), odrzucone jako śmieci 11, do dostawcy 10
+  zamiast 36 (171 zamiast 571 znaków) —
+  [ROADMAP.md → Runda 2026-10-06 (4)](docs/ROADMAP.md).
 
 ### Modele językowe
 
@@ -151,6 +217,30 @@ czas tłumaczenia (ten wyznaczają OCR i dostawca). Liczby przed/po:
 
 ### Dla deweloperów
 
+- **Łatka z wypełnionymi literami (`Core.Vision.GlyphCoverBuilder`, `GlyphCover`, `InkProfile`):**
+  maska liter (odchylenie od tła z pierścienia + top-hat, próg 50% kontrastu), obwódka (kontur,
+  cień), wypełnienie push-pull, kolor/kontur/cień/linia bazowa/gęstość/wyrównanie/ikony; duże
+  napisy w 1/2–1/3 rozdzielczości. Koszt na klatce 4K: 1,7–24 ms na blok, cała klatka nowych
+  napisów równolegle 2–16 ms, ponowne użycie po podpisie pola 0,03–0,11 ms. Liczona
+  w `LiveTranslationSession` równolegle z tłumaczeniem (`LiveSessionOptions.BuildGlyphCovers`,
+  `LiveFrameDiagnostics.GlyphCoverMs/GlyphCoverWaitMs`, w SceneReplay `glyphCoverMs`).
+  Rysowana przez `App.Ui.GameTextElement` (geometria, kontur piórem, cień) z krojem
+  z `OverlayFonts` (zasoby `App/Fonts`, wybór grubości po gęstości tuszu). Szczegóły i pomiary:
+  [ROADMAP.md → Runda 2026-10-06 (5)](docs/ROADMAP.md).
+- **OverlayPreview** (`tools/GameTranslatorOverlay.OverlayPreview`, Windows): składa prawdziwą
+  nakładkę (wspólny `App.Ui.OverlayBlockRenderer`, wydzielony z `OverlayWindow`) na klatce gry
+  przez Windows OCR, bramkę live i lokalny pipeline z kopii bazy, zapisuje PNG, porównanie
+  i powiększenia bloków oraz `galeria.md`; sieć zablokowana, brak w bazie = Mock `[PL]`.
+- **Wstrzymanie niedokończonej kwestii:** `LiveSessionOptions.HoldTypingPrefixes`,
+  `TypingPrefixSettleTime` (0,9 s), `TypingPrefixHoldLimit` (8 s), `TranslationPipeline.IsCorpusPrefix`,
+  `CorpusSnapper.StartsSpokenLine`; SceneReplay `typing` / `typing-nohold` (pomiar w
+  [ROADMAP.md → Runda 2026-10-06 (6)](docs/ROADMAP.md)). `OverlayFonts.ChooseStyleWeight`
+  (grubość z głosów bloków w jednym stylu), `LiveSessionOptions.IdentityEchoSafe`.
+- **OverlayPreview:** `--cover crisp|soft|off`, `--font-family auto` (domyślnie, jak gracz),
+  rozgrzanie krojów i czasy układu WPF/łatek w konsoli. Galerie PRZED/PO:
+  `GTO Diagnostics\20261005-natywne-spolszczenie\krok-wyglad` (poza repo).
+- Testy: 24 nowe w Core (łatka, profil tuszu, ikony, kotwica, podpis, komunikat pełnego ekranu,
+  `overlay.fontFamily`) i 4 w Infrastructure (migracja kroju) — wyłącznie dane syntetyczne.
 - **Core: przyciąganie odczytu OCR do korpusu gry** (`GameTranslatorOverlay.Core.Corpus`):
   `CorpusIndex` (trigramy po tekście bez wielkości liter) i `CorpusSnapper` dopasowują cały
   blok, akapity po `TextReflow.Unwrap` i pojedyncze wiersze (dokładnie, przybliżenie albo

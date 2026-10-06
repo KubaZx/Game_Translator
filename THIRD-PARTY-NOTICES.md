@@ -18,6 +18,17 @@ znajdują się na stronach projektów.
 | H.NotifyIcon.Wpf | MIT | ikona w zasobniku systemowym |
 | Anthropic (oficjalne SDK C#) + Microsoft.Extensions.AI.Abstractions | MIT | opcjonalny dostawca tłumaczeń Claude |
 
+## Czcionki dołączone do aplikacji
+
+| Czcionka | Licencja | Zastosowanie |
+|---|---|---|
+| Lexend Deca (Regular, Medium, SemiBold, Bold; wersja 1.007) — Copyright 2019 The Lexend Project Authors (https://github.com/googlefonts/lexend) | SIL Open Font License 1.1 | krój napisów nakładki w profilu Escape Academy (`overlay.fontFamily`) |
+
+Pliki czcionki są zasobami aplikacji (`src/GameTranslatorOverlay.App/Fonts`), niezmienione.
+Pełny tekst licencji: `licenses/LexendDeca-OFL.txt` obok programu
+(`src/GameTranslatorOverlay.App/Fonts/OFL.txt` w repozytorium). Czcionki nie są sprzedawane
+osobno, zgodnie z warunkiem 1 licencji OFL.
+
 ## Wyłącznie do budowania i testów (nie są dystrybuowane z aplikacją)
 
 | Biblioteka | Licencja |

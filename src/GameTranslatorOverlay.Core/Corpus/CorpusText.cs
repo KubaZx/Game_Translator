@@ -149,6 +149,36 @@ public static partial class CorpusText
         return count;
     }
 
+    public static IEnumerable<string> Words(string text)
+    {
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (!char.IsLetter(text[i]))
+            {
+                i++;
+                continue;
+            }
+            var start = i;
+            while (i < text.Length
+                   && (char.IsLetter(text[i]) || (text[i] == '\'' && i + 1 < text.Length && char.IsLetter(text[i + 1]))))
+            {
+                i++;
+            }
+            yield return text[start..i].ToLowerInvariant();
+        }
+    }
+
+    public static string LettersOnly(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        foreach (var ch in text)
+        {
+            if (char.IsLetter(ch)) builder.Append(char.ToLowerInvariant(ch));
+        }
+        return builder.ToString();
+    }
+
     public static int LetterOrDigitCount(string text)
     {
         var count = 0;

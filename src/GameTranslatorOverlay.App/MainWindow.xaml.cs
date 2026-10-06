@@ -26,6 +26,8 @@ namespace GameTranslatorOverlay.App;
 
 public partial class MainWindow : Window
 {
+    private const string AutoFontLabel = "Jak w grze (krój z profilu)";
+
     private const string NoProfileLabel = "— brak profilu (tryb uniwersalny) —";
 
     private readonly TranslationOrchestrator _orchestrator;
@@ -161,8 +163,8 @@ public partial class MainWindow : Window
             _ => 0,
         };
 
-        CmbFont.ItemsSource = new[] { "Segoe UI", "Georgia", "Palatino Linotype", "Cambria", "Book Antiqua", "Times New Roman" };
-        CmbFont.SelectedItem = _settings.OverlayFontFamily;
+        CmbFont.ItemsSource = new[] { AutoFontLabel, "Segoe UI", "Georgia", "Palatino Linotype", "Cambria", "Book Antiqua", "Times New Roman" };
+        CmbFont.SelectedItem = Ui.OverlayFonts.IsAuto(_settings.OverlayFontFamily) ? AutoFontLabel : _settings.OverlayFontFamily;
         if (CmbFont.SelectedItem is null) CmbFont.SelectedIndex = 0;
 
         // Kolejność pozycji = PlayerGender (Unknown, Male, Female) — indeks to wartość wyliczenia.
@@ -607,6 +609,7 @@ public partial class MainWindow : Window
                 .ToList();
             if (translated.Count > 0)
             {
+                _overlay.ProfileFontFamily = _orchestrator.ActiveProfile?.Overlay?.FontFamily;
                 _overlay.ShowBlocks(translated, _settings);
             }
             ShowOverlayNotice(notice, result.Region);
@@ -851,7 +854,7 @@ public partial class MainWindow : Window
             TxtFontSize.Text = _settings.OverlayFontSize.ToString(CultureInfo.InvariantCulture);
         }
 
-        _settings.OverlayFontFamily = CmbFont.SelectedItem as string ?? "Segoe UI";
+        _settings.OverlayFontFamily = CmbFont.SelectedItem is string font && font != AutoFontLabel ? font : AppSettings.AutoFontFamily;
         _settings.PlayerGender = PlayerGenders.ToSetting(CmbPlayerGender.SelectedIndex switch
         {
             1 => PlayerGender.Male,
@@ -1144,10 +1147,19 @@ public partial class MainWindow : Window
             OcrUpscale = upscale.Preferred,
             AllowAutoUpscale = upscale.AllowAuto,
             NoticeEcho = _noticeEcho,
+            BuildGlyphCovers = () => _settings.OverlayPlacement == "cover" && _settings.LiveDisplayMode != "subtitle",
+            HoldTypingPrefixes = () => _settings.OverlayPlacement == "cover" && _settings.LiveDisplayMode != "subtitle",
+            IdentityEchoSafe = () => Ui.OverlayBlockRenderer.HidesIdenticalText(_settings) || _overlay.IsCaptureExclusionActive,
         };
 
         // Wczesne utworzenie HWND nakładki, żeby wiedzieć, czy wykluczenie z capture działa.
         _overlay.EnsureHandleCreated();
+        _overlay.ProfileFontFamily = profile?.Overlay?.FontFamily;
+        if (_settings.OverlayPlacement == "cover")
+        {
+            Ui.OverlayFonts.WarmUp(Ui.OverlayFonts.ResolveFamilyName(_settings, _overlay.ProfileFontFamily));
+            _ = Task.Run(GameTranslatorOverlay.Core.Vision.GlyphCoverBuilder.WarmUp);
+        }
         if (!_overlay.IsCaptureExclusionActive)
         {
             _logger.LogWarning("Wykluczenie nakładki z przechwytywania nie działa na tym systemie — aktywny filtr anty-sprzężeniowy");
@@ -1257,6 +1269,7 @@ public partial class MainWindow : Window
             }
             else
             {
+                _overlay.ProfileFontFamily = _orchestrator.ActiveProfile?.Overlay?.FontFamily;
                 _overlay.UpdateLiveBlocks(blocks, _settings);
             }
         }

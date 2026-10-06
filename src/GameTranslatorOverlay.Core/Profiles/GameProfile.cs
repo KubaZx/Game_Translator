@@ -20,6 +20,12 @@ public sealed class GameProfile
     public string? MinAppVersion { get; set; }
     public bool? Online { get; set; }
     public CorpusRecipe? Corpus { get; set; }
+    public OverlayProfileSettings? Overlay { get; set; }
+}
+
+public sealed class OverlayProfileSettings
+{
+    public string? FontFamily { get; set; }
 }
 
 public sealed class OcrProfileSettings
@@ -97,6 +103,11 @@ public static class ProfileValidator
         if (profile.ChangeDetection is { } cd && (cd.Fps <= 0 || cd.Fps > 30))
         {
             errors.Add("Wartość changeDetection.fps musi mieścić się w zakresie 0–30.");
+        }
+        if (profile.Overlay?.FontFamily is { } fontFamily
+            && (fontFamily.Trim().Length is 0 or > 64 || fontFamily.IndexOfAny(['\\', '/', ':', '#', '*', '?', '"', '<', '>', '|']) >= 0))
+        {
+            errors.Add("Pole overlay.fontFamily musi być nazwą kroju (do 64 znaków, bez ścieżki).");
         }
         if (profile.Corpus is { } corpus)
         {
