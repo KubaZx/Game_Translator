@@ -50,11 +50,12 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy] [--ocr scripted|windows]\n" +
+            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink] [--ocr scripted|windows]\n" +
                 "  [--provider-delay-ms 0..5000] [--phase-ms 0..200] [--ocr-delay-ms 100..600 only ocr-timing]\n" +
                 "  [--assets KATALOG_Z_inspect_crop.png] [--texture OBRAZ] [--texture-origin X,Y] [--bright-spot-px 4..14] only stale-*\n" +
+                "  [--fade-ms 100..1000 only stale-fade] [--dim-percent 10..90 only stale-dim] [--junk-run 1..3 only stale-present-junk]\n" +
                 "Wlasne widoczne okno; prawdziwy capture i LiveTranslationSession. Mock domyslnie 2000 ms, bez sieci.\n" +
-                "Faza domyslnie 0 ms; niezerowa tylko dla displayed/inflight. Scenariusze local-reading/reading-jitter/reading-whiff odrzucaja oba parametry.\n" +
+                "Faza domyslnie 0 ms; niezerowa tylko dla displayed/inflight/stale-*. Scenariusze local-reading/reading-jitter/reading-whiff odrzucaja oba parametry.\n" +
                 "Domyslnie displayed oraz scripted OCR z koloru przechwyconej klatki. Bez sterowania gra.");
             return 0;
         }
@@ -73,6 +74,9 @@ internal static class Program
             string? texturePath = null;
             (int X, int Y)? textureOrigin = null;
             var brightSpotPx = 0;
+            int? dimPercent = null;
+            int? fadeMs = null;
+            int? junkRun = null;
             for (var i = 0; i < args.Length; i++)
             {
                 var option = args[i];
@@ -102,22 +106,39 @@ internal static class Program
                         brightSpotPx = ParseMilliseconds(args[i], option, 14);
                         if (brightSpotPx < 4) throw new ArgumentException("--bright-spot-px wymaga liczby calkowitej od 4 do 14.");
                         break;
+                    case "--dim-percent":
+                        dimPercent = ParseMilliseconds(args[i], option, 90);
+                        if (dimPercent < 10) throw new ArgumentException("--dim-percent wymaga liczby calkowitej od 10 do 90.");
+                        break;
+                    case "--fade-ms":
+                        fadeMs = ParseMilliseconds(args[i], option, 1000);
+                        if (fadeMs < 100) throw new ArgumentException("--fade-ms wymaga liczby calkowitej od 100 do 1000.");
+                        break;
+                    case "--junk-run":
+                        junkRun = ParseMilliseconds(args[i], option, 3);
+                        if (junkRun < 1) throw new ArgumentException("--junk-run wymaga liczby calkowitej od 1 do 3.");
+                        break;
                     default: throw new ArgumentException("Nieznany argument.");
                 }
             }
             if (output is null) throw new ArgumentException("Wymagany nowy plik --output.");
-            var staleScenario = scenario is "stale-junk" or "stale-junk-ghost" or "stale-texture" or "stale-newtext" or "stale-busy";
+            var staleScenario = StaleLabelReplay.Scenarios.Contains(scenario);
             if (!staleScenario && (assetsDirectory is not null || texturePath is not null || textureOrigin is not null || brightSpotPx > 0))
                 throw new ArgumentException("--assets, --texture, --texture-origin i --bright-spot-px sa dostepne tylko dla stale-*.");
+            if ((dimPercent is not null && scenario != "stale-dim") || (fadeMs is not null && scenario != "stale-fade")
+                || (junkRun is not null && scenario != "stale-present-junk"))
+                throw new ArgumentException("--dim-percent, --fade-ms i --junk-run sa dostepne tylko dla stale-dim, stale-fade i stale-present-junk.");
             if (staleScenario)
             {
-                if (phaseSpecified || ocrDelaySpecified)
-                    throw new ArgumentException("stale-* nie obsluguje --phase-ms ani --ocr-delay-ms.");
-                var requiredOcr = scenario is "stale-junk" or "stale-junk-ghost" ? "scripted" : "windows";
+                if (ocrDelaySpecified)
+                    throw new ArgumentException("stale-* nie obsluguje --ocr-delay-ms.");
+                var requiredOcr = StaleLabelReplay.ScriptedScenarios.Contains(scenario) ? "scripted" : "windows";
                 if (args.Contains("--ocr") && ocrMode != requiredOcr)
                     throw new ArgumentException($"{scenario} requires {requiredOcr} OCR.");
                 return StaleLabelReplay.Run(output, scenario, assetsDirectory, texturePath, textureOrigin,
-                    providerDelaySpecified ? providerDelayMs : 1000, brightSpotPx);
+                    new StaleLabelReplay.Options(providerDelaySpecified ? providerDelayMs : 1000, brightSpotPx, phaseMs,
+                        dimPercent ?? StaleLabelReplay.DefaultDimPercent, fadeMs ?? StaleLabelReplay.DefaultFadeMs,
+                        junkRun ?? StaleLabelReplay.DefaultJunkRun));
             }
             if (scenario is "hud-motion" or "hud-motion-whiff" or "hud-motion-small-whiff")
             {

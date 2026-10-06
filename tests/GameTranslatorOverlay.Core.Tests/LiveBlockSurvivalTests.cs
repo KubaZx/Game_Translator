@@ -132,4 +132,37 @@ public class LiveBlockSurvivalTests
 
         Assert.Empty(survivors);
     }
+
+    [Fact]
+    public void Bliskie_bloki_z_brakami_dolaczaja_do_wycinka()
+    {
+        var frame = new RectPx(0, 0, 1500, 900);
+
+        var seed = LiveBlockSurvival.PartialOcrSeed(new RectPx(100, 100, 50, 50), new RectPx(300, 100, 50, 50), frame, 24);
+
+        Assert.Equal(new RectPx(76, 76, 298, 98), seed);
+    }
+
+    [Fact]
+    public void Odlegle_bloki_z_brakami_nie_rozciagaja_wycinka_ponad_polowe_klatki()
+    {
+        var frame = new RectPx(0, 0, 1500, 900);
+        var unconfirmed = LiveBlockSurvival.UnconfirmedRegion(
+        [
+            Block(1, new RectPx(20, 20, 60, 20)),
+            Block(1, new RectPx(1400, 820, 60, 20)),
+        ]);
+
+        var seed = LiveBlockSurvival.PartialOcrSeed(new RectPx(700, 400, 40, 40), unconfirmed, frame, 24);
+
+        Assert.Equal(new RectPx(676, 376, 88, 88), seed);
+    }
+
+    [Fact]
+    public void Bez_blokow_z_brakami_ziarnem_jest_poszerzony_region_zmian_w_klatce()
+    {
+        var frame = new RectPx(0, 0, 1500, 900);
+
+        Assert.Equal(new RectPx(0, 0, 54, 54), LiveBlockSurvival.PartialOcrSeed(new RectPx(10, 10, 20, 20), null, frame, 24));
+    }
 }

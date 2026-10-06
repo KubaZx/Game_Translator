@@ -14,6 +14,8 @@ public sealed class LiveReadingStabilizer
     private const double SimilarityThreshold = 0.5;
     private const double CleanQuality = 0.9;
     private const double QualityTolerance = 0.1;
+    public const double PlausibleQuality = 0.75;
+    public const double PlausibleLetterShare = 0.5;
     private readonly Dictionary<string, (string Displayed, string Candidate)> _pending = new(StringComparer.Ordinal);
 
     public LiveReadingDecision Observe(string key, string displayed, string candidate)
@@ -70,6 +72,20 @@ public sealed class LiveReadingStabilizer
             && !IsWholeWordFragment(candidate, displayed);
     }
 
+    public static bool IsPlausibleText(string candidate)
+    {
+        candidate = TextNormalizer.Normalize(candidate);
+        if (candidate.Length == 0 || ReadingQuality.Score(candidate) < PlausibleQuality) return false;
+        var visible = candidate.Count(static ch => !char.IsWhiteSpace(ch));
+        return visible > 0 && candidate.Count(char.IsLetter) >= visible * PlausibleLetterShare;
+    }
+
+    public static bool IsImplausibleReading(string displayed, string candidate) =>
+        IsUnrelatedDirtierReading(displayed, candidate) && !IsPlausibleText(candidate);
+
+    public static bool IsVariantOf(string displayed, string candidate) =>
+        TextSimilarity.Ratio(TextNormalizer.Normalize(candidate), TextNormalizer.Normalize(displayed)) >= SimilarityThreshold;
+
     public void Reset(string key) => _pending.Remove(key);
     public void Clear() => _pending.Clear();
     public void Prune(IReadOnlySet<string> liveKeys)
@@ -81,7 +97,8 @@ public sealed class LiveReadingStabilizer
     private static bool CanReplace(string candidate, string displayed, double similarity,
         double candidateQuality, double displayedQuality)
     {
-        if (candidateQuality < displayedQuality - QualityTolerance) return false;
+        if (candidateQuality < displayedQuality - QualityTolerance)
+            return similarity < SimilarityThreshold && IsPlausibleText(candidate);
         if (similarity < SimilarityThreshold) return true;
         if (candidateQuality > displayedQuality + QualityTolerance) return true;
 

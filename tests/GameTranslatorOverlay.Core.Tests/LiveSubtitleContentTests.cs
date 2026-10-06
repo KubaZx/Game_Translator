@@ -120,4 +120,29 @@ public class LiveSubtitleContentTests
         Assert.Equal(new string('a', 398) + "…", shortened);
         Assert.True(shortened.Length <= 400);
     }
+
+    [Fact]
+    public void Napis_ktory_wrocil_po_zniknieciu_wraca_na_pusty_pasek()
+    {
+        var content = new LiveSubtitleContent();
+        content.Replace([Text("inspect", "Zbadaj")]);
+
+        Assert.True(content.Contains("inspect"));
+        Assert.Equal(string.Empty, content.Remove(["inspect"]));
+        Assert.True(content.IsEmpty);
+        Assert.False(content.Contains("inspect"));
+        Assert.Equal("Zbadaj", content.Restore([Text("inspect", "Zbadaj")]));
+        Assert.False(content.IsEmpty);
+    }
+
+    [Fact]
+    public void Powrot_napisu_dolacza_go_za_biezaca_trescia_bez_dublowania()
+    {
+        var content = new LiveSubtitleContent();
+        content.Replace([Text("inspect", "Zbadaj"), Text("dialog", "Drzwi są otwarte")]);
+        content.Remove(["inspect"]);
+
+        Assert.Equal("Drzwi są otwarte\nZbadaj", content.Restore([Text("inspect", "Zbadaj"), Text("dialog", "Drzwi są otwarte")]));
+        Assert.Equal("Drzwi są otwarte\nZbadaj", content.Restore([Text("inspect", "Zbadaj")]));
+    }
 }

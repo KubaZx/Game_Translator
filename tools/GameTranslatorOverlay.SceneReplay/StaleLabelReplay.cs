@@ -33,33 +33,51 @@ internal static class StaleLabelReplay
     private const string JunkReading = "lRrgIé@ue";
     private const string NewText = "The drawer is open";
     private const string NewWord = "is open";
+    private const string DirtyNewText = "Loading…";
+    private const string DirtyNewWord = "Loading";
     private const string LabelCropFile = "inspect_crop.png";
     private const int FrameWidth = 1500;
     private const int FrameHeight = 900;
     private const int ObservationMs = 12000;
     private const int SettleMs = 1500;
+    private const int SecondStepMs = 1500;
     private const int SettledReadingMs = 200;
     private const int AnimationIntervalMs = 200;
     private const int MarkerSize = 8;
     private const int OutlineDilation = 7;
     private const int GhostCycle = 4;
+    private const int SubtitleSeconds = 8;
     private const double JunkShiftFraction = 0.15;
+    public const int DefaultDimPercent = 40;
+    public const int DefaultFadeMs = 300;
+    public const int DefaultJunkRun = 1;
+    public static readonly string[] Scenarios =
+    [
+        "stale-junk", "stale-junk-ghost", "stale-texture", "stale-newtext", "stale-busy",
+        "stale-fade", "stale-dim", "stale-newdirty", "stale-present-junk", "stale-blink",
+    ];
+    public static readonly string[] ScriptedScenarios = ["stale-junk", "stale-junk-ghost", "stale-newdirty", "stale-present-junk"];
     private static readonly RectPx LabelPatch = new(525, 375, 450, 150);
     private static readonly RectPx SyntheticGlyphTarget = new(674, 430, 259, 70);
     private static readonly RectPx AnimationBox = new(1360, 60, 96, 96);
     private static readonly RectPx NewTextTarget = new(80, 760, 0, 0);
+    private static readonly byte[] UnderlayDarkLevels = [0, 2, 4, 6, 8, 10, 12];
+    private static readonly byte[] UnderlayLightLevels = [44, 46, 48, 50, 52, 54, 56];
+    private static readonly Color NewMarkerColor = Color.FromRgb(0, 112, 0);
+
+    public sealed record Options(int ProviderDelayMs, int BrightSpotPx, int PhaseMs, int DimPercent, int FadeMs, int JunkRun);
 
     public static int Run(string output, string scenario, string? assetsDirectory, string? texturePath,
-        (int X, int Y)? textureOrigin, int providerDelayMs, int brightSpotPx = 0)
+        (int X, int Y)? textureOrigin, Options options)
     {
-        if (scenario is not ("stale-junk" or "stale-junk-ghost" or "stale-texture" or "stale-newtext" or "stale-busy"))
+        if (!Scenarios.Contains(scenario))
             throw new ArgumentException("Unknown stale label scenario.", nameof(scenario));
-        var assets = SceneAssets.Load(assetsDirectory, texturePath, textureOrigin);
-        using var report = new Report(output, scenario, providerDelayMs, assets, brightSpotPx);
-        return RunAsync(report, assets, providerDelayMs).GetAwaiter().GetResult();
+        var assets = SceneAssets.Load(assetsDirectory, texturePath, textureOrigin, options.DimPercent);
+        using var report = new Report(output, scenario, assets, options);
+        return RunAsync(report, assets, options).GetAwaiter().GetResult();
     }
 
-    private static async Task<int> RunAsync(Report report, SceneAssets assets, int providerDelayMs)
+    private static async Task<int> RunAsync(Report report, SceneAssets assets, Options scenarioOptions)
     {
         var paths = new AppPaths(Path.Combine(Path.GetTempPath(), "gto-stalelabel-" + Guid.NewGuid().ToString("N")));
         var settings = new AppSettings
@@ -69,12 +87,12 @@ internal static class StaleLabelReplay
         };
         using var logging = LoggerFactory.Create(static b => b.SetMinimumLevel(LogLevel.Warning));
         using var http = new HttpClient(new NoNetworkHandler());
-        var scripted = report.Junk ? new MarkerOcr(report, report.Ghost) : null;
+        var scripted = report.Scripted ? new MarkerOcr(report) : null;
         IOcrProvider ocr = scripted is not null ? scripted : new ObservedOcr(new WindowsOcrProvider(), report);
         var usage = new UsageTracker();
         var orchestrator = new TranslationOrchestrator(settings, new SqliteTranslationCache(paths.DatabasePath),
             new GlossaryService(), GlossaryCatalog.CreateDefault(paths), ProfileCatalog.CreateDefault(paths),
-            new UserGlossaryStore(paths), new MockTranslationProvider { Delay = TimeSpan.FromMilliseconds(providerDelayMs) },
+            new UserGlossaryStore(paths), new MockTranslationProvider { Delay = TimeSpan.FromMilliseconds(scenarioOptions.ProviderDelayMs) },
             new DeepLTranslationProvider(http, static () => null), ocr, usage, logging);
         TestWindow? window = null;
         LiveTranslationSession? session = null;
@@ -86,18 +104,42 @@ internal static class StaleLabelReplay
             if (!ocr.IsLanguageAvailable(settings.SourceLanguage))
                 throw new OcrLanguageNotAvailableException(settings.SourceLanguage);
             window = await TestWindow.CreateAsync(assets, report);
-            var truth = await MeasureGroundTruthAsync(window, report.ShowsNewText);
+            var truth = await MeasureGroundTruthAsync(window, report);
             report.RecordGroundTruth(truth);
             scripted?.Calibrate(truth);
             if (report.Busy) await window.StartAnimationAsync();
+            if (report.Underlay) await window.StartUnderlayAsync();
             var options = new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true };
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle, options,
                 report.Update, logging.CreateLogger("StaleLabelReplay"));
             session.Start();
             await report.InitialDisplayed.Task.WaitAsync(TimeSpan.FromSeconds(20));
-            await Task.Delay(SettleMs);
-            await window.SetStateAsync(false, report.ShowsNewText, () => report.BeginMeasurement(usage));
-            await Task.Delay(ObservationMs);
+            await Task.Delay(SettleMs + scenarioOptions.PhaseMs);
+            var measuredFrom = Stopwatch.StartNew();
+            if (report.Fade)
+            {
+                await window.StartFadeAsync(scenarioOptions.FadeMs, () => report.BeginMeasurement(usage), report.FadeEnded);
+            }
+            else if (report.Dim)
+            {
+                await window.SetDimAsync(() => report.BeginMeasurement(usage));
+            }
+            else if (report.PresentJunk)
+            {
+                report.BeginMeasurement(usage);
+            }
+            else
+            {
+                await window.SetStateAsync(false, report.ShowsNewText, () => report.BeginMeasurement(usage));
+            }
+            if (report.Blink || report.NewDirty)
+            {
+                await Task.Delay(SecondStepMs);
+                if (report.Blink) await window.SetStateAsync(true, false, report.SecondStepRendered);
+                else await window.ShowDirtyNewTextAsync(report.SecondStepRendered);
+            }
+            var remaining = ObservationMs - (int)measuredFrom.ElapsedMilliseconds;
+            if (remaining > 0) await Task.Delay(remaining);
         }
         catch (Exception ex)
         {
@@ -137,21 +179,39 @@ internal static class StaleLabelReplay
         int CaptureWidth, int CaptureHeight, bool ScreenFallback, RectPx GlyphBox, int GlyphWhite,
         RectPx? Marker, int TextRgb, int BackgroundRgb, bool KnownContrast, int AfterWhite, bool AfterClearlyEmpty,
         int[] AfterChannelRange, double ChangedPixelFraction, double GridChangedFraction, double GridSignificantFraction,
-        RectPx? GridSignificantRegion, int NewTextWhite, bool AfterKnownTextAbsent);
-
-    private static async Task<GroundTruth> MeasureGroundTruthAsync(TestWindow window, bool busy)
+        RectPx? GridSignificantRegion, int NewTextWhite, bool AfterKnownTextAbsent)
     {
+        public double AfterMaxLuminance { get; init; }
+        public RectPx? DirtyGlyphBox { get; init; }
+        public int DirtyWhite { get; init; }
+        public RectPx? DirtyMarker { get; init; }
+    }
+
+    private static async Task<GroundTruth> MeasureGroundTruthAsync(TestWindow window, Report report)
+    {
+        var busy = report.ShowsNewText;
         await window.SetStateAsync(true, false);
         await Task.Delay(150);
         var (before, beforeFallback) = CaptureFrame(window.Handle);
-        await window.SetStateAsync(false, busy);
+        if (report.Dim) await window.SetDimAsync();
+        else if (!report.PresentJunk) await window.SetStateAsync(false, busy);
         await Task.Delay(150);
         var (after, afterFallback) = CaptureFrame(window.Handle);
+        OcrBitmap? dirty = null;
+        var dirtyFallback = false;
+        if (report.NewDirty)
+        {
+            await window.SetStateAsync(false, false);
+            await window.ShowDirtyNewTextAsync();
+            await Task.Delay(150);
+            (dirty, dirtyFallback) = CaptureFrame(window.Handle);
+            await window.HideDirtyNewTextAsync();
+        }
         await window.SetStateAsync(true, false);
         await Task.Delay(150);
         var frameRect = new RectPx(0, 0, before.Width, before.Height);
         var (glyphWhite, glyphBox) = CountWhite(before, LabelPatch.Intersect(frameRect));
-        var marker = FindMarker(before);
+        var marker = FindMarker(before, IsMarker);
         var colors = BlockColorSampler.SampleColors(before.PixelsBgra32, before.Width, before.Height, before.Stride, glyphBox);
         var (afterWhite, _) = CountWhite(after, glyphBox);
         var afterEmpty = TextPresenceProbe.IsClearlyEmpty(after, glyphBox, colors.TextRgb, colors.BackgroundRgb);
@@ -178,10 +238,44 @@ internal static class StaleLabelReplay
             ? new NoiseAwareChangeDetector().Analyze(gridBefore, gridAfter, before.Width, before.Height)
             : new NoiseAwareAnalysis(1, 1, 1, null);
         var newWhite = busy ? CountWhite(after, new RectPx(NewTextTarget.X - 10, NewTextTarget.Y - 10, 900, 110).Intersect(frameRect)).Count : 0;
-        return new GroundTruth(before.Width, before.Height, beforeFallback || afterFallback, glyphBox, glyphWhite,
+        var dirtyWhite = 0;
+        RectPx? dirtyBox = null;
+        RectPx? dirtyMarker = null;
+        if (dirty is not null)
+        {
+            var search = new RectPx(LabelPatch.X, LabelPatch.Y, LabelPatch.Width + 300, LabelPatch.Height).Intersect(frameRect);
+            var (count, box) = CountWhite(dirty, search);
+            dirtyWhite = count;
+            dirtyBox = count > 0 ? box : null;
+            dirtyMarker = FindMarker(dirty, IsNewMarker);
+        }
+        return new GroundTruth(before.Width, before.Height, beforeFallback || afterFallback || dirtyFallback, glyphBox, glyphWhite,
             marker, colors.TextRgb, colors.BackgroundRgb, TextPresenceProbe.CanCheckKnownText(colors.TextRgb, colors.BackgroundRgb),
             afterWhite, afterEmpty, range, (double)changed / ((long)before.Width * before.Height),
-            analysis.ChangedFraction, analysis.SignificantFraction, analysis.SignificantRegion, newWhite, afterAbsent);
+            analysis.ChangedFraction, analysis.SignificantFraction, analysis.SignificantRegion, newWhite, afterAbsent)
+        {
+            AfterMaxLuminance = MaxLuminance(after, glyphBox),
+            DirtyGlyphBox = dirtyBox,
+            DirtyWhite = dirtyWhite,
+            DirtyMarker = dirtyMarker,
+        };
+    }
+
+    private static double MaxLuminance(OcrBitmap bitmap, RectPx area)
+    {
+        var region = area.Intersect(new RectPx(0, 0, bitmap.Width, bitmap.Height));
+        var max = 0.0;
+        for (var y = region.Y; y < region.Bottom; y++)
+        {
+            for (var x = region.X; x < region.Right; x++)
+            {
+                var offset = y * bitmap.Stride + x * 4;
+                var luminance = 0.299 * bitmap.PixelsBgra32[offset + 2] + 0.587 * bitmap.PixelsBgra32[offset + 1]
+                    + 0.114 * bitmap.PixelsBgra32[offset];
+                max = Math.Max(max, luminance);
+            }
+        }
+        return Math.Round(max, 1);
     }
 
     private static (OcrBitmap Frame, bool Fallback) CaptureFrame(IntPtr handle)
@@ -207,6 +301,16 @@ internal static class StaleLabelReplay
     private static bool IsMarker(byte[] pixels, int offset) =>
         pixels[offset + 2] is >= 110 and <= 190 && pixels[offset + 1] <= 50 && pixels[offset] is >= 110 and <= 190;
 
+    private static bool IsNewMarker(byte[] pixels, int offset) =>
+        pixels[offset + 2] <= 40 && pixels[offset + 1] is >= 90 and <= 140 && pixels[offset] <= 40;
+
+    private static Color UnderlayColor(int tick)
+    {
+        var levels = tick % 2 == 0 ? UnderlayDarkLevels : UnderlayLightLevels;
+        var level = levels[tick / 2 % levels.Length];
+        return Color.FromRgb(level, level, level);
+    }
+
     private static (int Count, RectPx Box) CountWhite(OcrBitmap bitmap, RectPx area)
     {
         var region = area.Intersect(new RectPx(0, 0, bitmap.Width, bitmap.Height));
@@ -228,14 +332,14 @@ internal static class StaleLabelReplay
         return count == 0 ? (0, default) : (count, new RectPx(left, top, right - left + 1, bottom - top + 1));
     }
 
-    private static RectPx? FindMarker(OcrBitmap bitmap)
+    private static RectPx? FindMarker(OcrBitmap bitmap, Func<byte[], int, bool> isMarker)
     {
         int left = int.MaxValue, top = int.MaxValue, right = -1, bottom = -1;
         for (var y = 0; y < bitmap.Height; y++)
         {
             for (var x = 0; x < bitmap.Width; x++)
             {
-                if (!IsMarker(bitmap.PixelsBgra32, y * bitmap.Stride + x * 4)) continue;
+                if (!isMarker(bitmap.PixelsBgra32, y * bitmap.Stride + x * 4)) continue;
                 left = Math.Min(left, x);
                 top = Math.Min(top, y);
                 right = Math.Max(right, x);
@@ -272,18 +376,20 @@ internal static class StaleLabelReplay
     private static long Area(RectPx box) => box.IsEmpty ? 0 : (long)box.Width * box.Height;
 
     private static bool IsOld(string text) => text.Contains("nspect", StringComparison.OrdinalIgnoreCase);
-    private static bool IsNew(string text) => text.Contains(NewWord, StringComparison.OrdinalIgnoreCase);
+    private static bool IsNew(string text) =>
+        text.Contains(NewWord, StringComparison.OrdinalIgnoreCase) || text.Contains(DirtyNewWord, StringComparison.OrdinalIgnoreCase);
 
     private sealed record SceneAssets(
         BitmapSource Texture, BitmapSource? Label, string? TextureFile, int TextureX, int TextureY,
-        string? LabelFile, RectPx? LabelGlyphsInCrop)
+        string? LabelFile, RectPx? LabelGlyphsInCrop, BitmapSource? DimLabel, int DimPercent)
     {
         public bool RealTexture => TextureFile is not null;
         public bool RealLabel => Label is not null;
 
-        public static SceneAssets Load(string? assetsDirectory, string? texturePath, (int X, int Y)? origin)
+        public static SceneAssets Load(string? assetsDirectory, string? texturePath, (int X, int Y)? origin, int dimPercent)
         {
             BitmapSource? label = null;
+            BitmapSource? dimLabel = null;
             RectPx? glyphs = null;
             string? labelFile = null;
             if (assetsDirectory is not null)
@@ -294,13 +400,14 @@ internal static class StaleLabelReplay
                 if (crop.PixelWidth != LabelPatch.Width || crop.PixelHeight != LabelPatch.Height)
                     throw new ArgumentException($"{LabelCropFile} musi miec {LabelPatch.Width}x{LabelPatch.Height} px.");
                 (label, var cropGlyphs) = MaskLabel(crop);
+                dimLabel = Dimmed(label, dimPercent);
                 glyphs = cropGlyphs;
                 labelFile = LabelCropFile;
             }
             if (texturePath is null)
             {
                 if (origin is not null) throw new ArgumentException("--texture-origin wymaga --texture.");
-                return new SceneAssets(SyntheticTexture(), label, null, 0, 0, labelFile, glyphs);
+                return new SceneAssets(SyntheticTexture(), label, null, 0, 0, labelFile, glyphs, dimLabel, dimPercent);
             }
             if (!File.Exists(texturePath)) throw new ArgumentException("Plik --texture nie istnieje.");
             var source = Decode(texturePath);
@@ -311,8 +418,27 @@ internal static class StaleLabelReplay
             var cropped = new CroppedBitmap(source, new Int32Rect(x, y, FrameWidth, FrameHeight));
             cropped.Freeze();
             var folder = Path.GetFileName(Path.GetDirectoryName(Path.GetFullPath(texturePath)));
-            return new SceneAssets(cropped, label, $"{folder}/{Path.GetFileName(texturePath)}", x, y, labelFile, glyphs);
+            return new SceneAssets(cropped, label, $"{folder}/{Path.GetFileName(texturePath)}", x, y, labelFile, glyphs,
+                dimLabel, dimPercent);
         }
+    }
+
+    private static BitmapSource Dimmed(BitmapSource label, int percent)
+    {
+        var width = label.PixelWidth;
+        var height = label.PixelHeight;
+        var stride = width * 4;
+        var pixels = new byte[stride * height];
+        label.CopyPixels(pixels, stride, 0);
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = (byte)(pixels[i] * percent / 100);
+            pixels[i + 1] = (byte)(pixels[i + 1] * percent / 100);
+            pixels[i + 2] = (byte)(pixels[i + 2] * percent / 100);
+        }
+        var dimmed = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
+        dimmed.Freeze();
+        return dimmed;
     }
 
     private static BitmapSource Decode(string path)
@@ -442,7 +568,8 @@ internal static class StaleLabelReplay
         return texture;
     }
 
-    private static void AddOutlinedText(Panel parent, string text, double fontPx, double left, double top, double stroke)
+    private static void AddOutlinedText(Panel parent, string text, double fontPx, double left, double top, double stroke,
+        int percent = 100)
     {
         var typeface = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
         var formatted = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
@@ -453,29 +580,43 @@ internal static class StaleLabelReplay
         placed.Transform = new TranslateTransform(left - bounds.X, top - bounds.Y);
         placed.Freeze();
         parent.Children.Add(new WpfPath { Data = placed, Stroke = Brushes.Black, StrokeThickness = stroke, StrokeLineJoin = PenLineJoin.Round });
-        parent.Children.Add(new WpfPath { Data = placed, Fill = Brushes.White });
+        parent.Children.Add(new WpfPath { Data = placed, Fill = new SolidColorBrush(Scale(Colors.White, percent)) });
     }
 
-    private static Canvas SyntheticLabel()
+    private static Color Scale(Color color, int percent) =>
+        Color.FromRgb((byte)(color.R * percent / 100), (byte)(color.G * percent / 100), (byte)(color.B * percent / 100));
+
+    private static Canvas SyntheticLabel(int percent = 100)
     {
         var canvas = new Canvas { Width = FrameWidth, Height = FrameHeight, IsHitTestVisible = false };
         var icon = new WpfRectangle
         {
             Width = 70, Height = 92, RadiusX = 32, RadiusY = 32, StrokeThickness = 6, Stroke = Brushes.Black,
-            Fill = new SolidColorBrush(Color.FromRgb(168, 160, 190)),
+            Fill = new SolidColorBrush(Scale(Color.FromRgb(168, 160, 190), percent)),
         };
         Canvas.SetLeft(icon, 566);
         Canvas.SetTop(icon, 418);
         var button = new WpfRectangle
         {
             Width = 24, Height = 34, RadiusX = 10, RadiusY = 10,
-            Fill = new SolidColorBrush(Color.FromRgb(214, 206, 92)),
+            Fill = new SolidColorBrush(Scale(Color.FromRgb(214, 206, 92), percent)),
         };
         Canvas.SetLeft(button, 574);
         Canvas.SetTop(button, 426);
         canvas.Children.Add(icon);
         canvas.Children.Add(button);
-        AddOutlinedText(canvas, Inspect, 76, SyntheticGlyphTarget.X, SyntheticGlyphTarget.Y, 8);
+        AddOutlinedText(canvas, Inspect, 76, SyntheticGlyphTarget.X, SyntheticGlyphTarget.Y, 8, percent);
+        return canvas;
+    }
+
+    private static Canvas DirtyNewTextLayer()
+    {
+        var canvas = new Canvas { Width = FrameWidth, Height = FrameHeight, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+        AddOutlinedText(canvas, DirtyNewText, 76, SyntheticGlyphTarget.X, SyntheticGlyphTarget.Y, 8);
+        var marker = new WpfRectangle { Width = MarkerSize, Height = MarkerSize, Fill = new SolidColorBrush(NewMarkerColor) };
+        Canvas.SetLeft(marker, SyntheticGlyphTarget.X + SyntheticGlyphTarget.Width / 2 + 3 * MarkerSize);
+        Canvas.SetTop(marker, SyntheticGlyphTarget.Y + SyntheticGlyphTarget.Height / 2 - MarkerSize / 2);
+        canvas.Children.Add(marker);
         return canvas;
     }
 
@@ -500,15 +641,34 @@ internal static class StaleLabelReplay
         }
     }
 
-    private sealed class MarkerOcr(Report report, bool ghostCycle) : IOcrProvider
+    private sealed class MarkerOcr(Report report) : IOcrProvider
     {
         private GroundTruth? _truth;
         private int _absentReadings;
+        private int _presentMeasuredReadings;
         public string Name => "Scripted label OCR from captured marker and white glyph pixels";
         public int MaxImageDimension => 4096;
         public IReadOnlyList<string> AvailableLanguages => ["en"];
         public bool IsLanguageAvailable(string languageTag) => languageTag.StartsWith("en", StringComparison.OrdinalIgnoreCase);
         public void Calibrate(GroundTruth truth) => _truth = truth;
+
+        private static (RectPx Expected, double Scale) Locate(RectPx marker, RectPx reference, RectPx glyphs)
+        {
+            var ratio = (marker.Width + marker.Height) / (double)(reference.Width + reference.Height);
+            var scale = ratio < 1.5 ? 1.0 : 2.0;
+            var centerX = marker.X + marker.Width / 2.0;
+            var centerY = marker.Y + marker.Height / 2.0;
+            var referenceX = reference.X + reference.Width / 2.0;
+            var referenceY = reference.Y + reference.Height / 2.0;
+            return (new RectPx(
+                (int)Math.Round(centerX + (glyphs.X - referenceX) * scale),
+                (int)Math.Round(centerY + (glyphs.Y - referenceY) * scale),
+                (int)Math.Round(glyphs.Width * scale),
+                (int)Math.Round(glyphs.Height * scale)), scale);
+        }
+
+        private static OcrResult Line(string text, RectPx box, string languageTag) =>
+            new([new OcrLine(text, box, [new OcrWord(text, box)])], languageTag);
 
         public Task<OcrResult> RecognizeAsync(OcrBitmap bitmap, string languageTag, CancellationToken cancellationToken = default)
         {
@@ -516,46 +676,85 @@ internal static class StaleLabelReplay
             var started = report.Now;
             var truth = _truth ?? throw new InvalidOperationException("Scripted OCR used before calibration.");
             var frame = new RectPx(0, 0, bitmap.Width, bitmap.Height);
-            if (FindMarker(bitmap) is not { } marker || truth.Marker is not { } reference)
+            if (report.NewDirty && truth.DirtyMarker is { } dirtyReference && truth.DirtyGlyphBox is { } dirtyGlyphs
+                && FindMarker(bitmap, IsNewMarker) is { } dirtyMarker)
+            {
+                var (dirtyExpected, dirtyScale) = Locate(dirtyMarker, dirtyReference, dirtyGlyphs);
+                var (dirtyWhite, dirtyBox) = CountWhite(bitmap, dirtyExpected.Intersect(frame));
+                var dirtyRatio = dirtyWhite / (truth.DirtyWhite * dirtyScale * dirtyScale);
+                if (dirtyRatio >= 0.3)
+                {
+                    report.ScriptedOcr("loading", dirtyScale, dirtyRatio, null, bitmap.Width, bitmap.Height, started);
+                    return Task.FromResult(Line(DirtyNewText, dirtyBox, languageTag));
+                }
+            }
+            if (FindMarker(bitmap, IsMarker) is not { } marker || truth.Marker is not { } reference)
             {
                 report.ScriptedOcr("no-marker", 0, 0, null, bitmap.Width, bitmap.Height, started);
                 return Task.FromResult(OcrResult.Empty(languageTag));
             }
-            var ratio = (marker.Width + marker.Height) / (double)(reference.Width + reference.Height);
-            var scale = ratio < 1.5 ? 1.0 : 2.0;
-            var centerX = marker.X + marker.Width / 2.0;
-            var centerY = marker.Y + marker.Height / 2.0;
-            var referenceX = reference.X + reference.Width / 2.0;
-            var referenceY = reference.Y + reference.Height / 2.0;
-            var expected = new RectPx(
-                (int)Math.Round(centerX + (truth.GlyphBox.X - referenceX) * scale),
-                (int)Math.Round(centerY + (truth.GlyphBox.Y - referenceY) * scale),
-                (int)Math.Round(truth.GlyphBox.Width * scale),
-                (int)Math.Round(truth.GlyphBox.Height * scale));
+            var (expected, scale) = Locate(marker, reference, truth.GlyphBox);
             var (white, whiteBox) = CountWhite(bitmap, expected.Intersect(frame));
             var whiteRatio = white / (truth.GlyphWhite * scale * scale);
+            var junkBox = expected.Offset((int)Math.Round(expected.Width * JunkShiftFraction), 0).Intersect(frame);
+            var overlap = Area(junkBox.Intersect(expected)) / (double)Math.Max(1, Math.Min(Area(junkBox), Area(expected)));
             if (whiteRatio >= 0.3)
             {
+                if (report.PresentJunk && report.IsMeasuring)
+                {
+                    var index = _presentMeasuredReadings++;
+                    if (index % (report.JunkRun + 1) < report.JunkRun)
+                    {
+                        report.ScriptedOcr("junk-present", scale, whiteRatio, overlap, bitmap.Width, bitmap.Height, started);
+                        return Task.FromResult(Line(JunkReading, junkBox, languageTag));
+                    }
+                }
                 report.ScriptedOcr("inspect", scale, whiteRatio, null, bitmap.Width, bitmap.Height, started);
-                return Task.FromResult(new OcrResult([new OcrLine(Inspect, whiteBox, [new OcrWord(Inspect, whiteBox)])], languageTag));
+                return Task.FromResult(Line(Inspect, whiteBox, languageTag));
             }
             _absentReadings++;
-            if (ghostCycle && _absentReadings % GhostCycle != 0)
+            if (report.NewDirty || (report.Ghost && _absentReadings % GhostCycle != 0))
             {
                 report.ScriptedOcr("empty", scale, whiteRatio, null, bitmap.Width, bitmap.Height, started);
                 return Task.FromResult(OcrResult.Empty(languageTag));
             }
-            var junkBox = expected.Offset((int)Math.Round(expected.Width * JunkShiftFraction), 0).Intersect(frame);
-            var overlap = Area(junkBox.Intersect(expected)) / (double)Math.Max(1, Math.Min(Area(junkBox), Area(expected)));
             report.ScriptedOcr("junk", scale, whiteRatio, overlap, bitmap.Width, bitmap.Height, started);
-            return Task.FromResult(new OcrResult([new OcrLine(JunkReading, junkBox, [new OcrWord(JunkReading, junkBox)])], languageTag));
+            return Task.FromResult(Line(JunkReading, junkBox, languageTag));
         }
     }
 
-    private sealed class TestWindow(Window window, UIElement label, UIElement? newText, WpfRectangle? animation,
-        DispatcherTimer? timer, Thread thread)
+    private sealed class TestWindow
     {
-        public IntPtr Handle { get; } = new WindowInteropHelper(window).Handle;
+        private readonly Window _window;
+        private readonly UIElement _label;
+        private readonly UIElement? _dimLabel;
+        private readonly UIElement? _newText;
+        private readonly UIElement? _dirtyText;
+        private readonly DispatcherTimer? _timer;
+        private readonly DispatcherTimer? _underlayTimer;
+        private readonly Thread _thread;
+
+        private TestWindow(Window window, UIElement label, UIElement? dimLabel, UIElement? newText, UIElement? dirtyText,
+            DispatcherTimer? timer, DispatcherTimer? underlayTimer, Thread thread)
+        {
+            (_window, _label, _dimLabel, _newText, _dirtyText) = (window, label, dimLabel, newText, dirtyText);
+            (_timer, _underlayTimer, _thread) = (timer, underlayTimer, thread);
+            Handle = new WindowInteropHelper(window).Handle;
+        }
+
+        public IntPtr Handle { get; }
+
+        private static UIElement CreateLabel(BitmapSource? real, int percent)
+        {
+            if (real is not null)
+            {
+                var image = new Image { Source = real, Width = LabelPatch.Width, Height = LabelPatch.Height, Stretch = Stretch.Fill };
+                Canvas.SetLeft(image, LabelPatch.X);
+                Canvas.SetTop(image, LabelPatch.Y);
+                return image;
+            }
+            return SyntheticLabel(percent);
+        }
 
         public static async Task<TestWindow> CreateAsync(SceneAssets assets, Report report)
         {
@@ -568,6 +767,22 @@ internal static class StaleLabelReplay
                     var canvas = new Canvas { Width = FrameWidth, Height = FrameHeight, Background = Brushes.Black, ClipToBounds = true };
                     RenderOptions.SetBitmapScalingMode(canvas, BitmapScalingMode.NearestNeighbor);
                     canvas.Children.Add(new Image { Source = assets.Texture, Width = FrameWidth, Height = FrameHeight, Stretch = Stretch.Fill });
+                    DispatcherTimer? underlayTimer = null;
+                    if (report.Underlay)
+                    {
+                        var underlay = new WpfRectangle { Width = LabelPatch.Width, Height = LabelPatch.Height, Fill = new SolidColorBrush(UnderlayColor(0)) };
+                        Canvas.SetLeft(underlay, LabelPatch.X);
+                        Canvas.SetTop(underlay, LabelPatch.Y);
+                        canvas.Children.Add(underlay);
+                        var underlayTick = 0;
+                        underlayTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(AnimationIntervalMs) };
+                        underlayTimer.Tick += (_, _) =>
+                        {
+                            underlayTick++;
+                            underlay.Fill = new SolidColorBrush(UnderlayColor(underlayTick));
+                            report.UnderlayTick();
+                        };
+                    }
                     if (report.BrightSpot is { } spot)
                     {
                         var brightSpot = new WpfRectangle { Width = spot.Width, Height = spot.Height, Fill = Brushes.White };
@@ -575,21 +790,22 @@ internal static class StaleLabelReplay
                         Canvas.SetTop(brightSpot, spot.Y);
                         canvas.Children.Add(brightSpot);
                     }
-                    UIElement label;
-                    if (assets.Label is { } real)
-                    {
-                        var image = new Image { Source = real, Width = LabelPatch.Width, Height = LabelPatch.Height, Stretch = Stretch.Fill };
-                        Canvas.SetLeft(image, LabelPatch.X);
-                        Canvas.SetTop(image, LabelPatch.Y);
-                        label = image;
-                    }
-                    else
-                    {
-                        label = SyntheticLabel();
-                    }
+                    var label = CreateLabel(assets.Label, 100);
                     canvas.Children.Add(label);
+                    UIElement? dimLabel = null;
+                    if (report.Dim)
+                    {
+                        dimLabel = CreateLabel(assets.DimLabel, assets.DimPercent);
+                        dimLabel.Visibility = Visibility.Collapsed;
+                        canvas.Children.Add(dimLabel);
+                    }
+                    UIElement? dirtyText = null;
+                    if (report.NewDirty)
+                    {
+                        dirtyText = DirtyNewTextLayer();
+                        canvas.Children.Add(dirtyText);
+                    }
                     UIElement? newText = null;
-                    WpfRectangle? animation = null;
                     DispatcherTimer? timer = null;
                     if (report.ShowsNewText)
                     {
@@ -599,21 +815,20 @@ internal static class StaleLabelReplay
                         newText = newCanvas;
                         var dark = new SolidColorBrush(Color.FromRgb(30, 30, 40));
                         var bright = new SolidColorBrush(Color.FromRgb(230, 200, 60));
-                        animation = new WpfRectangle { Width = AnimationBox.Width, Height = AnimationBox.Height, Fill = dark };
+                        var animation = new WpfRectangle { Width = AnimationBox.Width, Height = AnimationBox.Height, Fill = dark };
                         Canvas.SetLeft(animation, AnimationBox.X);
                         Canvas.SetTop(animation, AnimationBox.Y);
                         canvas.Children.Add(animation);
                         var tick = 0;
                         timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(AnimationIntervalMs) };
-                        var animated = animation;
                         timer.Tick += (_, _) =>
                         {
                             tick++;
-                            animated.Fill = tick % 2 == 0 ? dark : bright;
+                            animation.Fill = tick % 2 == 0 ? dark : bright;
                             report.Tick();
                         };
                     }
-                    if (report.Junk)
+                    if (report.Scripted)
                     {
                         var marker = new WpfRectangle { Width = MarkerSize, Height = MarkerSize, Fill = new SolidColorBrush(Color.FromRgb(144, 0, 144)) };
                         Canvas.SetLeft(marker, SyntheticGlyphTarget.X + SyntheticGlyphTarget.Width / 2 - MarkerSize / 2);
@@ -629,9 +844,11 @@ internal static class StaleLabelReplay
                         Content = new Viewbox { Stretch = Stretch.Fill, Child = canvas },
                     };
                     var stoppedTimer = timer;
+                    var stoppedUnderlay = underlayTimer;
                     window.Closed += (_, _) =>
                     {
                         stoppedTimer?.Stop();
+                        stoppedUnderlay?.Stop();
                         window.Dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
                     };
                     window.Show();
@@ -640,7 +857,7 @@ internal static class StaleLabelReplay
                     window.Height = FrameHeight / dpi.DpiScaleY;
                     report.Event(new { type = "window_created", dpiScaleX = dpi.DpiScaleX, dpiScaleY = dpi.DpiScaleY,
                         windowWidthDip = window.Width, windowHeightDip = window.Height });
-                    ready.TrySetResult(new TestWindow(window, label, newText, animation, timer, thread!));
+                    ready.TrySetResult(new TestWindow(window, label, dimLabel, newText, dirtyText, timer, underlayTimer, thread!));
                     Dispatcher.Run();
                 }
                 catch (Exception ex) { ready.TrySetException(ex); }
@@ -652,20 +869,58 @@ internal static class StaleLabelReplay
 
         public Task SetStateAsync(bool labelVisible, bool newTextVisible, Action? afterRendering = null) => RenderAsync(() =>
         {
-            label.Visibility = labelVisible ? Visibility.Visible : Visibility.Collapsed;
-            if (newText is not null) newText.Visibility = newTextVisible ? Visibility.Visible : Visibility.Collapsed;
+            _label.BeginAnimation(UIElement.OpacityProperty, null);
+            _label.Opacity = 1;
+            _label.Visibility = labelVisible ? Visibility.Visible : Visibility.Collapsed;
+            if (_dimLabel is not null) _dimLabel.Visibility = Visibility.Collapsed;
+            if (_newText is not null) _newText.Visibility = newTextVisible ? Visibility.Visible : Visibility.Collapsed;
+        }, afterRendering);
+
+        public Task SetDimAsync(Action? afterRendering = null) => RenderAsync(() =>
+        {
+            if (_dimLabel is null) throw new InvalidOperationException("Dimmed label is only available in stale-dim.");
+            _dimLabel.Visibility = Visibility.Visible;
+            _label.Visibility = Visibility.Collapsed;
+        }, afterRendering);
+
+        public Task ShowDirtyNewTextAsync(Action? afterRendering = null) => RenderAsync(() =>
+        {
+            if (_dirtyText is null) throw new InvalidOperationException("Dirty new text is only available in stale-newdirty.");
+            _dirtyText.Visibility = Visibility.Visible;
+        }, afterRendering);
+
+        public Task HideDirtyNewTextAsync() => RenderAsync(() =>
+        {
+            if (_dirtyText is not null) _dirtyText.Visibility = Visibility.Collapsed;
+        });
+
+        public Task StartFadeAsync(int fadeMs, Action afterRendering, Action ended) => RenderAsync(() =>
+        {
+            var fade = new System.Windows.Media.Animation.DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(fadeMs));
+            fade.Completed += (_, _) =>
+            {
+                _label.Visibility = Visibility.Collapsed;
+                ended();
+            };
+            _label.BeginAnimation(UIElement.OpacityProperty, fade);
         }, afterRendering);
 
         public Task StartAnimationAsync() => RenderAsync(() =>
         {
-            if (timer is null || animation is null) throw new InvalidOperationException("Animation is only available in stale-busy.");
-            timer.Start();
+            if (_timer is null) throw new InvalidOperationException("Animation is only available in stale-busy.");
+            _timer.Start();
+        });
+
+        public Task StartUnderlayAsync() => RenderAsync(() =>
+        {
+            if (_underlayTimer is null) throw new InvalidOperationException("Underlay animation is only available in stale-dim and stale-present-junk.");
+            _underlayTimer.Start();
         });
 
         private async Task RenderAsync(Action? change, Action? afterRendering = null)
         {
             var rendered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            await window.Dispatcher.InvokeAsync(() =>
+            await _window.Dispatcher.InvokeAsync(() =>
             {
                 change?.Invoke();
                 EventHandler? handler = null;
@@ -682,8 +937,8 @@ internal static class StaleLabelReplay
 
         public async Task CloseAsync()
         {
-            await window.Dispatcher.InvokeAsync(window.Close).Task.WaitAsync(TimeSpan.FromSeconds(3));
-            if (!thread.Join(TimeSpan.FromSeconds(3))) throw new TimeoutException();
+            await _window.Dispatcher.InvokeAsync(_window.Close).Task.WaitAsync(TimeSpan.FromSeconds(3));
+            if (!_thread.Join(TimeSpan.FromSeconds(3))) throw new TimeoutException();
         }
     }
 
@@ -696,38 +951,62 @@ internal static class StaleLabelReplay
         private double? _changeAt, _endedAt, _initialDisplayedAt, _oldRemovedAt, _newReadyAt;
         private double? _firstOcrAfterChangeAt, _firstOcrCallbackAfterChangeAt, _firstFullOcrAfterChangeAt, _lastFullOcrAt;
         private double? _firstRetainedAt, _newFirstOcrAt, _oldVisibleSince, _lastOldRemovedAt;
+        private double? _fadeEndedAt, _secondStepAt, _oldReturnedAfterSecondAt;
+        private double? _subtitleOldRemovedAt, _subtitleOldReturnedAt;
         private double _maxFullOcrGapMs, _oldVisibleTotalMs;
         private long _requestsAtChange, _charactersAtChange;
         private bool _ended, _screenFallback, _stoppedDuringMeasurement;
         private bool _visibleOld, _visibleNew, _oldRemoved;
-        private int _oldReturnTransitions, _oldVisibleCallbacksAfterRemoval, _visualUpdates, _clears, _hides, _maxOtherBlocks;
+        private bool _subtitleShown, _subtitleOldAtChange;
+        private string? _subtitleText;
+        private double _subtitleExpiresAt;
+        private int _oldReturnTransitions, _oldRemovalTransitions, _oldVisibleCallbacksAfterRemoval, _visualUpdates, _clears, _hides, _maxOtherBlocks;
         private int _completedOcr, _fullOcr, _partialOcr, _sceneCuts, _whiffs, _retained, _reused, _reusedFrames;
-        private int _ocrCalls, _ocrFull, _ocrInspect, _ocrInspectSettled, _ocrNew, _ocrEmpty, _ocrOtherMeaningful;
-        private int _junkReadings, _emptyScripted, _noMarker, _inspectScriptedSettled;
+        private int _ocrCalls, _ocrFull, _ocrInspect, _ocrInspectSettled, _ocrInspectAfterSecond, _ocrNew, _ocrEmpty, _ocrOtherMeaningful;
+        private int _junkReadings, _junkPresentReadings, _loadingReadings, _emptyScripted, _noMarker, _inspectScriptedSettled;
+        private int _subtitleShows, _subtitleClears;
         private double _minJunkOverlap = double.PositiveInfinity;
-        private int _ticks, _ticksAfterChange;
+        private int _ticks, _ticksAfterChange, _underlayTicks, _underlayTicksAfterChange;
         private RectPx? _initialOldBox;
         private readonly string _scenario;
 
+        public bool Scripted { get; }
         public bool Junk { get; }
         public bool Ghost { get; }
         public bool Busy { get; }
         public bool ShowsNewText { get; }
+        public bool Fade { get; }
+        public bool Dim { get; }
+        public bool NewDirty { get; }
+        public bool PresentJunk { get; }
+        public bool Blink { get; }
+        public bool Underlay { get; }
+        public int JunkRun { get; }
         public RectPx? BrightSpot { get; }
         public TaskCompletionSource InitialDisplayed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public double Now => _clock.Elapsed.TotalMilliseconds;
+        public bool IsMeasuring { get { lock (_gate) return Measuring; } }
+        private bool HidesLabel => !Dim && !PresentJunk;
 
-        public Report(string output, string scenario, int providerDelayMs, SceneAssets assets, int brightSpotPx)
+        public Report(string output, string scenario, SceneAssets assets, Options options)
         {
             _scenario = scenario;
-            BrightSpot = brightSpotPx > 0
-                ? new RectPx(SyntheticGlyphTarget.X + 24, SyntheticGlyphTarget.Y + (SyntheticGlyphTarget.Height - brightSpotPx) / 2,
-                    brightSpotPx, brightSpotPx)
+            BrightSpot = options.BrightSpotPx > 0
+                ? new RectPx(SyntheticGlyphTarget.X + 24, SyntheticGlyphTarget.Y + (SyntheticGlyphTarget.Height - options.BrightSpotPx) / 2,
+                    options.BrightSpotPx, options.BrightSpotPx)
                 : null;
+            Scripted = ScriptedScenarios.Contains(scenario);
             Junk = scenario is "stale-junk" or "stale-junk-ghost";
             Ghost = scenario == "stale-junk-ghost";
             Busy = scenario == "stale-busy";
             ShowsNewText = scenario is "stale-busy" or "stale-newtext";
+            Fade = scenario == "stale-fade";
+            Dim = scenario == "stale-dim";
+            NewDirty = scenario == "stale-newdirty";
+            PresentJunk = scenario == "stale-present-junk";
+            Blink = scenario == "stale-blink";
+            Underlay = Dim || PresentJunk;
+            JunkRun = options.JunkRun;
             var junkNormalized = TextNormalizer.Normalize(JunkReading);
             var stabilizer = new LiveReadingStabilizer();
             var firstDecision = stabilizer.Observe("fixture", Inspect, JunkReading);
@@ -737,16 +1016,25 @@ internal static class StaleLabelReplay
             var inspectQuality = ReadingQuality.Score(Inspect);
             var junkSimilarity = TextSimilarity.Ratio(junkNormalized, Inspect);
             var ghostCondition = junkSimilarity >= 0.5 || junkQuality < inspectQuality - 0.1;
-            if (Junk && (!junkMeaningful || junkQuality >= 0.9 || firstDecision != LiveReadingDecision.Keep
+            var usesJunk = Junk || PresentJunk;
+            if (usesJunk && (!junkMeaningful || junkQuality >= 0.9 || firstDecision != LiveReadingDecision.Keep
                 || secondDecision != LiveReadingDecision.Keep || (Ghost && !ghostCondition)))
                 throw new InvalidOperationException("Junk OCR fixture no longer exercises the Keep path of LiveReadingStabilizer.");
+            var dirtyNormalized = TextNormalizer.Normalize(DirtyNewText);
+            var dirtyMeaningful = JunkFilter.IsMeaningful(DirtyNewText);
+            var dirtyQuality = ReadingQuality.Score(dirtyNormalized);
+            var dirtySimilarity = TextSimilarity.Ratio(dirtyNormalized, Inspect);
+            var dirtyUnrelated = LiveReadingStabilizer.IsUnrelatedDirtierReading(Inspect, DirtyNewText);
+            if (NewDirty && (!dirtyMeaningful || dirtyQuality >= inspectQuality - 0.1 || dirtySimilarity >= 0.5 || !dirtyUnrelated))
+                throw new InvalidOperationException("Dirty new text fixture no longer exercises the unrelated dirtier reading path.");
             _writer = new StreamWriter(new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) { AutoFlush = true };
             Event(new
             {
-                type = "header", scenario, ocrMode = Junk ? "scripted" : "windows", provider = "Mock", providerDelayMs,
+                type = "header", scenario, ocrMode = Scripted ? "scripted" : "windows", provider = "Mock", providerDelayMs = options.ProviderDelayMs,
                 privateMode = true, cache = "fresh-memory", network = "blocked", capture = "own-window-only", actualOverlayWindow = false,
                 fps = 6, ocrUpscale = 1, staticRescanIntervalMs = 4000, blockMissGrace = 2, maxWhiffRetries = 2,
-                observationMs = ObservationMs, settleAfterInitialDisplayMs = SettleMs, settledReadingMs = SettledReadingMs,
+                observationMs = ObservationMs, settleAfterInitialDisplayMs = SettleMs, phaseMs = options.PhaseMs, settledReadingMs = SettledReadingMs,
+                phaseMeaning = "Added to the settle delay before the measured change; shifts the change against the 6 fps capture clock",
                 framePx = new[] { FrameWidth, FrameHeight }, labelPatchPx = LabelPatch,
                 labelPatchFraction = (double)Area(LabelPatch) / ((long)FrameWidth * FrameHeight),
                 realLabel = assets.RealLabel, labelFile = assets.LabelFile, labelGlyphsInCropPx = assets.LabelGlyphsInCrop,
@@ -760,7 +1048,22 @@ internal static class StaleLabelReplay
                 brightSpotPx = BrightSpot,
                 brightSpotMeaning = BrightSpot is null ? null
                     : "White square under the label inside the old glyph box; stays after the label disappears, so no pixel evidence of absence exists",
-                junkFixture = Junk ? new
+                fadeMs = Fade ? options.FadeMs : (int?)null,
+                fadeMeaning = Fade ? "Label opacity animated 1 -> 0 by WPF over fadeMs, then collapsed; measurement starts at the first rendering of the fade" : null,
+                dimPercent = Dim ? options.DimPercent : (int?)null,
+                dimMeaning = Dim ? "Label RGB (glyphs, outline, icon) multiplied by dimPercent/100 and kept on screen; alpha unchanged" : null,
+                underlayPx = Underlay ? LabelPatch : (RectPx?)null,
+                underlayMeaning = Underlay ? "Opaque rectangle under the whole label patch; every 200 ms it alternates dark gray 0..12 and light gray 44..56 (levels cycle with a 2.8 s period, so a capture rarely repeats the pixels of an earlier one); runs from session start; texture hidden inside the patch" : null,
+                junkRun = PresentJunk ? JunkRun : (int?)null,
+                presentJunkMeaning = PresentJunk ? "While measuring, scripted OCR over the still visible label returns junkRun junk readings, then one Inspect reading, repeated" : null,
+                secondStepMs = Blink || NewDirty ? SecondStepMs : (int?)null,
+                blinkMeaning = Blink ? "Label hidden at the change, shown again secondStepMs later" : null,
+                subtitleSimulation = new
+                {
+                    meaning = "Replays MainWindow subtitle-bar handling of ClearOverlay, ClearSubtitle, SubtitleText and PreserveSubtitleLifetime; not a WPF window",
+                    subtitleSeconds = SubtitleSeconds,
+                },
+                junkFixture = usesJunk ? new
                 {
                     markerPx = MarkerSize, markerColor = "#900090 inside the old glyph box (luminance below the remaining-contrast threshold of the white label)",
                     meaningful = junkMeaningful, quality = junkQuality, inspectQuality,
@@ -771,9 +1074,19 @@ internal static class StaleLabelReplay
                     requiredOverlapOfSmaller = 0.5,
                     ghostCycle = Ghost ? "empty, empty, empty, junk; repeated for every OCR covering the marker without glyphs" : null,
                 } : null,
-                timingMeaning = "From WPF Rendering after the label disappears to the first session callback without the old block; not physical overlay presentation",
-                resultMeaning = ShowsNewText
-                    ? "Old label removed and never returns; the new text is shown"
+                dirtyFixture = NewDirty ? new
+                {
+                    text = "Loading + U+2026 ellipsis, Segoe UI Bold 76 px white with black 8 px stroke at the old glyph origin",
+                    markerColor = "#007000 shown only with the new text (luminance below the remaining-contrast threshold of the white label)",
+                    meaningful = dirtyMeaningful, quality = dirtyQuality, inspectQuality, similarityToInspect = dirtySimilarity,
+                    unrelatedDirtierAtBaseline = dirtyUnrelated,
+                    afterLabelHidden = "scripted OCR returns no lines until the new text appears",
+                } : null,
+                timingMeaning = "From WPF Rendering of the measured change to the first session callback without the old block; not physical overlay presentation",
+                resultMeaning = Dim || PresentJunk ? "Label stays on screen: its translation never disappears"
+                    : Blink ? "Old label removed, then returns together with its subtitle-bar text after the label is shown again"
+                    : NewDirty ? "Old label removed and never returns; the dirtier new text shown in its place"
+                    : ShowsNewText ? "Old label removed and never returns; the new text is shown"
                     : "Old label removed and never returns",
             });
         }
@@ -793,11 +1106,15 @@ internal static class StaleLabelReplay
                     textRgb = truth.TextRgb.ToString("X6", CultureInfo.InvariantCulture),
                     backgroundRgb = truth.BackgroundRgb.ToString("X6", CultureInfo.InvariantCulture),
                     truth.KnownContrast, afterWhiteInGlyphBox = truth.AfterWhite, afterClearlyEmpty = truth.AfterClearlyEmpty,
-                    afterKnownTextAbsent = truth.AfterKnownTextAbsent,
+                    afterKnownTextAbsent = truth.AfterKnownTextAbsent, afterMaxLuminanceInGlyphBox = truth.AfterMaxLuminance,
                     afterChannelRangeRgb = truth.AfterChannelRange, truth.ChangedPixelFraction,
                     truth.GridChangedFraction, truth.GridSignificantFraction, gridSignificantRegionPx = truth.GridSignificantRegion,
-                    newTextWhite = truth.NewTextWhite,
-                    meaning = "Pre-session captures of the same window: label visible, label hidden, label restored",
+                    newTextWhite = truth.NewTextWhite, dirtyGlyphBoxPx = truth.DirtyGlyphBox, dirtyWhite = truth.DirtyWhite,
+                    dirtyMarkerPx = truth.DirtyMarker,
+                    meaning = Dim ? "Pre-session captures: label visible, label dimmed, label restored"
+                        : PresentJunk ? "Pre-session captures: label visible twice, label restored"
+                        : NewDirty ? "Pre-session captures: label visible, label hidden, new text shown, label restored"
+                        : "Pre-session captures of the same window: label visible, label hidden, label restored",
                 });
             }
         }
@@ -810,7 +1127,29 @@ internal static class StaleLabelReplay
                 _oldVisibleSince = _visibleOld ? _changeAt : null;
                 _requestsAtChange = usage.ApiRequests;
                 _charactersAtChange = usage.ApiCharacters;
-                Write(new { type = "label_hidden_rendering", newTextShown = ShowsNewText, mockRequestsAtChange = _requestsAtChange, oldVisible = _visibleOld });
+                RefreshSubtitleExpiry(_changeAt.Value);
+                _subtitleOldAtChange = SubtitleShowsOld;
+                Write(new { type = "measured_change_rendering", newTextShown = ShowsNewText, mockRequestsAtChange = _requestsAtChange,
+                    oldVisible = _visibleOld, subtitleOld = _subtitleOldAtChange });
+            }
+        }
+
+        public void FadeEnded()
+        {
+            lock (_gate)
+            {
+                _fadeEndedAt = _clock.Elapsed.TotalMilliseconds;
+                Write(new { type = "fade_completed", sinceChangeMs = _fadeEndedAt - _changeAt });
+            }
+        }
+
+        public void SecondStepRendered()
+        {
+            lock (_gate)
+            {
+                _secondStepAt = _clock.Elapsed.TotalMilliseconds;
+                Write(new { type = Blink ? "label_restored_rendering" : "dirty_new_text_rendering", sinceChangeMs = _secondStepAt - _changeAt,
+                    oldVisible = _visibleOld, subtitleOld = SubtitleShowsOld });
             }
         }
 
@@ -820,6 +1159,7 @@ internal static class StaleLabelReplay
             {
                 _ended = true;
                 _endedAt = _clock.Elapsed.TotalMilliseconds;
+                RefreshSubtitleExpiry(_endedAt.Value);
             }
         }
 
@@ -832,7 +1172,49 @@ internal static class StaleLabelReplay
             }
         }
 
+        public void UnderlayTick()
+        {
+            lock (_gate)
+            {
+                _underlayTicks++;
+                if (_changeAt is not null && !_ended) _underlayTicksAfterChange++;
+            }
+        }
+
         private bool Measuring => _changeAt is not null && !_ended;
+
+        private bool IsSettled(double started)
+        {
+            if (_changeAt is not { } change) return false;
+            var reference = Fade ? _fadeEndedAt : change;
+            if (reference is not { } from || started < from + SettledReadingMs) return false;
+            return _secondStepAt is not { } second || started < second;
+        }
+
+        private bool AfterSecondStep(double started) => _secondStepAt is { } second && started >= second;
+
+        private bool SubtitleShowsOld => _subtitleShown && _subtitleText is { } text && IsOld(text);
+
+        private void RefreshSubtitleExpiry(double now)
+        {
+            if (_subtitleShown && now >= _subtitleExpiresAt) _subtitleShown = false;
+        }
+
+        private void ApplySubtitle(LiveUpdate update, double now)
+        {
+            RefreshSubtitleExpiry(now);
+            if (update.ClearOverlay || update.ClearSubtitle)
+            {
+                if (_subtitleShown) _subtitleClears++;
+                _subtitleShown = false;
+            }
+            if (update.Blocks is null || update.Stopped || update.SubtitleText is not { Length: > 0 } subtitle) return;
+            if (update.PreserveSubtitleLifetime && !_subtitleShown) return;
+            if (!update.PreserveSubtitleLifetime) _subtitleExpiresAt = now + SubtitleSeconds * 1000.0;
+            _subtitleShown = true;
+            _subtitleText = subtitle;
+            _subtitleShows++;
+        }
 
         public void WindowsOcr(OcrResult result, int width, int height, double started)
         {
@@ -846,13 +1228,15 @@ internal static class StaleLabelReplay
                     && !IsOld(TextNormalizer.Normalize(line.Text)) && !IsNew(TextNormalizer.Normalize(line.Text)));
                 var full = width == FrameWidth && height == FrameHeight;
                 var startedAfterChange = _changeAt is { } change && started > change;
-                var settled = _changeAt is { } changed && started >= changed + SettledReadingMs;
+                var settled = IsSettled(started);
+                var afterSecond = AfterSecondStep(started);
                 if (Measuring && startedAfterChange)
                 {
                     _ocrCalls++;
                     if (full) _ocrFull++;
                     if (hasInspect) _ocrInspect++;
                     if (hasInspect && settled) _ocrInspectSettled++;
+                    if (hasInspect && afterSecond) _ocrInspectAfterSecond++;
                     if (hasNew)
                     {
                         _ocrNew++;
@@ -864,7 +1248,7 @@ internal static class StaleLabelReplay
                 }
                 Write(new
                 {
-                    type = "ocr_completed", measured = Measuring, startedAfterChange, settled, width, height, full,
+                    type = "ocr_completed", measured = Measuring, startedAfterChange, settled, afterSecondStep = afterSecond, width, height, full,
                     rawLines = result.Lines.Count, meaningfulLines = meaningful, hasInspect, hasNew, otherMeaningfulLines = other,
                     startedMs = started, sinceChangeMs = now - _changeAt,
                 });
@@ -877,7 +1261,7 @@ internal static class StaleLabelReplay
             {
                 var now = _clock.Elapsed.TotalMilliseconds;
                 var startedAfterChange = _changeAt is { } change && started > change;
-                var settled = _changeAt is { } changed && started >= changed + SettledReadingMs;
+                var settled = IsSettled(started);
                 var full = width == FrameWidth && height == FrameHeight;
                 if (Measuring && startedAfterChange)
                 {
@@ -889,6 +1273,15 @@ internal static class StaleLabelReplay
                         case "junk":
                             _junkReadings++;
                             _minJunkOverlap = Math.Min(_minJunkOverlap, overlap ?? 0);
+                            break;
+                        case "junk-present":
+                            _junkPresentReadings++;
+                            _minJunkOverlap = Math.Min(_minJunkOverlap, overlap ?? 0);
+                            break;
+                        case "loading":
+                            _loadingReadings++;
+                            _ocrNew++;
+                            _newFirstOcrAt ??= now;
                             break;
                         case "empty": _emptyScripted++; break;
                         case "no-marker": _noMarker++; break;
@@ -921,6 +1314,10 @@ internal static class StaleLabelReplay
                 if (_ended) return;
                 var visual = update.Blocks is not null || update.ClearOverlay || update.HideOverlay;
                 var wasVisibleOld = _visibleOld;
+                RefreshSubtitleExpiry(now);
+                var wasSubtitleOld = SubtitleShowsOld;
+                ApplySubtitle(update, now);
+                var subtitleOld = SubtitleShowsOld;
                 var other = 0;
                 if (update.ClearOverlay || update.HideOverlay)
                 {
@@ -946,6 +1343,8 @@ internal static class StaleLabelReplay
                 var measured = Measuring;
                 if (measured)
                 {
+                    if (wasSubtitleOld && !subtitleOld) _subtitleOldRemovedAt ??= now;
+                    if (!wasSubtitleOld && subtitleOld && _secondStepAt is not null) _subtitleOldReturnedAt ??= now;
                     if (visual)
                     {
                         _visualUpdates++;
@@ -960,6 +1359,7 @@ internal static class StaleLabelReplay
                         {
                             _oldVisibleSince = now;
                         }
+                        if (wasVisibleOld && !_visibleOld) _oldRemovalTransitions++;
                         if (!_visibleOld && !_oldRemoved)
                         {
                             _oldRemoved = true;
@@ -970,6 +1370,7 @@ internal static class StaleLabelReplay
                             _oldVisibleCallbacksAfterRemoval++;
                             if (!wasVisibleOld) _oldReturnTransitions++;
                         }
+                        if (_visibleOld && _secondStepAt is not null) _oldReturnedAfterSecondAt ??= now;
                         if (_visibleNew) _newReadyAt ??= now;
                     }
                     if (update.ClearOverlay) _clears++;
@@ -999,7 +1400,9 @@ internal static class StaleLabelReplay
                 {
                     type = "update", measured, sinceChangeMs = now - _changeAt, visualUpdate = visual, blockCount = update.Blocks?.Count,
                     visibleOld = _visibleOld, visibleNew = _visibleNew, otherBlocks = other,
-                    update.ClearOverlay, update.HideOverlay, completedOcr = update.Diagnostics is not null,
+                    update.ClearOverlay, update.HideOverlay, update.ClearSubtitle, update.PreserveSubtitleLifetime,
+                    subtitleProvided = update.SubtitleText is not null, subtitleShown = _subtitleShown, subtitleOld,
+                    completedOcr = update.Diagnostics is not null,
                     partialOcr = update.Diagnostics?.PartialOcr, ocrWidth = update.Diagnostics?.OcrWidth, ocrHeight = update.Diagnostics?.OcrHeight,
                     rawLines = update.Diagnostics?.RawLines, recognizedBlocks = update.Diagnostics?.RecognizedBlocks,
                     sceneCut = update.Diagnostics?.SceneCut, whiffSuspected = update.Diagnostics?.WhiffSuspected,
@@ -1009,10 +1412,22 @@ internal static class StaleLabelReplay
             }
         }
 
-        private bool TruthValid => _truth is { } t && t.CaptureWidth == FrameWidth && t.CaptureHeight == FrameHeight
-            && !t.ScreenFallback && t.GlyphWhite >= 1000 && t.AfterWhite * 20 <= t.GlyphWhite && !t.AfterClearlyEmpty
-            && (!Junk || t.Marker is not null) && (!ShowsNewText || t.NewTextWhite >= 1000)
-            && (BrightSpot is null || !t.AfterKnownTextAbsent);
+        private bool TruthValid
+        {
+            get
+            {
+                if (_truth is not { } t || t.CaptureWidth != FrameWidth || t.CaptureHeight != FrameHeight
+                    || t.ScreenFallback || t.GlyphWhite < 1000) return false;
+                if (HidesLabel && (t.AfterWhite * 20 > t.GlyphWhite || t.AfterClearlyEmpty)) return false;
+                if (Dim && t.AfterWhite * 20 > t.GlyphWhite) return false;
+                if (Scripted && t.Marker is null) return false;
+                if (NewDirty && (t.DirtyMarker is null || t.DirtyGlyphBox is null || t.DirtyWhite < 1000)) return false;
+                if (ShowsNewText && t.NewTextWhite < 1000) return false;
+                return BrightSpot is null || !HidesLabel || !t.AfterKnownTextAbsent;
+            }
+        }
+
+        private bool UnderlayRan => !Underlay || _underlayTicksAfterChange >= ObservationMs / AnimationIntervalMs / 2;
 
         public bool FixtureValid
         {
@@ -1021,9 +1436,19 @@ internal static class StaleLabelReplay
                 lock (_gate)
                 {
                     var common = TruthValid && _changeAt is not null && _initialDisplayedAt is not null && !_screenFallback
-                        && !_stoppedDuringMeasurement && _sceneCuts == 0 && _completedOcr >= 1;
+                        && !_stoppedDuringMeasurement && _sceneCuts == 0 && _completedOcr >= 1 && UnderlayRan;
                     if (Junk)
                         return common && _junkReadings >= (Ghost ? 1 : 2) && _inspectScriptedSettled == 0 && _minJunkOverlap >= 0.5;
+                    if (NewDirty)
+                        return common && _loadingReadings >= 1 && _inspectScriptedSettled == 0 && _secondStepAt is not null;
+                    if (PresentJunk)
+                        return common && _junkPresentReadings >= 2 && _inspectScriptedSettled >= 1 && _minJunkOverlap >= 0.5;
+                    if (Dim)
+                        return common && _ocrInspectSettled >= 1;
+                    if (Blink)
+                        return common && _secondStepAt is not null && _ocrInspectSettled == 0 && _ocrInspectAfterSecond >= 1;
+                    if (Fade)
+                        return common && _fadeEndedAt is not null && _ocrInspectSettled == 0;
                     if (ShowsNewText)
                         return common && _ocrNew >= 1 && _ocrInspectSettled == 0
                             && (!Busy || _ticksAfterChange >= ObservationMs / AnimationIntervalMs / 2);
@@ -1037,8 +1462,13 @@ internal static class StaleLabelReplay
             lock (_gate)
             {
                 var valid = FixtureValid;
-                var expected = valid && _oldRemoved && _oldReturnTransitions == 0 && !_visibleOld
-                    && (!ShowsNewText || (_newReadyAt is not null && _visibleNew));
+                var subtitleOldAtEnd = SubtitleShowsOld;
+                var expected = valid && (Dim || PresentJunk
+                    ? !_oldRemoved && _visibleOld && _oldRemovalTransitions == 0
+                    : Blink
+                        ? _oldRemoved && _visibleOld && _oldReturnedAfterSecondAt is not null && _subtitleOldReturnedAt is not null
+                        : _oldRemoved && _oldReturnTransitions == 0 && !_visibleOld
+                            && (!(ShowsNewText || NewDirty) || (_newReadyAt is not null && _visibleNew)));
                 var tail = _endedAt is { } end && _changeAt is not null ? end - (_lastFullOcrAt ?? _changeAt.Value) : (double?)null;
                 var visibleTotal = _oldVisibleTotalMs + (_oldVisibleSince is { } visibleSince && _endedAt is { } stop ? stop - visibleSince : 0);
                 var maxGap = tail is { } t ? Math.Max(_maxFullOcrGapMs, t) : _maxFullOcrGapMs;
@@ -1055,11 +1485,21 @@ internal static class StaleLabelReplay
                     screenFallback = _screenFallback, stoppedDuringMeasurement = _stoppedDuringMeasurement,
                     staleLifetimeMs = _oldRemovedAt - _changeAt, oldRemoved = _oldRemoved,
                     oldNotRemovedAfterObservationMs = _oldRemoved ? (double?)null : _endedAt - _changeAt,
-                    oldReturnTransitions = _oldReturnTransitions, oldVisibleCallbacksAfterRemoval = _oldVisibleCallbacksAfterRemoval,
+                    fadeEndedMs = Fade ? _fadeEndedAt - _changeAt : null,
+                    staleLifetimeAfterFadeEndMs = Fade ? _oldRemovedAt - _fadeEndedAt : null,
+                    oldReturnTransitions = _oldReturnTransitions, oldRemovalTransitions = _oldRemovalTransitions,
+                    oldVisibleCallbacksAfterRemoval = _oldVisibleCallbacksAfterRemoval,
                     oldVisibleAtEnd = _visibleOld, oldVisibleMsAfterChange = _changeAt is null ? (double?)null : visibleTotal,
                     lastOldRemovedMs = _lastOldRemovedAt - _changeAt,
-                    newReadyMs = ShowsNewText ? _newReadyAt - _changeAt : null,
-                    newFirstOcrMs = ShowsNewText ? _newFirstOcrAt - _changeAt : null, newVisibleAtEnd = ShowsNewText ? _visibleNew : (bool?)null,
+                    secondStepMs = _secondStepAt - _changeAt,
+                    oldReturnedAfterSecondStepMs = Blink ? _oldReturnedAfterSecondAt - _secondStepAt : null,
+                    subtitleOldAtChange = _subtitleOldAtChange, subtitleOldRemovedMs = _subtitleOldRemovedAt - _changeAt,
+                    subtitleOldReturnedAfterSecondStepMs = _subtitleOldReturnedAt - _secondStepAt, subtitleOldAtEnd,
+                    subtitleShows = _subtitleShows, subtitleClears = _subtitleClears,
+                    newReadyMs = ShowsNewText || NewDirty ? _newReadyAt - _changeAt : null,
+                    newReadyAfterShownMs = NewDirty ? _newReadyAt - _secondStepAt : null,
+                    newFirstOcrMs = ShowsNewText || NewDirty ? _newFirstOcrAt - _changeAt : null,
+                    newVisibleAtEnd = ShowsNewText || NewDirty ? _visibleNew : (bool?)null,
                     initialDisplayedMs = _initialDisplayedAt, initialOldBoxWindowPx = _initialOldBox, initialOldBoxIouWithGlyphs = iou,
                     observationMs = _endedAt - _changeAt, visualUpdates = _visualUpdates, maxOtherBlocks = _maxOtherBlocks,
                     clearCallbacks = _clears, hideCallbacks = _hides,
@@ -1071,16 +1511,19 @@ internal static class StaleLabelReplay
                     sceneCutFrames = _sceneCuts, whiffSuspectedFrames = _whiffs, retainedBlocks = _retained,
                     reusedBlocks = _reused, framesWithReusedBlocks = _reusedFrames,
                     ocrCallsAfterChange = _ocrCalls, fullOcrCallsAfterChange = _ocrFull, inspectReadingsAfterChange = _ocrInspect,
-                    inspectReadingsSettled = Junk ? _inspectScriptedSettled : _ocrInspectSettled,
-                    newTextReadings = _ocrNew, emptyOcrReadings = Junk ? _emptyScripted : _ocrEmpty,
-                    otherMeaningfulReadings = _ocrOtherMeaningful, junkReadings = _junkReadings, noMarkerReadings = _noMarker,
+                    inspectReadingsSettled = Scripted ? _inspectScriptedSettled : _ocrInspectSettled,
+                    inspectReadingsAfterSecondStep = _ocrInspectAfterSecond,
+                    newTextReadings = _ocrNew, emptyOcrReadings = Scripted ? _emptyScripted : _ocrEmpty,
+                    otherMeaningfulReadings = _ocrOtherMeaningful, junkReadings = _junkReadings, junkPresentReadings = _junkPresentReadings,
+                    loadingReadings = _loadingReadings, noMarkerReadings = _noMarker,
                     minJunkOverlapOfSmaller = double.IsPositiveInfinity(_minJunkOverlap) ? (double?)null : _minJunkOverlap,
                     animationTicks = _ticks, animationTicksAfterChange = _ticksAfterChange,
+                    underlayTicks = _underlayTicks, underlayTicksAfterChange = _underlayTicksAfterChange,
                     mockProviderRequests = usage.ApiRequests, mockRequestsAfterChange = usage.ApiRequests - _requestsAtChange,
                     mockProviderCharacters = usage.ApiCharacters, mockCharactersAfterChange = usage.ApiCharacters - _charactersAtChange,
                     usage.CacheHits, usage.GlossaryHits,
                 });
-                Console.WriteLine($"StaleLabelReplay: {reason}; fixture={valid}; expected={expected}; stary napis {(_oldRemoved ? $"usuniety po {_oldRemovedAt - _changeAt:F0} ms" : "nie usuniety")}, powroty {_oldReturnTransitions}.");
+                Console.WriteLine($"StaleLabelReplay: {reason}; fixture={valid}; expected={expected}; stary napis {(_oldRemoved ? $"usuniety po {_oldRemovedAt - _changeAt:F0} ms" : "nie usuniety")}, zniknięcia {_oldRemovalTransitions}, powroty {_oldReturnTransitions}.");
             }
             return exitCode;
         }

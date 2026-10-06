@@ -476,7 +476,8 @@ fizycznych pikseli, etykieta znika lokalnie (pole 5% okna, zmienione 2–3,6% ko
 zero globalnych `SceneCut`), Mock 1000 ms, obserwacja 12 s. Wariant „real” używa lokalnie
 prawdziwego wycinka etykiety (glify 259×70 px) i tekstury z klatki 4K gry; zasoby nie trafiają
 do repozytorium. Pole po zniknięciu etykiety nie jest jednolite (wariant real: zakres
-kanałów 33–50), więc usunięcie z dowodem w pikselach nie ma zastosowania.
+kanałów 33–50), więc usunięcie z dowodem w pikselach nie ma zastosowania — to stan sprzed
+sondy `KnownTextAbsenceProbe` (krok 2); wtedy jedynym dowodem w pikselach był test jednolitości.
 
 **Pomiar** (callbacki sesji od WPF Rendering; 5 prób „real” + 1 syntetyczna; percentyle
 nearest-rank):
@@ -534,20 +535,22 @@ i 242 Infrastructure zaliczone.
 
 #### Krok 2 — poprawka i pomiar po (2026-10-06)
 
-**Co trzymało napis (z pomiaru bazowego, nie hipoteza).** Wspólna przyczyna: na
-teksturowanym tle pole po etykiecie nie jest jednolite, więc sesja nie miała żadnego dowodu
-w pikselach i w najlepszym razie czekała na trzy przebiegi OCR bez etykiety (ok. 0,9 s).
-Na to nakładały się trzy błędy logiki:
+**Co trzymało napis w SceneReplay (z pomiaru bazowego, nie hipoteza).** Interpretacja, nie
+osobny pomiar: wspólną przyczyną było to, że na teksturowanym tle pole po etykiecie nie jest
+jednolite, więc sesja nie miała żadnego dowodu w pikselach i w najlepszym razie czekała na
+trzy przebiegi OCR bez etykiety (ok. 0,9 s). Na to nakładały się trzy błędy logiki:
 
-- (1) potwierdzone: brudniejszy, niepowiązany odczyt (`lRrgIé@ue` nad „Inspect”) dawał `Keep`
-  i `Misses=0`, więc blok nie znikał wcale (5/5), a ten sam odczyt nad duchem wskrzeszał
-  usunięty napis (5/5 powrotów po ok. 4,95 s);
+- (1) potwierdzone w SceneReplay: brudniejszy, niepowiązany odczyt (`lRrgIé@ue` nad „Inspect”)
+  dawał `Keep` i `Misses=0`, więc blok nie znikał wcale (5/5), a ten sam odczyt nad duchem
+  wskrzeszał usunięty napis (5/5 powrotów po ok. 4,95 s). Logika sesji jest potwierdzona przy
+  skryptowym OCR; nie wykazano, że Windows OCR w grze daje taki odczyt (na badanej teksturze
+  zwracał 0 linii w 25/25 przebiegów po zmianie);
 - (3) potwierdzone: wycinki OCR zerowały zegar pełnego skanu, a blok spoza wycinka nie dostawał
   kolejnych pudeł — `stale-busy` bez usunięcia (5/5, przerwa bez pełnego OCR 10,5–10,9 s),
   `stale-newtext` ok. 6,3 s; ten sam wzorzec jest w logach z gry (do 59 s bez pełnego OCR);
 - (2) częściowo: pierwsze pudło trafia do callbacku dopiero z wynikiem dostawcy, ale samo
-  usunięcie bez dowodu (trzecie pudło) w żadnej próbie nie wypadło w klatce z zapytaniem do
-  dostawcy, więc ta ścieżka nie trzymała napisu.
+  usunięcie bez dowodu (trzecie pudło) w żadnej próbie (120 po poprawce i 42 kontrolne na
+  HEAD) nie wypadło w klatce z zapytaniem do dostawcy, więc ta ścieżka nie trzymała napisu.
 
 **Zmiana w kodzie produktu.**
 
@@ -558,6 +561,11 @@ Na to nakładały się trzy błędy logiki:
    (biały → żółty) i przygaszenie do ok. 30% nie są zniknięciem. Próg 50% dałby dowód w 74–77%
    pól 259×70 na trzech klatkach 4K z Escape Academy zamiast 31–46%, ale uznałby za zniknięty
    napis przygaszony do ok. 30% (pulsujące „Press any key” migałoby). Wybrano ostrożniej.
+   Analiza: klatki `20260912-escape-menu\visual-01..03\frame-original.png` (3840×2160), pole
+   259×70 przesuwane siatką co 8 px (117 376 pozycji na klatkę), kolory etykiety tekst FAFAFA /
+   tło 0C0B0D, tolerancja 18 pikseli (1‰); dowód przy progu 25%: 31,2 / 45,7 / 35,7%, przy 50%:
+   73,6 / 77,6 / 76,3%. Skrypt `krok1\skrypty\pozycje_pola_4k.py`, wynik (same liczby, bez
+   pikseli) `krok1\pozycje-pola-4k-wynik.json`.
 2. Sonda działa w trzech miejscach: (a) przy każdym przechwyceniu z istotną zmianą, która
    obejmuje wyświetlany blok (bez cięcia sceny i bez zapasowego zrzutu ekranu; blok o niezmienionym
    odcisku pola jest pomijany) — blok znika od razu i zostaje duchem, który wskrzesi tylko
@@ -600,7 +608,9 @@ callbacku bez starego bloku):
 
 Próby syntetyczne (1 na scenariusz): 47–60 ms. Nowy tekst bez zmian (`stale-newtext` p50/p90
 1345/1353 → 1357/1367 ms, `stale-busy` 1502/1532 → 1519/1525 ms). Najdłuższa przerwa bez
-pełnego OCR w `stale-busy` 10,5–10,9 s → 4,02–4,17 s.
+pełnego OCR w `stale-busy` 10,5–10,9 s → 4,02–4,17 s. Czasy rzędu 0,05 s wynikają ze stałej
+fazy fixture (zmiana zawsze 1500 ms po callbacku, więc zawsze w tym samym miejscu zegara
+przechwytywania 6 fps); rozkład po przesunięciu fazy i zmiana tego zachowania — krok 1b.
 
 **Wariant bez dowodu w pikselach** (`--bright-spot-px 12`, to samo HEAD vs po poprawce, 5 prób):
 
@@ -621,7 +631,8 @@ Mock bez zmian.
 trybach OCR, noisy, aba, churn, stop, local-reading, reading-jitter, reading-whiff, ocr-timing,
 local-occlusion ×3, moving-text, position-jitter, hud-motion ×3), po 3 próby na kodzie HEAD i po
 poprawce: wszystkie `expectedBehavior`, `desired*` i `fixtureValid` takie same albo lepsze
-(moving-text na HEAD miał 1 nieważną próbę z 3, po poprawce 3/3), liczby zapytań i znaków Mock
+(moving-text: na HEAD 1 nieważna próba z 3, po poprawce 3/3 — to niestabilność fixture, nie
+poprawa), liczby zapytań i znaków Mock
 identyczne. `local-occlusion` usuwa Inspect po 16 ms zamiast 295 ms. Drobne różnice:
 local-reading i local-occlusion-hover mają o jeden callback z tekstem więcej (częstszy pełny
 skan), czasy usunięcia w hud-motion mieszczą się w rozrzucie (65–172 ms, limit 700 ms).
@@ -630,8 +641,150 @@ skan), czasy usunięcia w hud-motion mieszczą się w rozrzucie (65–172 ms, li
 Dowód w pikselach działa tylko przy przechwytywaniu okna (nie przy zapasowym zrzucie ekranu)
 i tylko gdy pod napisem nie zostaje nic jasnego jak on (na klatkach z gry: 31–46% pozycji).
 Tekst, który pulsuje poniżej ćwierci kontrastu albo przy najechaniu zmienia kolor na równie
-ciemny jak tło, zniknie z nakładki i wróci przy następnym OCR (bez zapytania do dostawcy).
+ciemny jak tło, zniknie z nakładki i wróci przy następnym OCR (bez zapytania do dostawcy) —
+w recenzji okazało się, że miga przy każdej istotnej zmianie w polu (M1, zmienione w kroku 1b).
 Niezależnie od poprawki w `stale-newtext` (wariant real) nowy tekst nadal znika na ok. 1,02 s
 w 5/5 prób przed i po: Windows OCR czyta go raz z przekłamaną literą, potwierdzona podmiana
-wariantu zdejmuje blok przed tłumaczeniem i wysyła nowe zapytanie — osobny temat.
+wariantu zdejmuje blok przed tłumaczeniem i wysyła nowe zapytanie — osobny temat (usunięte
+w kroku 1b).
 Weryfikacja: build bez ostrzeżeń, Core 947/947 (36 nowych testów), Infrastructure 242/242.
+
+#### Krok 1b — poprawki po recenzji (2026-10-06)
+
+Dwóch recenzentów kroku 2 dało werdykt ok-with-fixes: M1–M3 (medium), L1–L2 (low) i uwagi do
+dokumentów. Dla każdego znaleziska najpierw scenariusz odtwarzający na HEAD c99947a, potem
+poprawka, potem pomiar. „Przed” = kod produktu c99947a z nowym narzędziem SceneReplay
+(osobny build `krok1\after2\bin-before` ze źródeł `git archive c99947a`), „po” = poprawki
+(`after2\bin-after`). Wszędzie prawdziwy wycinek etykiety i tekstura visual-01 od 1750,560,
+Mock 1000 ms, obserwacja 12 s, percentyle nearest-rank, czas od WPF Rendering zmiany do
+pierwszego callbacku. Próby przed/po przeplatane w każdej turze, z jednym wyjątkiem: nowe
+scenariusze „po” (5 × 7 wariantów) poszły po wszystkich „przed”, bo pierwsza wersja poprawki
+została odrzucona w trakcie serii (niżej, M3).
+
+**Odtworzenie na HEAD (pomiar).**
+
+- M1: `stale-dim --dim-percent 25` — 12–16 zniknięć tłumaczenia na próbę (5/5), każde wracało
+  po 0,34–2,4 s. Prawda referencyjna potwierdza mechanizm: sonda z kolorami pierwszego odczytu
+  (F9F9F9 / 010102) mówi „nieobecny” (`afterKnownTextAbsent=true`, najjaśniejszy piksel pola 63
+  przy progu ok. 71), a OCR czyta przygaszoną etykietę i duch wraca ze starymi kolorami.
+  `stale-dim` z domyślnymi 40% (najjaśniejszy piksel 102) i `stale-fade` (300 ms) na HEAD
+  przechodzą 5/5 — tych dwóch M1 nie odtwarza. W jednym próbnym przebiegu `stale-dim` 40% na
+  HEAD (poza serią) tłumaczenie zniknęło raz na ok. 1 s: potwierdzona podmiana wariantu odczytu
+  zdejmowała stary blok przed tłumaczeniem — ten sam mechanizm co luka ok. 1,02 s nowego tekstu
+  w `stale-newtext` real z kroku 2.
+- M2: `stale-blink` — po powrocie etykiety blok wraca po 78–434 ms, pasek napisów nie wraca
+  wcale (0/5).
+- M3: `stale-newdirty` — „Loading…” w miejscu zniknętej etykiety nie pojawia się przez 10,5 s
+  od pokazania (0/5); każdy z 3–4 odczytów nad duchem był odrzucany.
+- L1: `stale-present-junk --junk-run 3` — 5 zniknięć i powrotów na próbę (5/5), pierwsze po
+  1,48–1,59 s, każde na 0,26–0,78 s. Wariant domyślny (śmieć co drugi przebieg) na HEAD przechodzi
+  5/5: poprawny odczyt między śmieciami zeruje braki, więc „co drugi przebieg” L1 nie odtwarza.
+  Pierwsza wersja podkładu (dwa stałe odcienie) też nie odtwarzała: co któreś przechwycenie
+  powtarzało piksele odcisku i zerowało braki; podkład ma teraz poziomy z okresem 2,8 s.
+- L2: w żadnym istniejącym scenariuszu bloki z brakami nie leżą daleko od siebie; liczba pełnych
+  OCR (niżej) nie pokazuje problemu ani zmiany.
+
+**Zmiana w kodzie produktu.**
+
+1. M1 — `KnownTextReference` w `LiveOverlayBlock.Probe`: kolory dla sond i liczba pikseli
+   „rdzenia” glifów (po stronie tekstu połowy kontrastu) z ostatniego odczytu OCR, który
+   potwierdził blok (ten sam klucz, podobny odczyt, wskrzeszony duch), trzymane osobno od kolorów
+   rysowania z histerezą. Dowód nieobecności na teksturze w chwili przechwycenia nie zdejmuje już
+   bloku: blok staje się podejrzany, jego pole wchodzi do najbliższego OCR, a trwający przebieg,
+   który go obejmuje, jest porzucany i ponawiany. Blok znika dopiero, gdy OCR go nie widzi, a sonda
+   z aktualnym wzorcem mówi „nieobecny”. Jednolite przykrycie (`TextPresenceProbe`) nadal zdejmuje
+   blok od razu. Koszt: usunięcie z dowodem w pikselach przychodzi z najbliższym OCR, a nie
+   z najbliższą klatką (pomiar niżej). Wymóg dwóch potwierdzeń sondy w osobnych przechwyceniach
+   odrzucono: przy przygaszeniu bez dalszych zmian drugie przechwycenie przychodzi przed OCR
+   (ok. 167 ms wobec ok. 300 ms) i też zdjęłoby napis.
+   Przy okazji: potwierdzona podmiana **wariantu** odczytu (podobieństwo ≥ 0,5) nie zdejmuje
+   starego bloku przed tłumaczeniem — zamiana następuje w aktualizacji z nowym tłumaczeniem.
+   Zmiana treści (podobieństwo < 0,5) nadal zdejmuje stary blok od razu.
+2. M2 — duch pamięta, czy jego tekst był na pasku i zniknął z niego razem z blokiem; wskrzeszenie
+   go przywraca (`LiveSubtitleContent.Restore`). Pusty pasek pokazuje się od nowa (pełny czas
+   paska), pasek z innymi liniami dostaje tekst bez odnawiania czasu — zgodnie z M21 i punktem 4
+   regresji M20/M21/M22 („usunięcie części treści nie odnawia czasu”). Duchy po okresie łaski nie
+   usuwały treści paska, więc niczego nie przywracają.
+3. M3 — nad duchem odrzucany jest tylko odczyt niewiarygodny (`IsImplausibleReading`:
+   niepowiązany i brudniejszy, a do tego `ReadingQuality` < 0,75 albo litery < 50% znaków
+   niebiałych; śmieć fixture ma 0,667, „Loading…” 0,875, „Lv5 Key” 0,857, „Price: €5” 0,889).
+   Wiarygodny niepowiązany odczyt nad duchem usuniętym **z dowodem w pikselach** to nowy napis:
+   duch wygasa, nowy blok dziedziczy styl. Nad duchem po samych brakach OCR (napis mógł zostać)
+   brudniejszy niepowiązany odczyt jest dalej odrzucany. Nad wyświetlanym blokiem
+   `LiveReadingStabilizer` przyjmuje wiarygodny niepowiązany odczyt gorszej jakości po dwóch
+   kolejnych identycznych odczytach (wcześniej nigdy); różne przekłamania się nie sumują.
+   Pierwsza wersja (wiarygodny odczyt nad blokiem, który i tak wypadłby w tym przebiegu, od razu
+   zastępował napis) została odrzucona w trakcie serii: w 1 z 5 prób `stale-dim` 25% przekłamany
+   odczyt przygaszonej, wciąż widocznej etykiety zastąpił ją po 10,5 s nowym tłumaczeniem
+   (+1 zapytanie Mock). Wyniki tej wersji: `after2\odrzucone-po-v1`.
+4. L1 — niewiarygodny niepowiązany odczyt nad blokiem nie jest pudłem i nie zeruje braków, gdy
+   przechwycenie pokazuje w polu tyle pikseli rdzenia co przy ostatnim potwierdzeniu (0,5–2×).
+   Liczone na natywnej bitmapie przed skalowaniem, więc także dla wycinków powiększanych ×2,
+   dla których nie powstaje odcisk pola. Bez tego dowodu (jasna plamka po zniknięciu: 144 px
+   wobec ok. 4 tys. pikseli rdzenia) odczyt liczy się jak pudło, jak w kroku 2.
+5. L2 — `LiveBlockSurvival.PartialOcrSeed`: bloki z brakami dołączają do wycinka tylko wtedy,
+   gdy unia z regionem zmian (z zapasem 24 px) nie przekracza połowy klatki; inaczej wycinek
+   obejmuje sam region zmian, a pełny skan zostaje na zegarze `FullScanSchedule`.
+
+**Nowe scenariusze, przed → po** (5 prób; „zniknięcia” = przejścia widoczny → niewidoczny):
+
+| Scenariusz | Wynik przed | Wynik po | Przed: szczegóły | Po: szczegóły |
+|---|---:|---:|---|---|
+| `stale-fade` (300 ms) | 5/5 | 5/5 | usunięty 372–394 ms od startu wygaszania (91–108 ms po końcu) | usunięty 643–671 ms (356–387 ms po końcu) |
+| `stale-dim` 40% | 5/5 | 5/5 | 0 zniknięć | 0 zniknięć |
+| `stale-dim` 25% | 0/5 | 2/5 | 12–16 zniknięć na próbę | 0, 1, 1, 0, 1 zniknięcie, każde ok. 0,61 s |
+| `stale-present-junk` (co drugi) | 5/5 | 5/5 | 0 zniknięć | 0 zniknięć |
+| `stale-present-junk --junk-run 3` | 0/5 | 5/5 | 5 zniknięć na próbę (0,26–0,78 s) | 0 zniknięć |
+| `stale-newdirty` | 0/5 | 5/5 | nowy napis nie pokazany w 10,5 s | nowy napis 1059–1477 ms po pokazaniu |
+| `stale-blink` | 0/5 | 5/5 | pasek nie wraca | blok i pasek wracają razem 71–324 ms po powrocie etykiety |
+
+Zapytania Mock po zmianie: wszędzie 0 przed i po, poza `stale-newdirty` po (1 — tłumaczenie
+nowego napisu). Stary napis w `stale-newdirty` i `stale-blink` znika po 328–349 ms (przed
+44–72 ms). Jedyne pozostałe mignięcia w `stale-dim` 25%: pierwszy OCR po przygaszeniu nie
+zwrócił linii, a wzorzec sondy był jeszcze sprzed przygaszenia; następny OCR przeczytał etykietę
+i tłumaczenie wróciło (blok i pasek).
+
+**Dotychczasowe `stale-*`, przed → po** (3 próby; p50 / max, ms; powroty 0 i Mock bez zmian
+we wszystkich 60 próbach, `expectedBehavior` 30/30 przed i 30/30 po):
+
+| Scenariusz | Z dowodem w pikselach: przed | po | Bez dowodu (`--bright-spot-px 12`): przed | po |
+|---|---:|---:|---:|---:|
+| `stale-junk` | 63 / 65 | 328 / 345 | 890 / 891 | 894 / 912 |
+| `stale-junk-ghost` | 58 / 59 | 328 / 341 | 863 / 898 | 871 / 891 |
+| `stale-texture` | 55 / 66 | 343 / 344 | 930 / 940 | 941 / 950 |
+| `stale-newtext` | 49 / 60 | 354 / 365 | 1713 / 1855 | 1723 / 1870 |
+| `stale-busy` | 65 / 108 | 535 / 552 | 3105 / 3223 | 3044 / 3208 |
+
+Nowy tekst w `stale-newtext` (real) znikał przed na 1028–1042 ms w 3/3 próbach (podmiana wariantu
+odczytu), po — w 0/3; czas pojawienia bez zmian (1374–1395 → 1378–1400 ms). Usunięcie z dowodem
+w pikselach jest wolniejsze o ok. 0,3 s — to świadomy koszt poprawki M1: decyzja wymaga OCR.
+
+**Faza** (`--phase-ms` 0/40/80/120/160, po 3 próby, 15 na scenariusz): czasy ok. 0,05 s z kroku 2
+wynikały ze stałej fazy fixture. Przed (c99947a): `stale-junk` 12–158 ms (p50 68, p90 143),
+`stale-texture` 14–160 ms (p50 66, p90 156) — czyli w ciągu jednej klatki przechwycenia (do ok.
+0,17 s przy 6 fps). Po: `stale-junk` 295–460 ms (p50 367, p90 457), `stale-texture` 294–443 ms
+(p50 346, p90 421) — najbliższy OCR po zmianie. `expectedBehavior` 60/60.
+
+**Regresje** — 20 starszych scenariuszy (displayed i inflight w obu trybach OCR, noisy, aba,
+churn, stop, local-reading, reading-jitter, reading-whiff, ocr-timing, local-occlusion ×3,
+moving-text, position-jitter, hud-motion ×3), po 3 próby przed i po, przeplatane: wszystkie
+`expectedBehavior`, `desired*`, `fixtureValid` i flagi poprawności takie same, liczby zapytań
+i znaków Mock identyczne, porównanie automatyczne bez regresji (`after2\porownanie-regresji.txt`).
+`local-occlusion` nadal 15–18 ms (jednolite przykrycie zdejmuje od razu). L2: pełne OCR bez
+zmian — `stale-busy` 3/3/3 → 3/3/3, `hud-motion` 2 → 2, `hud-motion-whiff` 3 → 3,
+`hud-motion-small-whiff` 6 → 6; poprawka L2 jest zapobiegawcza, żaden scenariusz nie układa
+bloków z brakami daleko od siebie.
+
+**Ograniczenia i ryzyka.** Callbacki sesji, nie fizyczna nakładka; gry nie uruchamiano;
+`stale-junk*`, `stale-present-junk` i `stale-newdirty` mają skryptowy OCR. Podkład w `stale-dim`
+i `stale-present-junk` jest płaski i zasłania teksturę w polu etykiety. Usunięcie z dowodem
+w pikselach trwa teraz 0,29–0,55 s zamiast do ok. 0,16 s. Napis przygaszony poniżej ćwierci
+kontrastu mignie raz (ok. 0,6 s), jeśli pierwszy OCR po przygaszeniu go nie zobaczy — usunięcie
+tego wymagałoby drugiego OCR przed każdym usunięciem (ok. +0,3 s). Kierunek M3 ma swój koszt:
+wiarygodne, ale błędne przekłamanie OCR nad duchem z dowodem w pikselach staje się nowym blokiem
+i zapytaniem do dostawcy. Dowód obecności L1 to liczba pikseli rdzenia w paśmie 0,5–2× — jasna
+tekstura o podobnej liczbie jasnych pikseli mogłaby przy samych śmieciach OCR podtrzymać napis,
+którego już nie ma. Nowy napis z brudniejszym odczytem w miejscu zniknięcia bez dowodu w pikselach
+nadal czeka do 10 s. Weryfikacja: build bez ostrzeżeń, Core 982/982 (+35 testów), Infrastructure
+242/242. Analiza pozycji pola: `krok1\skrypty\pozycje_pola_4k.py`, wynik
+`krok1\pozycje-pola-4k-wynik.json`; JSONL i agregaty: `krok1\after2`.

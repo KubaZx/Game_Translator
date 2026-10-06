@@ -51,4 +51,54 @@ public class LiveReadingEvidenceTests
     {
         Assert.False(LiveReadingStabilizer.IsUnrelatedDirtierReading("Inspect the old drawer", "Inspect the"));
     }
+
+    [Theory]
+    [InlineData("Loading…")]
+    [InlineData("Lv5 Key")]
+    [InlineData("2nd Floor")]
+    [InlineData("#1 Rank")]
+    [InlineData("Price: €5")]
+    public void Prawdziwy_napis_z_wielokropkiem_cyfra_albo_znakiem_nie_jest_smieciem(string candidate)
+    {
+        Assert.True(LiveReadingStabilizer.IsUnrelatedDirtierReading("Inspect", candidate));
+        Assert.True(LiveReadingStabilizer.IsPlausibleText(candidate));
+        Assert.False(LiveReadingStabilizer.IsImplausibleReading("Inspect", candidate));
+    }
+
+    [Theory]
+    [InlineData("Level 20")]
+    [InlineData("Level 20 reached")]
+    public void Czysty_napis_z_liczba_nie_jest_ani_brudniejszy_ani_smieciem(string candidate)
+    {
+        Assert.False(LiveReadingStabilizer.IsUnrelatedDirtierReading("Inspect", candidate));
+        Assert.True(LiveReadingStabilizer.IsPlausibleText(candidate));
+        Assert.False(LiveReadingStabilizer.IsImplausibleReading("Inspect", candidate));
+    }
+
+    [Theory]
+    [InlineData("lRrgIé@ue")]
+    [InlineData("€5")]
+    [InlineData("x2")]
+    [InlineData("#@%& 12")]
+    public void Odczyt_o_niskiej_jakosci_albo_bez_liter_zostaje_smieciem(string candidate)
+    {
+        Assert.False(LiveReadingStabilizer.IsPlausibleText(candidate));
+        Assert.True(LiveReadingStabilizer.IsImplausibleReading("Inspect", candidate));
+    }
+
+    [Fact]
+    public void Podobny_brudny_odczyt_nie_jest_smieciem_tylko_wariantem()
+    {
+        Assert.False(LiveReadingStabilizer.IsImplausibleReading("Last Played: 06.08.2026", "Lasi Played: 06.0840261"));
+        Assert.True(LiveReadingStabilizer.IsVariantOf("Inspect", "Inspecl"));
+        Assert.True(LiveReadingStabilizer.IsVariantOf("Inspect", "Inspect (E)"));
+        Assert.False(LiveReadingStabilizer.IsVariantOf("Inspect", "Loading…"));
+    }
+
+    [Fact]
+    public void Pusty_odczyt_nie_jest_wiarygodnym_napisem()
+    {
+        Assert.False(LiveReadingStabilizer.IsPlausibleText(""));
+        Assert.False(LiveReadingStabilizer.IsPlausibleText("   "));
+    }
 }

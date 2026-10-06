@@ -17,7 +17,12 @@ public sealed record LiveOverlayBlock(
     int Misses = 0,
     BackgroundTexture? Texture = null,
     string SourceText = "",
-    int PendingBackgroundRgb = -1);
+    int PendingBackgroundRgb = -1,
+    KnownTextReference? Probe = null)
+{
+    public int ProbeTextRgb => Probe?.TextRgb ?? ColorRgb;
+    public int ProbeBackgroundRgb => Probe?.BackgroundRgb ?? BackgroundRgb;
+}
 
 /// <summary>
 /// Okres łaski dla bloków nakładki: Windows OCR potrafi na niezmienionej scenie
@@ -72,6 +77,15 @@ public static class LiveBlockSurvival
             region = region?.Union(block.WindowRelativeBox) ?? block.WindowRelativeBox;
         }
         return region;
+    }
+
+    public static RectPx PartialOcrSeed(RectPx dirty, RectPx? unconfirmed, RectPx frame, int margin)
+    {
+        var seed = dirty.Inflate(margin).Intersect(frame);
+        if (unconfirmed is not { } suspects) return seed;
+        var withSuspects = dirty.Union(suspects).Inflate(margin).Intersect(frame);
+        return (long)withSuspects.Width * withSuspects.Height * 2 <= (long)frame.Width * frame.Height
+            ? withSuspects : seed;
     }
 
     private static bool IsClaimed(RectPx box, IReadOnlyCollection<RectPx> claimedBoxes)

@@ -187,6 +187,30 @@ public static class ScreenCapture
         finally { bitmap.UnlockBits(data); }
     }
 
+    public static long CountKnownTextPixels(Bitmap bitmap, RectPx box, int textRgb, int backgroundRgb, ref byte[]? rowBuffer)
+    {
+        var counter = new Core.Vision.KnownTextReference.Counter(textRgb, backgroundRgb);
+        if (!counter.CanCount
+            || box.X < 0 || box.Y < 0 || box.Width <= 0 || box.Height <= 0
+            || (long)box.X + box.Width > bitmap.Width || (long)box.Y + box.Height > bitmap.Height)
+            return -1;
+        var rowBytes = checked(box.Width * 4);
+        if (rowBuffer is null || rowBuffer.Length < rowBytes) rowBuffer = new byte[rowBytes];
+        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            for (var y = box.Y; y < box.Bottom; y++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(
+                    data.Scan0 + y * data.Stride + box.X * 4, rowBuffer, 0, rowBytes);
+                counter.ObserveBgra32(rowBuffer.AsSpan(0, rowBytes));
+            }
+            return counter.Invalid ? -1 : counter.TextPixels;
+        }
+        finally { bitmap.UnlockBits(data); }
+    }
+
     /// <summary>Hashes only a bounded complete ROI of an existing capture, without saving pixels.</summary>
     public static Core.Vision.TextRegionFingerprint? ComputeTextFingerprint(Bitmap bitmap, RectPx box, ref byte[]? rowBuffer)
     {

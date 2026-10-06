@@ -26,6 +26,19 @@ public sealed class LiveSubtitleContent
         return _texts.RemoveAll(pair => keys.Contains(pair.Key)) > 0 ? Render() : null;
     }
 
+    public bool IsEmpty => _texts.Count == 0;
+
+    public bool Contains(string key) => _texts.Any(pair => string.Equals(pair.Key, key, StringComparison.Ordinal));
+
+    public string Restore(IEnumerable<KeyValuePair<string, string>> returnedTexts)
+    {
+        foreach (var pair in returnedTexts)
+        {
+            if (!Contains(pair.Key)) _texts.Add(pair);
+        }
+        return Render();
+    }
+
     public void Clear() => _texts.Clear();
 
     private string Render()

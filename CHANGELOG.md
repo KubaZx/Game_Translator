@@ -7,16 +7,31 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 ### Tryb live — poprawki błędów
 
 - **Tłumaczenie znika razem z napisem w grze** (zgłoszenie: „Zbadaj” zostawało na ekranie po
-  zniknięciu „Inspect” w Escape Academy). Gdy w miejscu napisu nie zostaje nawet ćwierć jego
-  dawnego kontrastu, nakładka zdejmuje tłumaczenie przy najbliższej klatce — w testach po
-  ok. 0,05 s, także na teksturowanym tle (wcześniej 0,9 s, ok. 6 s albo wcale). Napis, który
-  po najechaniu kursorem zmienia kolor albo przygasa, ale nadal odcina się od tła, zachowuje
-  tłumaczenie.
+  zniknięciu „Inspect” w Escape Academy). Gdy najbliższy odczyt OCR nie widzi napisu, a w jego
+  miejscu nie zostaje nawet ćwierć kontrastu, jaki napis miał przy ostatnim odczycie, nakładka
+  zdejmuje tłumaczenie — w testach po 0,3–0,55 s (zależnie od tego, kiedy wypada ten odczyt),
+  także na teksturowanym tle (wcześniej 0,9 s, ok. 6 s albo wcale). Napis, który przygasa albo
+  zmienia barwę na ciemniejszą, ale OCR nadal go czyta, zachowuje tłumaczenie i nie miga.
+  Wyjątek: gdy napis przygaśnie poniżej ćwierci dawnej jasności, a pierwszy odczyt po tym go
+  nie zobaczy, tłumaczenie raz zniknie na ok. 0,6 s.
 - Gdy tło nie pozwala tego stwierdzić (w miejscu napisu zostaje coś jasnego), tłumaczenie znika
   po kilku odczytach OCR zamiast wisieć: śmieciowy odczyt w miejscu napisu już go nie
   podtrzymuje ani nie przywraca, a pełny odczyt ekranu przychodzi co 4 s także wtedy, gdy
   w innym miejscu ekranu coś ciągle się rusza (wcześniej w grze potrafił nie przyjść przez
   blisko minutę).
+- **Napisy na dole:** tłumaczenie znika z paska razem z napisem w grze, a gdy napis wróci
+  w ciągu 10 s, wraca też na pasek. Gdy pasek nadal pokazuje inne linie, powrót nie przedłuża
+  jego czasu.
+- Nowy napis w miejscu poprzedniego dostaje własne tłumaczenie także wtedy, gdy OCR czyta go
+  z wielokropkiem, cyfrą przy literze albo znakiem w rodzaju # czy € — wcześniej w jego
+  miejscu zostawało albo wracało tłumaczenie poprzedniego napisu. Nad napisem, który nadal
+  jest na ekranie, taki odczyt zastępuje tłumaczenie dopiero po dwóch takich samych odczytach
+  z rzędu; wyraźnie śmieciowy odczyt nie staje się tłumaczeniem. Gdy zniknięcia poprzedniego
+  napisu nie widać w pikselach (w jego miejscu zostało coś jasnego), taki nowy napis czeka do
+  10 s — poprzedni mógł zostać, a odczyt bywa jego przekłamaniem.
+- Śmieciowy odczyt OCR nad napisem, który nadal stoi na ekranie, nie zdejmuje go, gdy piksele
+  pokazują, że napis jest w polu. Poprawiony odczyt z jedną inną literą podmienia tłumaczenie
+  w jednej aktualizacji — bez ok. 1 s przerwy na czas tłumaczenia.
 
 ### Wydajność
 
@@ -51,10 +66,21 @@ czas tłumaczenia (ten wyznaczają OCR i dostawca). Liczby przed/po:
   w pikselach (test ścieżki zapasowej). Znacznik geometrii w wariantach junk ma teraz ciemny
   kolor #900090 — jasny #FF00FF sam udawał resztkę tekstu. Wyniki przed/po:
   [ROADMAP.md → Runda 2026-10-05](docs/ROADMAP.md).
+- **SceneReplay: scenariusze napisu, który zostaje lub wraca** — `stale-fade` (wygaszanie
+  przez `--fade-ms`), `stale-dim` (przygaszenie do `--dim-percent` przy pulsującym podkładzie),
+  `stale-present-junk` (śmieci OCR nad widoczną etykietą, `--junk-run`), `stale-newdirty`
+  (nowy napis z wielokropkiem w miejscu zniknętego) i `stale-blink` (etykieta znika i wraca;
+  raport odtwarza pasek napisów z MainWindow). `--phase-ms 0..200` działa teraz także dla
+  `stale-*` i przesuwa zmianę względem zegara przechwytywania.
 - **Core:** `KnownTextAbsenceProbe` (dowód zniknięcia znanego tekstu na teksturze),
   `FullScanSchedule` (zegar pełnego skanu niezależny od wycinków),
   `LiveReadingStabilizer.IsUnrelatedDirtierReading`, `LiveBlockSurvival.UnconfirmedRegion`;
-  36 nowych testów jednostkowych.
+  po recenzji: `KnownTextReference` (wzorzec sondy z ostatniego odczytu i liczba pikseli
+  rdzenia glifów), `LiveOverlayBlock.Probe`, `LiveReadingStabilizer.IsPlausibleText`,
+  `IsImplausibleReading`, `IsVariantOf`, `LiveBlockSurvival.PartialOcrSeed`,
+  `LiveSubtitleContent.Restore`; `LiveReadingStabilizer` przyjmuje wiarygodny, niepowiązany
+  odczyt gorszej jakości po dwóch kolejnych potwierdzeniach (wcześniej odrzucał go zawsze);
+  71 nowych testów jednostkowych (36 + 35).
 
 ## [0.4.0] — 2026-10-01
 

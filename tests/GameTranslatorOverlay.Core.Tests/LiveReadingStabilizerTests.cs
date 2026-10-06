@@ -202,4 +202,36 @@ public class LiveReadingStabilizerTests
         Assert.Equal(LiveReadingDecision.Confirm, stabilizer.Observe("first", displayed, candidate));
         Assert.Equal(LiveReadingDecision.Confirm, stabilizer.Observe("second", displayed, candidate));
     }
+
+    [Theory]
+    [InlineData("Loading…")]
+    [InlineData("Lv5 Key")]
+    [InlineData("Price: €5")]
+    public void Wiarygodny_nowy_napis_gorszej_jakosci_zastepuje_stary_po_dwoch_odczytach(string candidate)
+    {
+        var stabilizer = new LiveReadingStabilizer();
+
+        Assert.Equal(LiveReadingDecision.Confirm, stabilizer.Observe("label", "Inspect", candidate));
+        Assert.Equal(LiveReadingDecision.Replace, stabilizer.Observe("label", "Inspect", candidate));
+    }
+
+    [Fact]
+    public void Rozne_przeklamania_nad_napisem_nie_sumuja_sie_w_podmiane()
+    {
+        var stabilizer = new LiveReadingStabilizer();
+
+        Assert.Equal(LiveReadingDecision.Confirm, stabilizer.Observe("label", "Inspect", "Loading…"));
+        Assert.Equal(LiveReadingDecision.Confirm, stabilizer.Observe("label", "Inspect", "Lv5 Key"));
+        Assert.Equal(LiveReadingDecision.Keep, stabilizer.Observe("label", "Inspect", "Inspect"));
+        Assert.Equal(LiveReadingDecision.Confirm, stabilizer.Observe("label", "Inspect", "Loading…"));
+    }
+
+    [Fact]
+    public void Smieciowy_odczyt_nadal_nie_zastepuje_napisu_nawet_powtorzony()
+    {
+        var stabilizer = new LiveReadingStabilizer();
+
+        for (var reading = 0; reading < 3; reading++)
+            Assert.Equal(LiveReadingDecision.Keep, stabilizer.Observe("label", "Inspect", "lRrgIé@ue"));
+    }
 }

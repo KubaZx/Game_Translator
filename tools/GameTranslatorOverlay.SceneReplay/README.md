@@ -114,21 +114,26 @@ przy skalowaniu OCR, zapasowym przechwytywaniu ekranu ani w każdej grze.
 
 ## Stary napis po lokalnym zniknięciu etykiety
 
-`stale-junk`, `stale-junk-ghost`, `stale-texture`, `stale-newtext` i `stale-busy` w `StaleLabelReplay.cs`
+`stale-junk`, `stale-junk-ghost`, `stale-texture`, `stale-newtext`, `stale-busy`, `stale-fade`,
+`stale-dim`, `stale-newdirty`, `stale-present-junk` i `stale-blink` w `StaleLabelReplay.cs`
 mierzą, jak długo tłumaczenie etykiety „Inspect” zostaje w callbackach sesji po tym, jak
-oryginał zniknął **lokalnie** (bez globalnego cięcia sceny). Własne okno ma dokładnie
+oryginał zniknął **lokalnie** (bez globalnego cięcia sceny), a w wariantach dim i present-junk
+— czy tłumaczenie etykiety, która nadal jest na ekranie, nie znika ani nie mruga. Własne okno ma dokładnie
 1500×900 fizycznych pikseli (rozmiar DIP liczony z DPI), 1 jednostka płótna = 1 piksel, więc
 etykieta ma rozmiar jak w 4K: glify około 259×70 px. Pole etykiety zajmuje 5% okna.
 Mock ma domyślnie **1000 ms** (`--provider-delay-ms` zmienia wartość), cache jest prywatny
-w pamięci, HTTP zablokowane. Odrzucane: `--phase-ms`, `--ocr-delay-ms` i niezgodny `--ocr`.
+w pamięci, HTTP zablokowane. `--phase-ms 0..200` dolicza się do 1500 ms oczekiwania przed
+mierzoną zmianą: bez niej zmiana wypada zawsze w tej samej fazie zegara przechwytywania
+(6 fps, co ok. 167 ms), więc pojedynczy czas usunięcia nie mówi nic o rozrzucie. Odrzucane:
+`--ocr-delay-ms` i niezgodny `--ocr`.
 
 - `stale-junk` (scripted OCR): po zniknięciu etykiety OCR w miejscu starego pola zwraca stały
   śmieciowy odczyt. Header zapisuje, że fixture przechodzi `JunkFilter.IsMeaningful`, ma
   `ReadingQuality` < 0,9 i gorszą o więcej niż 0,1 od „Inspect”, a prawdziwy
   `LiveReadingStabilizer` dwukrotnie zwraca dla niego `Keep`. Box śmieci to oczekiwane pole
   glifów przesunięte o 15% szerokości; pokrycie mniejszego pola jest zapisywane przy każdym
-  odczycie i musi wynosić co najmniej 0,5 (warunek `FindOverlapping`). Test ścieżki
-  „śmieciowy odczyt podtrzymuje stary blok”.
+  odczycie i musi wynosić co najmniej 0,5 (warunek `FindOverlapping`; w pomiarach rundy
+  2026-10-05 wynosiło 0,848–0,891). Test ścieżki „śmieciowy odczyt podtrzymuje stary blok”.
 - `stale-junk-ghost` (scripted OCR): to samo, ale w miejscu bez glifów OCR zwraca cyklicznie
   pusty, pusty, pusty, śmieci. Bada wskrzeszanie ducha (10 s) i liczy powroty starego bloku.
 - `stale-texture` (Windows OCR): etykieta znika z teksturowanego tła, bez śmieci, bez nowego
@@ -137,19 +142,52 @@ w pamięci, HTTP zablokowane. Odrzucane: `--phase-ms`, `--ocr-delay-ms` i niezgo
   dawnego kontrastu). Okres łaski bez żadnego dowodu w pikselach bada `--bright-spot-px`.
 - `stale-newtext` (Windows OCR): w chwili zniknięcia etykiety w lewym dolnym rogu pojawia się
   „The drawer is open”; kwadrat 96×96 px w prawym górnym rogu stoi nieruchomo. Test samej
-  publikacji usunięcia razem z wynikiem dostawcy (bez wycinków animacji).
+  publikacji usunięcia razem z wynikiem dostawcy (bez wycinków animacji). W wariancie real
+  Windows OCR czyta nowy tekst raz z przekłamaną literą, więc sesja uruchamia też wycinki
+  potwierdzające wariant odczytu wokół nowego tekstu — to też ścieżka (3) z ROADMAP: przed
+  poprawką `FullScanSchedule` blok poza tymi wycinkami czekał na pełny skan.
 - `stale-busy` (Windows OCR): jak `stale-newtext`, ale kwadrat miga co 200 ms od startu sesji
   (stałe wycinki OCR). Test publikacji usunięcia razem z wynikiem dostawcy i braku pełnego
   skanu przy ciągłych wycinkach. Nowy tekst jest klasyfikowany po frazie „is open”, bo Windows
   OCR na prawdziwej teksturze potrafi przekłamać jedną literę słowa „drawer”.
+- `stale-fade` (Windows OCR): etykieta wygasa przez `--fade-ms` (domyślnie 300, zakres
+  100–1000; animacja przezroczystości WPF 1 → 0), potem znika. Pomiar od pierwszej klatki
+  wygaszania; `staleLifetimeAfterFadeEndMs` liczy od końca animacji. Odczyt „ustalony” liczy się
+  tu od końca wygaszania.
+- `stale-dim` (Windows OCR): etykieta przygasa do `--dim-percent` (domyślnie 40, zakres 10–90)
+  dawnej jasności — wszystkie kanały RGB glifów, obrysu i ikony mnożone przez ten ułamek — i
+  **zostaje** na ekranie. Pod etykietą od startu sesji co 200 ms zmienia się nieprzezroczysty
+  podkład (szarość 0–12 na przemian z 44–56, poziomy z okresem 2,8 s, więc przechwycenie rzadko
+  powtarza wcześniejsze piksele): każda zmiana jest istotna dla detektora i obejmuje blok.
+  Wymagane: Windows OCR przeczytał przygaszoną etykietę co najmniej raz (inaczej próba jest
+  nieważna). `--dim-percent 25` to wariant poniżej ćwierci kontrastu, w którym sonda nieobecności
+  z kolorami sprzed przygaszenia mówi „nieobecny”.
+- `stale-present-junk` (scripted OCR): etykieta zostaje, podkład pod nią pulsuje jak w
+  `stale-dim`, a podczas pomiaru OCR nad etykietą zwraca na przemian `--junk-run` odczytów
+  śmieci (domyślnie 1, zakres 1–3) i jeden odczyt „Inspect”. Domyślnie co drugi przebieg to
+  śmieć; dopiero `--junk-run 3` daje trzy chybione przebiegi z rzędu, które na kodzie sprzed
+  poprawki wyczerpywały okres łaski.
+- `stale-newdirty` (scripted OCR): etykieta znika, a 1500 ms później w tym samym miejscu
+  pojawia się prawdziwy napis „Loading…” (U+2026, ten sam styl co etykieta). Między zniknięciem
+  a nowym napisem OCR nie zwraca linii. „Loading…” ma `ReadingQuality` 0,875 i jest
+  „niepowiązanym, brudniejszym” odczytem względem „Inspect” (header zapisuje te fakty).
+  `newReadyAfterShownMs` liczy od pokazania nowego napisu.
+- `stale-blink` (Windows OCR): etykieta znika i po 1500 ms wraca. Raport odtwarza obsługę
+  paska napisów z MainWindow (`ClearOverlay`, `ClearSubtitle`, `SubtitleText`,
+  `PreserveSubtitleLifetime`, czas paska 8 s jak domyślne `SubtitleSeconds`) i sprawdza, czy po
+  powrocie etykiety jej tłumaczenie wraca także na pasek (`subtitleOldReturnedAfterSecondStepMs`),
+  a nie tylko do bloków.
 
 Geometria scripted OCR pochodzi wyłącznie z pikseli: znacznik #900090 8×8 px w środku
-starego pola glifów (rysowany tylko w wariantach junk) wyznacza położenie i skalę także
+starego pola glifów (rysowany we wszystkich wariantach scripted) wyznacza położenie i skalę także
 w wycinku powiększonym 2×; obecność etykiety rozpoznaje liczba białych pikseli w tym polu.
 Znacznik zostaje po zniknięciu etykiety, więc ma luminancję (ok. 60) poniżej progu „ćwierci
 dawnego kontrastu” białej etykiety (ok. 71) — inaczej sam udawałby resztkę tekstu.
 Pierwotny #FF00FF (luminancja ok. 105) odbierał sesji dowód w pikselach; pomiar bazowy
 junk powtórzono z nowym znacznikiem na kodzie sprzed poprawki (wyniki w ROADMAP, runda 2026-10-05).
+Nowy napis w `stale-newdirty` ma osobny znacznik #007000 (luminancja ok. 66, kolor nieobecny
+w teksturze visual-01 — niebieski #1000C0 kolidował z 259 jej pikselami); OCR zwraca
+„Loading…” tylko wtedy, gdy ten znacznik i białe glify nowego napisu są w kadrze.
 
 Bez opcji scenariusz rysuje syntetyczną etykietę (Segoe UI Bold 76 px, biały z czarnym
 obrysem 8 px, rysowana ikona myszy) na deterministycznej teksturze. Prawdziwe zasoby czyta
@@ -171,29 +209,40 @@ GameTranslatorOverlay.SceneReplay.exe --scenario stale-busy --output C:\pomiary\
   --assets C:\lokalne\zasoby --texture C:\lokalne\frame-original.png --texture-origin 1750,560
 ```
 
-Przed startem sesji narzędzie robi trzy przechwycenia własnego okna (etykieta, bez etykiety,
-znów etykieta) i zapisuje `ground_truth`: pole glifów, kolory, czy pole po zniknięciu jest
-„jednolite” według `TextPresenceProbe` (musi nie być, inaczej to test dowodu w pikselach),
-czy `KnownTextAbsenceProbe` widzi zniknięcie znanego tekstu (`afterKnownTextAbsent`),
-odsetek zmienionych pikseli i komórek siatki. Po pierwszym callbacku z „Inspect” czeka
-1500 ms, ukrywa etykietę i obserwuje 12 s.
+Przed startem sesji narzędzie robi trzy przechwycenia własnego okna (etykieta, stan po
+zmianie, znów etykieta; w `stale-newdirty` dodatkowo nowy napis) i zapisuje `ground_truth`:
+pole glifów, kolory, czy pole po zniknięciu jest „jednolite” według `TextPresenceProbe`
+(musi nie być, inaczej to test dowodu w pikselach), czy `KnownTextAbsenceProbe` z kolorami
+sprzed zmiany widzi zniknięcie znanego tekstu (`afterKnownTextAbsent`; w `stale-dim` to
+właśnie ta pomyłka sondy), najjaśniejszy piksel pola po zmianie, odsetek zmienionych pikseli
+i komórek siatki. Po pierwszym callbacku z „Inspect” czeka 1500 ms (+ `--phase-ms`),
+wykonuje zmianę i obserwuje 12 s od niej.
 
-Metryka główna `staleLifetimeMs`: od zdarzenia WPF Rendering zniknięcia do pierwszego
+Metryka główna `staleLifetimeMs`: od zdarzenia WPF Rendering zmiany do pierwszego
 wizualnego callbacku bez starego bloku; `null` z `oldNotRemovedAfterObservationMs`, gdy nie
-zniknął w 12 s. Dodatkowo: `oldReturnTransitions` (powroty), `oldVisibleMsAfterChange`
-(łączny czas widoczności po zmianie), `lastOldRemovedMs`, `newReadyMs` (stale-newtext, stale-busy),
-`fullOcrCallbacksAfterChange`, `partialOcrCallbacksAfterChange`,
+zniknął w 12 s. Dodatkowo: `oldReturnTransitions` (powroty), `oldRemovalTransitions`
+(zniknięcia; w `stale-dim` i `stale-present-junk` każde to mignięcie napisu, który stoi na
+ekranie), `oldVisibleMsAfterChange` (łączny czas widoczności po zmianie), `lastOldRemovedMs`,
+`newReadyMs` (stale-newtext, stale-busy, stale-newdirty), `newReadyAfterShownMs`
+(stale-newdirty), `oldReturnedAfterSecondStepMs` i `subtitleOldReturnedAfterSecondStepMs`
+(stale-blink), `subtitleOldRemovedMs`, `fullOcrCallbacksAfterChange`, `partialOcrCallbacksAfterChange`,
 `maxFullOcrGapMsIncludingEdges` (najdłuższa przerwa bez pełnego OCR, łącznie z odcinkiem od
 zmiany i do końca), `firstRetainedCallbackAfterChangeMs`, `reusedBlocks`, liczniki odczytów
 OCR po zmianie i `mockRequestsAfterChange`. Odczyt „ustalony” to OCR rozpoczęty co najmniej
-200 ms po zmianie.
+200 ms po zmianie (w `stale-fade` po końcu wygaszania, w `stale-blink` przed powrotem etykiety).
 
 `fixtureValid` wymaga zgodnej prawdy referencyjnej (1500×900, bez fallbacku, glify przed,
-brak glifów po, pole nie jednolite, z `--bright-spot-px` także `afterKnownTextAbsent=false`),
-callbacku z Inspect, zero globalnych `SceneCut` po
-zmianie, braku ustalonego odczytu „Inspect” po zmianie oraz: dla junk co najmniej dwóch
-odczytów śmieci (ghost: jednego) z pokryciem ≥ 0,5, dla stale-newtext i stale-busy odczytu
-nowego tekstu, a dla stale-busy także ciągłej animacji. **Exit 0 oznacza ważną próbę; `expectedBehavior` (stary napis usunięty,
-bez powrotu; w stale-newtext i stale-busy także pokazany nowy tekst) jest wynikiem regresji.** JSONL nie
+brak glifów po — poza dim i present-junk — pole nie jednolite, z `--bright-spot-px` także
+`afterKnownTextAbsent=false`), callbacku z Inspect, zero globalnych `SceneCut` po zmianie oraz:
+dla junk co najmniej dwóch odczytów śmieci (ghost: jednego) z pokryciem ≥ 0,5 i braku
+ustalonego „Inspect”; dla stale-newtext i stale-busy odczytu nowego tekstu, a dla stale-busy
+także ciągłej animacji; dla stale-fade braku ustalonego „Inspect” po końcu wygaszania; dla
+stale-dim co najmniej jednego ustalonego odczytu przygaszonej etykiety i pracującego podkładu;
+dla stale-present-junk co najmniej dwóch śmieci, jednego „Inspect” i pracującego podkładu; dla
+stale-newdirty odczytu „Loading…” bez ustalonego „Inspect”; dla stale-blink braku ustalonego
+„Inspect” przed powrotem i odczytu po powrocie. **Exit 0 oznacza ważną próbę; `expectedBehavior` jest
+wynikiem regresji:** stary napis usunięty, bez powrotu (w stale-newtext, stale-busy i
+stale-newdirty także pokazany nowy tekst); w stale-dim i stale-present-junk napis ani razu
+nie zniknął; w stale-blink napis zniknął i wrócił — w blokach i na pasku. JSONL nie
 zawiera pikseli ani treści OCR. To callbacki sesji, nie fizyczna nakładka ani zachowanie
 każdej gry; wariant scripted bada logikę sesji, nie to, czy Windows OCR naprawdę czyta śmieci.
