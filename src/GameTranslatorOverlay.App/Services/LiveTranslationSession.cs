@@ -213,7 +213,7 @@ public sealed class LiveTranslationSession(
     private sealed record HeldPrefix(int Letters, TimeSpan LettersSince, TimeSpan FirstSeen);
     private sealed record TrackState(GlyphCover Cover, float[] Signature);
     private readonly Dictionary<string, TrackState> _tracks = new(StringComparer.Ordinal);
-    private TimeSpan _lastTrackedMotion = TimeSpan.MinValue;
+    private TimeSpan? _lastTrackedMotion;
     private readonly HashSet<string> _presentByTracking = new(StringComparer.Ordinal);
     private bool _frameCapturedInMotion;
 
@@ -565,7 +565,7 @@ public sealed class LiveTranslationSession(
                 var now = clock.Elapsed;
                 // Preserve low FPS settings; at faster rates, avoid adding a full
                 // capture tick after the unchanged stability deadline is reached.
-                var pace = now - _lastTrackedMotion < TimeSpan.FromSeconds(1) && _tracks.Count > 0
+                var pace = _lastTrackedMotion is { } trackedMotion && now - trackedMotion < TimeSpan.FromSeconds(1) && _tracks.Count > 0
                     ? TimeSpan.FromSeconds(1.0 / Math.Clamp(Math.Max(options.Fps, options.MotionFps), 0.5, 30.0))
                     : interval;
                 var remaining = stabilizer.GetPollingDelay(now, pace - (now - cycleStart), pace);
@@ -905,7 +905,7 @@ public sealed class LiveTranslationSession(
         foreach (var (key, block) in _displayed)
         {
             var box = block.WindowRelativeBox;
-            if (!box.IntersectsWith(changedArea)) continue;
+            if (!box.IntersectsWith(changedArea) || _presentByTracking.Contains(key)) continue;
             if (_blockFingerprints.TryGetValue(key, out var reference) && reference.FrameRect == frameRect
                 && reference.Image.Matches(ScreenCapture.ComputeTextFingerprint(
                     bitmap, reference.SourceBox, ref _presenceRowBuffer)))
@@ -931,7 +931,7 @@ public sealed class LiveTranslationSession(
             _pendingTextGone = true;
             _refreshAfterBusyChanges = true;
         }
-        if (covered.Count > 0) RemoveLocalBlocks(covered, cancellationToken, sampledAt);
+        if (covered.Count > 0) RemoveLocalBlocks(covered, cancellationToken, sampledAt, status: "Live: napis przykryty — usuwam.");
     }
 
     private void TrackDisplayedBlocks(
@@ -956,15 +956,20 @@ public sealed class LiveTranslationSession(
             if (region is null) continue;
             var signatureArea = SignatureArea(block.WindowRelativeBox, block.LineHeight, frameRect);
             var signature = GlyphCoverBuilder.Signature(region, signatureArea.Offset(-area.X, -area.Y).Intersect(new RectPx(0, 0, region.Width, region.Height)));
-            if (!_tracks.TryGetValue(key, out var state) || !ReferenceEquals(state.Cover, cover))
-            {
-                _tracks[key] = new TrackState(cover, signature);
-                continue;
-            }
-            if (GlyphCover.SignatureDifference(state.Signature, signature) < GlyphCoverBuilder.StaticSignatureTolerance)
+            var fresh = !_tracks.TryGetValue(key, out var state) || !ReferenceEquals(state.Cover, cover);
+            if (!fresh && GlyphCover.SignatureDifference(state!.Signature, signature) < GlyphCoverBuilder.StaticSignatureTolerance)
             {
                 _presentByTracking.Add(key);
                 continue;
+            }
+            if (fresh)
+            {
+                _tracks[key] = new TrackState(cover, signature);
+                if (GlyphTracker.Locate(track, region, area.X, area.Y, 0) is { IsConfident: true })
+                {
+                    _presentByTracking.Add(key);
+                    continue;
+                }
             }
             var match = GlyphTracker.Locate(track, region, area.X, area.Y, options.TrackMaxShiftPx);
             if (match is not { IsConfident: true } m)
@@ -998,7 +1003,7 @@ public sealed class LiveTranslationSession(
                 _pendingTextGone = true;
                 _refreshAfterBusyChanges = true;
             }
-            RemoveLocalBlocks(lost, cancellationToken, sampledAt);
+            RemoveLocalBlocks(lost, cancellationToken, sampledAt, status: "Live: napis odjechał w ruchu — usuwam.");
             return;
         }
         if (!changed) return;
@@ -1034,7 +1039,7 @@ public sealed class LiveTranslationSession(
                     current, reference.SourceBox, ref _presenceRowBuffer)))).ToArray();
             if (removedKeys.Length < _displayed.Count)
             {
-                RemoveLocalBlocks(removedKeys, cancellationToken);
+                RemoveLocalBlocks(removedKeys, cancellationToken, status: "Live: zmiana widoku — usuwam niepotwierdzone napisy.");
                 var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
                 if (bounds != _lastEmittedBounds)
                 {
@@ -1260,14 +1265,14 @@ public sealed class LiveTranslationSession(
                     // areas, including unchanged menu text that has not appeared yet.
                     foreach (var area in _pendingTextAreas)
                         _pendingDirtyRegion = _pendingDirtyRegion?.Union(area.Box) ?? area.Box;
-                    RemoveLocalBlocks(covered.Select(static area => area.Key), cancellationToken);
+                    RemoveLocalBlocks(covered.Select(static area => area.Key), cancellationToken, status: "Live: tekst zniknął w trakcie tłumaczenia — usuwam.");
                 }
             }
         }
     }
 
     private void RemoveLocalBlocks(IEnumerable<string> keys, CancellationToken cancellationToken,
-        TimeSpan? ghostSince = null, IReadOnlySet<string>? ghostKeys = null)
+        TimeSpan? ghostSince = null, IReadOnlySet<string>? ghostKeys = null, string status = "Live: usuwam zastąpiony napis.")
     {
         var keyList = keys.ToArray();
         var inSubtitle = keyList.Where(_subtitleContent.Contains).ToHashSet(StringComparer.Ordinal);
@@ -1292,7 +1297,7 @@ public sealed class LiveTranslationSession(
         if (!removed && updatedSubtitle is null) return;
         var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
         _lastEmittedBounds = bounds;
-        Emit(new LiveUpdate("Live: usuwam zastąpiony napis.", BuildDisplayList(bounds),
+        Emit(new LiveUpdate(status, BuildDisplayList(bounds),
                 SubtitleText: updatedSubtitle, WindowBounds: bounds)
             {
                 ClearSubtitle = updatedSubtitle is { Length: 0 },

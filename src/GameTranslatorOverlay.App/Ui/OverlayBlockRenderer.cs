@@ -301,7 +301,8 @@ public static class OverlayBlockRenderer
         var natural = WidestLine(text, typeface, em);
         var fitted = natural > limit ? em * Math.Max(floor, limit / natural) : em;
         double wrap = 0;
-        if (lines.Count > 1 && WidestLine(text, typeface, fitted) > limit) wrap = Math.Max(1, available) * 1.04;
+        if (lines.Count > 1 && WidestLine(text, typeface, fitted) > limit)
+            wrap = Math.Max(Math.Max(1, available) * 1.04, WidestWord(text, typeface, fitted) + 1);
 
         native.Typeface = typeface;
         native.EmSize = fitted;
@@ -370,6 +371,17 @@ public static class OverlayBlockRenderer
     {
         var cut = text.IndexOf('\n');
         return (cut >= 0 ? text[..cut] : text).Trim();
+    }
+
+    private static double WidestWord(string text, Typeface typeface, double em)
+    {
+        var widest = 0.0;
+        foreach (var word in text.Split([' ', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var formatted = GameTextElement.Format(word, typeface, em, Brushes.Black, 1.0);
+            widest = Math.Max(widest, formatted.WidthIncludingTrailingWhitespace);
+        }
+        return widest;
     }
 
     private static double WidestLine(string text, Typeface typeface, double em)

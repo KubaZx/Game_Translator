@@ -49,7 +49,10 @@ public static class TextBlockGrouper
             var matching = new List<int>();
             for (var i = 0; i < clusters.Count; i++)
             {
-                if (Belongs(clusterBoxes[i], line.Box, maxVerticalGap, maxHorizontalGap)
+                var local = Math.Max(MedianLineHeight(clusters[i]), line.Box.Height);
+                if (Belongs(clusterBoxes[i], line.Box,
+                        Math.Min(maxVerticalGap, local * options.MaxVerticalGapFactor),
+                        Math.Min(maxHorizontalGap, local * options.MaxHorizontalGapFactor))
                     && SimilarLineHeight(clusters[i], line))
                 {
                     matching.Add(i);

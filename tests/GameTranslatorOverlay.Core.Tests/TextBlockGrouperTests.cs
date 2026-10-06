@@ -90,4 +90,24 @@ public class TextBlockGrouperTests
         var block = Assert.Single(blocks);
         Assert.Equal(3, block.Lines.Count);
     }
+
+    [Fact]
+    public void Duzy_napis_w_kadrze_nie_skleja_odleglych_wierszy_hud()
+    {
+        var lines = new[]
+        {
+            Line("X", 125, 1866, 39, 41),
+            Line("Hint", 224, 1864, 141, 52),
+            Line("Tab", 121, 2012, 49, 22),
+            Line("Items", 225, 1999, 191, 53),
+            Line("EXIT", 2440, 922, 341, 174),
+            Line("Escape!", 2423, 1727, 593, 208),
+            Line("Welcome", 1200, 300, 600, 200),
+        };
+
+        var blocks = TextBlockGrouper.Group(lines);
+
+        Assert.Contains(blocks, b => b.Text == "X Hint");
+        Assert.DoesNotContain(blocks, b => b.Text.Contains("Hint") && b.Text.Contains("Items"));
+    }
 }
