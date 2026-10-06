@@ -4,7 +4,54 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
-Brak zmian po wydaniu 0.6.0.
+Dopracowanie po 0.6.0: śledzenie we wszystkich trybach, czystsza łatka z bliska, szersze szukanie
+napisu w szybkim obrocie, publikacja dwufazowa i animowane tło. Testy: 1741 xUnit (1295 Core + 280
+Infrastructure + 166 CorpusTool), build bez ostrzeżeń. Liczby z MotionLab (te same nagrania co
+w 0.6.0, Mock 500 ms); metryki ruchu jednego nagrania różnią się między przebiegami nawet
+o kilkanaście punktów (prolog-intro, pokrycie HUD w ruchu kamery: 69–90% w trzech przebiegach
+tego samego kodu). **W grze na żywo nikt jeszcze tego nie oglądał.**
+
+- **Tłumaczenie jedzie za napisem także „Pod oryginałem” i przy pasku napisów.** Śledzenie liter
+  działało dotąd tylko w trybie „Na oryginale (zakrywa)”. Teraz w pozostałych układach sesja buduje
+  łatkę lekką (maska i wzorzec liter, bez wypełniania tła) i przesuwa ją w ruchu bez przeliczania
+  łatki. Tryb „Pod oryginałem”, nagranie pokoju: pokrycie przy ruchu kamery 3,4% → 75,3%, dziury
+  w tłumaczeniu obecnego napisu 52 s → 7 s, mediana opóźnienia pojawienia 3,2 s → 47 ms; prolog-intro:
+  pokrycie przy ruchu kamery 10,2% → 51,4%, utraty HUD 15 → 5. Koszt jak w trybie zakrywania:
+  tłumaczenie trzymane w ruchu częściej zostaje chwilę po zmianie napisu (nieaktualne tłumaczenie
+  w pokoju 1,9 s → 9,1 s, w prologu 9,1 s → 15,3 s). Pasek napisów po zmianie: pokrycie przy ruchu
+  kamery 75,2% (pokój) i 51,4% (prolog-intro); przed zmianą nie mierzony.
+- **Czystsza łatka z bliska** (tryb zakrywania, sprawdzone na 6 klatkach 4K narzędziem
+  OverlayPreview):
+  - ogonki liter („p”, „y”) i ich cień nie wystają spod tłumaczenia. Wcześniej ciemny pasek okna
+    dialogu tuż pod napisem był brany za podkreślenie i wycinał dół liter z maski, a cień ogonka
+    nad paskiem zostawał; teraz podkreślenie musi być cienką kreską w kolorze liter, z tłem nad
+    i pod nią, a maska dorasta przez cień w kolorze obrysu;
+  - krótkie kawałki maski (ogonki, cienie) z jednolitym tłem po obu stronach są wypełniane z boków,
+    bez ciemnych plam ciągniętych z innego obszaru pod napisem;
+  - przekrzywione podkreślenie zostaje, a koniec litery nad jego niższym końcem znika;
+  - ikony w środku zdania (klawisze, mysz) zostają widoczne (polski tekst może na nie nachodzić);
+  - wyśrodkowany tytuł nie wychodzi poza kartkę albo ramkę, a akapit zmniejsza się (do 70%), żeby
+    zmieścić się w liczbie wierszy oryginału.
+- **Napis w szybkim obrocie**: gdy napis jechał już w poprzedniej klatce, a zwykłe szukanie
+  zawiedzie, sesja szuka go zgrubnie w 3× większym promieniu, a po dopasowaniu z przesunięciem
+  odświeża wzorzec liter z nowej klatki. Test: napis przesunięty o 157 px w poziomie i 9 px
+  w pionie jest znaleziony. Na nagraniach bez mierzalnego zysku — tekst na ścianie przy ruchu
+  kamery ma nadal ok. 16% pokrycia (pokój).
+- **Znane napisy od razu.** Gdy w klatce są napisy z tłumaczeniem lokalnym (korekta, słownik, cache,
+  korpus) i napisy czekające na dostawcę, znane trafiają na nakładkę od razu, a reszta po odpowiedzi.
+  Na nagraniach różnica mieści się w rozrzucie (pokój, mediana opóźnienia w trybie zakrywania:
+  95–296 ms w dwóch przebiegach, w 0.6.0 262–313 ms).
+- **Animowane tło pod stojącym napisem** (woda, ogień, migające światło): gdy łatka odświeża się,
+  bo zmienia się tło, sesja przez 1 s próbkuje szybciej (jak w ruchu kamery), a nowa łatka jest
+  ostra zamiast miękkiej. Nagrania nie mają takiej sceny — niezmierzone.
+
+Regresje: SceneReplay (displayed/inflight/noisy/aba/churn/stop — stary napis usunięty po 33–35 ms,
+local-occlusion* — 0 strat menu, moving-text/position-jitter — błąd 0 px, hud-motion* — 0 strat
+HUD, stale-* — usunięcie po 204–446 ms, stale-dim i stale-present-junk bez zniknięcia, jak
+oczekiwano). `typing-nohold` (bez wstrzymywania kwestii pisanej literami, jak „Pod oryginałem”): 2 zapytania
+do dostawcy w 2 z 4 przebiegów, w 2 pozostałych 3 — gdy OCR dwa razy z rzędu przeczyta sam początek
+kwestii będący pełnym zdaniem („Careful now!”), idzie on do tłumaczenia jako nowy tekst (reguła
+dwóch zgodnych odczytów z 0.6.0; zależy od rytmu odczytów).
 
 ## [0.6.0] — 2026-10-06
 

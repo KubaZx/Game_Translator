@@ -502,8 +502,8 @@ które jeszcze nie dostało wyniku. Lokalne usunięcie aktualizuje tylko powiąz
 źródła paska napisów i nie odnawia jego czasu wygasania.
 
 Położenie ma tolerancję 2 fizycznych pikseli na każdej osi, oddzielną od stabilizacji
-rozmiaru. To aktualizacja przy odczycie OCR; między odczytami napisy z łatką śledzi
-`GlyphTracker` (niżej, „Ruch kamery”).
+rozmiaru. To aktualizacja przy odczycie OCR; między odczytami napisy (z łatką albo łatką lekką)
+śledzi `GlyphTracker` (niżej, „Ruch kamery”).
 `TextRegionFingerprint` porównuje wszystkie RGB źródła z marginesem 3 px, ignorując
 alpha i padding. W pamięci pozostają tylko skrót XxHash128 (niekryptograficzny), geometria
 pola i rozmiar całej klatki. Referencja powstaje z natywnej klatki OCR; każda kontrola
@@ -530,8 +530,12 @@ z przechwytywania (`LiveSessionOptions.IdentityEchoSafe`).
 
 ### Tryb „Na oryginale (zakrywa)”: łatka i kwestia pisana literami
 
-Oba mechanizmy włącza okno główne tylko przy umiejscowieniu „Na oryginale (zakrywa)” poza
-trybem paska napisów (`LiveSessionOptions.BuildGlyphCovers`, `HoldTypingPrefixes`).
+Rysowanie łatki i wstrzymanie kwestii włącza okno główne tylko przy umiejscowieniu „Na oryginale
+(zakrywa)” poza trybem paska napisów (`LiveSessionOptions.RenderGlyphCovers`, `HoldTypingPrefixes`).
+W pozostałych trybach sesja buduje łatkę lekką (`GlyphCoverBuilder.BuildForBlock(..., patch: false)`):
+maskę, linie i `GlyphTrack` bez wypełniania tła — tylko do śledzenia w ruchu (niżej). Nakładka
+rysuje natywny napis wyłącznie z łatki z pikselami (`GlyphCover.HasPatch`), więc zmiana trybu
+w trakcie sesji nie pokaże pustej łatki.
 
 - **Łatka liczona równolegle z tłumaczeniem.** Po OCR i próbkach kolorów sesja uruchamia
   w tle budowę łatek dla bloków klatki (`GlyphCoverBuilder.BuildForBlock`, `Parallel.For`
@@ -545,6 +549,19 @@ trybem paska napisów (`LiveSessionOptions.BuildGlyphCovers`, `HoldTypingPrefixe
   Nieudana budowa zostawia łatkę poprzedniego przebiegu, a bez łatki blok jest rysowany
   dawną ścieżką (rozmyta kopia tła). Koszt i zachowanie: ADR-015 i
   [ROADMAP.md → Runda 2026-10-06 (5)](ROADMAP.md).
+- **Maska łatki.** Piksele liter są ograniczone do ramek słów z OCR (z zapasem) i doklejane
+  zalewaniem przez sąsiednie piksele tekstu, więc ikona w środku zdania (klawisz, mysz) zostaje
+  widoczna. Podkreślenie (`DetectRules`) to cienkie, długie pasmo w kolorze tuszu liter, z tłem
+  nad i pod nim — pasek interfejsu przy krawędzi łatki albo jasna krawędź tła nim nie są; dla
+  przekrzywionej kreski liczy się odcinek każdego wiersza osobno, a piksele samych liter przy
+  kresce zostają w masce. Gdy napis ma obrys albo cień, maska dorasta przez sąsiednie piksele co
+  najmniej tak ciemne jak obrys (w strefie poświaty liter) — cień ogonka nad ciemnym paskiem nie
+  zostaje. Po wypełnieniu tła (`PushPull`) krótkie poziome kawałki maski z jednolitym, takim samym
+  tłem po obu stronach w co najmniej trzech kolejnych wierszach są wypełniane z boków
+  (`BridgeRows`, także przy `Refill`), zamiast ciągnąć kolor innego obszaru spod napisu.
+  `ContainerExtent` mierzy jednolite tło po bokach napisu (kartka, ramka): wyśrodkowany
+  jednowierszowy napis nie wychodzi poza nie, a tekst wielowierszowy zmniejsza się (do 70%), aż
+  zmieści się w liczbie wierszy oryginału.
 - **Prezentacja.** `OverlayWindow` najpierw zbiera głosy grubości wszystkich bloków aktualizacji,
   potem `OverlayFonts.ChooseStyleWeight` daje jedną grubość blokom w tym samym stylu (krój,
   wysokość liter, kolor tekstu, obrys), a
@@ -563,9 +580,9 @@ trybem paska napisów (`LiveSessionOptions.BuildGlyphCovers`, `HoldTypingPrefixe
 
 ### Ruch kamery: śledzenie, szybkie odświeżanie i Windows Graphics Capture
 
-Śledzenie, szybkie odświeżanie i WGC w ruchu działają przy łatkach (umiejscowienie „Na oryginale
-(zakrywa)” poza paskiem napisów) i bez zapasowego zrzutu ekranu; zastąpienie zrzutu ekranu przez
-WGC przy oknie bez PrintWindow (niżej) działa w każdym trybie live.
+Śledzenie, szybkie odświeżanie i WGC w ruchu działają w każdym trybie live (w trybach bez
+rysowanej łatki na łatce lekkiej, wyżej) i bez zapasowego zrzutu ekranu; zastąpienie zrzutu
+ekranu przez WGC przy oknie bez PrintWindow (niżej) też działa w każdym trybie.
 
 - **Przechwytywanie.** `GraphicsCaptureSource` trzyma sesję Windows Graphics Capture okna gry
   (bez kursora; ramka wyłączana przez `IGraphicsCaptureSession3`, a gdy system na to nie
@@ -591,10 +608,22 @@ WGC przy oknie bez PrintWindow (niżej) działa w każdym trybie live.
   tła) w układzie roboczym łatki. Na każdej przechwyconej klatce (także kontrolnej w trakcie OCR)
   `GlyphTracker.Locate` szuka przesunięcia: najpierw wokół przewidywanego z poprzedniego ruchu,
   potem w promieniu do 72 px; dopasowanie musi mieć mały koszt, zachować kontrast liter wobec
-  obrysu/tła i nie mieć równie dobrego kandydata daleko. Udane dopasowanie przesuwa blok
-  i odświeża łatkę z bieżącej klatki (`GlyphCoverBuilder.Refill`); śledzony blok jest dowodem
+  obrysu/tła i nie mieć równie dobrego kandydata daleko. Gdy blok jechał już w poprzedniej
+  klatce, a ruch trwa, po nieudanym zwykłym szukaniu idzie szerokie (`WideTrackReach`, 3× promienia,
+  krok zgrubny 2 przy grubości kreski od 3, do 60 000 pozycji); po pewnym dopasowaniu
+  z przesunięciem wzorzec jest odświeżany z nowej klatki (`GlyphTracker.Resample`), żeby nadążał za zmianą
+  wyglądu napisu. Udane dopasowanie przesuwa blok i odświeża łatkę z bieżącej klatki
+  (`GlyphCoverBuilder.Refill`); przy łatce lekkiej `GlyphCoverBuilder.Shift` przesuwa sam wzorzec,
+  a dopasowanie w miejscu nie jest zmianą (bez aktualizacji nakładki). Śledzony blok jest dowodem
   obecności dla pozostałych reguł. Zgubiony w ruchu blok znika od razu, poza ruchem — po dwóch
   klatkach bez liter.
+- **Animowane tło.** Gdy łatka stojącego napisu została odświeżona, bo tło pod nim się zmienia
+  (bez ruchu kamery), sesja przez 1 s próbkuje w tempie ruchu (`MotionFps`, najwyżej 2× `Fps`).
+  Przy działającym śledzeniu nowa łatka jest ostra, a nie miękka.
+- **Publikacja dwufazowa.** Gdy część bloków klatki ma tłumaczenie lokalne (korekta, słownik,
+  cache, korpus), a reszta czeka na dostawcę, bloki znane trafiają na nakładkę od razu po
+  zbudowaniu łatek (`PublishKnownBlocks`; w ruchu po potwierdzeniu na świeżej klatce), a reszta
+  po odpowiedzi dostawcy.
 - **Ruch nie unieważnia sceny**, gdy działa śledzenie (`LiveSceneValidity.Observe` z
   `tolerateMotion`): generacja zmienia się tylko przy cięciu widoku, a w ruchu OCR rusza najwyżej
   co 0,9 s (`TrackedMotionPause`). Nowy blok odczytany z klatki w ruchu jest szukany na świeżej

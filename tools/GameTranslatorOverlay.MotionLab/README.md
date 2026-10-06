@@ -49,7 +49,7 @@ gotowym katalogu (np. po zmianie metryk) bez ponownego odtwarzania.
   i ewentualne czekanie na dekoder (`shown.jsonl`, podsumowanie w `replay.json`).
 - Sesja: `LiveTranslationSession` z `WindowsOcrProvider` (opakowanym tylko logowaniem czasu do
   `ocr.jsonl`), opcje jak `MainWindow.StartLive` (Fps/Threshold z profilu, upscale, `NoticeEcho`,
-  `BuildGlyphCovers`/`HoldTypingPrefixes` dla cover, `IdentityEchoSafe`) + `EnableDiagnostics`.
+  `RenderGlyphCovers`/`HoldTypingPrefixes` dla cover, `IdentityEchoSafe`) + `EnableDiagnostics`.
   `TranslationOrchestrator` z kopią bazy, korpusem w `<out>\app-data\corpus`, profilem z `profiles\`
   obok exe i Mock z opóźnieniem `--provider-delay-ms` (tekst spoza bazy = `[PL] …`). Przed startem:
   rozgrzanie krojów, łatek i silnika OCR (jak długo działająca aplikacja).

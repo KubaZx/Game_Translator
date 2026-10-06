@@ -1012,8 +1012,8 @@ jedzie razem z nim albo znika; często wraca dopiero po zatrzymaniu kamery (w po
 ruchomy w ruchu kamery miał tłumaczenie przez 0–16% czasu, opóźnienie ok. 2 s) — to znane
 ograniczenie (ROADMAP, kierunek 25). Po zatrzymaniu napisy są na właściwych miejscach.
 Znane ograniczenia: w kroku 4 napis rosnący przy podchodzeniu może znikać i wracać po kolejnym
-odczycie OCR; w kroku 5 (bez trybu zakrywania) śledzenia nie ma — w ruchu napisy znikają
-i wracają jak w 0.5.0. Zapisz też, czy gra działała płynnie (bez nowych przycięć) i czy log
+odczycie OCR; w kroku 5 (od wersji po 0.6.0 — scenariusz M43) dymki pod oryginałem też jadą za
+napisami. Zapisz też, czy gra działała płynnie (bez nowych przycięć) i czy log
 (`logs\app-*.log`) ma wpis „w ruchu kamery przechwytywanie okna przez Windows Graphics Capture”.
 
 ## M42 — Gra na pełnym ekranie bez PrintWindow (0.6.0)
@@ -1034,3 +1034,31 @@ klatkach pojawia się ostrzeżenie o zrzucie ekranu (i komunikat jak w M40); zap
 wystąpił. Na Windows 10 (ramki WGC nie da się ukryć, więc sesja WGC nie startuje) zostaje zrzut
 ekranu z dotychczasowym ostrzeżeniem i komunikatem jak w M40; zapisz, czy mignęła żółta ramka. Jeśli nakładki nad grą nie
 widać w ogóle, zapisz to razem z trybem pełnego ekranu gry.
+
+## M43 — Śledzenie „Pod oryginałem” i przy pasku napisów (po 0.6.0)
+
+**Kroki:**
+1. Jak M41, krok 1, ale **Położenie dymków: Pod oryginałem**.
+2. Kroki 2–3 z M41.
+3. **Wyświetlanie: Napisy na dole**; w pokoju z HUD powtórz krok 2 z M41.
+4. Wróć do **Na oryginale (zakrywa)** bez zatrzymywania live i poruszaj kamerą.
+
+**Oczekiwany wynik:** w kroku 2 dymki pod HUD-em przez większość ruchu zostają pod swoimi napisami
+(w MotionLab ok. 75–79% czasu ruchu kamery, wcześniej ok. 3%), a dymek napisu na ścianie jedzie
+pod nim albo znika — nie wisi w starym miejscu. W kroku 3 pasek napisów nie miga przy ruchu kamery,
+dopóki napisy są na ekranie. W kroku 4 natywne napisy pojawiają się po najbliższym odczycie
+(do tego czasu mogą być dymki z rozmytym tłem) — bez pustych prostokątów. Zapisz, jak często
+dymek znika i na jak długo, oraz czy gra działała płynnie.
+
+## M44 — Łatka z bliska: ogonki, podkreślenia, ikony (po 0.6.0)
+
+**Kroki:**
+1. Escape Academy, tryb zakrywania; prolog z imieniem mówiącego nad oknem dialogu („Employee”)
+   i kartka zrzeczenia („Escape Room Waiver” z ikonami WASD, myszy, Tab i Shift).
+2. Obejrzyj z bliska (np. lupą Windows) dół imienia i tytuł kartki.
+
+**Oczekiwany wynik:** pod polskim imieniem nie widać żółtych ogonków „p”, „y” ani ich czarnego
+cienia; ciemny pasek okna dialogu jest nietknięty. Tytuł kartki mieści się na kartce,
+czerwone podkreślenie zostaje całe, bez czerwonej kropki nad nim. Akapity nie zajmują więcej
+wierszy niż oryginał. Ikony zostają widoczne; znane ograniczenie: polski tekst może na nie
+nachodzić (ROADMAP, kierunek 31). Zapisz zrzut z lupą, jeśli coś odstaje.

@@ -264,8 +264,9 @@ w oknie aplikacji.
   je poniżej.
 - Do dialogów możesz wybrać **Napisy na dole**. Jest to wspólny pasek świeżych
   tekstów rozpoznanych przez live, bez automatycznego rozpoznawania rodzaju wypowiedzi.
-- Po ruchu kamery daj obrazowi na chwilę się zatrzymać. Silny ruch nadal może
-  tymczasowo usuwać nakładkę, a nowe tłumaczenie może czekać na OCR i dostawcę.
+- W ruchu kamery tłumaczenia jadą za napisami we wszystkich układach. Napis, którego nie da się
+  znaleźć w nowym obrazie (odjechał, zasłonięty, mocno urósł), znika, a nowe tłumaczenie może
+  czekać na OCR i dostawcę — wtedy daj obrazowi na chwilę się zatrzymać.
 - Przy trudnej czcionce lub konkretnym opisie użyj **Ctrl+Shift+T** i zaznacz
   interesujący fragment. Automatyczne wydzielanie obszaru tooltipu jest w planach.
 
@@ -309,14 +310,19 @@ uruchom w oknie bez ramki. Tryb działa jak spolszczenie, ale nadal wyłącznie 
   Jednowierszowy napis wyśrodkowany na ekranie rośnie w obie strony.
 - **Ikony zostają:** ikona klawisza przed napisem („X Hint” → ikona X + „Podpowiedź”) i ikonka
   za napisem (np. ✓) nie są zamazywane, a litera odczytana z ikony nie pojawia się w tłumaczeniu
-  na ekranie.
+  na ekranie. Ikony w środku zdania (klawisze, mysz) też zostają, ale polski tekst nie robi dla
+  nich miejsca i może na nie nachodzić.
+- **Ogonki i podkreślenia:** ogonki liter („p”, „y”) i ich cień są zakrywane także tuż nad
+  paskiem okna dialogu, a podkreślenie pod tytułem zostaje. Wyśrodkowany tytuł nie wychodzi poza
+  kartkę albo ramkę, na której stoi.
 - **Tłumaczenie identyczne z oryginałem** (nazwy, „OK”, logo) nie jest rysowane — widać grę.
 - **Jedna grubość w jednym stylu:** napisy o tym samym rozmiarze, kolorze i obrysie (np. pozycje
   menu) dostają tę samą grubość kroju.
 - **Ruchome tło:** gdy tło pod napisem się rusza, łatka obejmuje całe pole napisu z miękkim
   brzegiem, dopóki obraz nie stanie.
 - **Ruch kamery:** tłumaczenie HUD zostaje na miejscu, a tłumaczenie napisu w świecie stara się
-  jechać za nim (śledzenie kształtu liter). Tło łatki jest odświeżane z bieżącego obrazu — na
+  jechać za nim (śledzenie kształtu liter; tak samo w trybie **Pod oryginałem** i przy pasku
+  napisów). Tło łatki jest odświeżane z bieżącego obrazu — na
   Windows 11 przez Windows Graphics Capture do ok. 30 razy na sekundę, bez niego ok. 10 razy na
   sekundę. Napis, którego nie da się znaleźć (odjechał, zasłonięty, mocno zmienił rozmiar), znika;
   OCR w ruchu działa co ok. 0,9 s, ale napis na ścianie często wraca dopiero po zatrzymaniu
@@ -669,8 +675,8 @@ kwestii pisanej literami.
 
 ## Uwaga o prywatności w trybie live
 
-Tryb live czyta obraz z okna gry — przez PrintWindow, a w trybie „Na oryginale (zakrywa)”
-w trwającym ruchu kamery przez Windows Graphics Capture (to samo publiczne API systemu, którego
+Tryb live czyta obraz z okna gry — przez PrintWindow, a w trwającym ruchu kamery przez
+Windows Graphics Capture (to samo publiczne API systemu, którego
 używa np. OBS Studio w trybie przechwytywania „Windows 10 (1903 i nowsze)”; Windows 11 nie pokazuje
 przy tym żółtej ramki; na Windows 10 aplikacja z niego nie korzysta). Gdy okna gry nie da się
 przechwycić przez PrintWindow (np. gra na pełnym ekranie), przechwytywanie przejmuje Windows

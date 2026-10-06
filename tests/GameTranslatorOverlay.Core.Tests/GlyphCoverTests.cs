@@ -263,6 +263,121 @@ public class GlyphCoverTests
         Assert.Equal(54, profile.Right);
     }
 
+    [Fact]
+    public void Cienka_odizolowana_kreska_w_kolorze_tuszu_jest_podkresleniem()
+    {
+        var (fill, area) = RuleCanvas();
+        foreach (var (x, y) in Rect(10, 30, 180, 3)) fill[y * area.Width + x] = true;
+
+        var rule = GlyphCoverBuilder.DetectRules(fill, area.Width, area, 20, _ => true);
+
+        Assert.NotNull(rule);
+        Assert.True(rule[31 * area.Width + 100]);
+        Assert.False(rule[20 * area.Width + 100]);
+    }
+
+    [Fact]
+    public void Pasek_dotykajacy_krawedzi_obszaru_nie_jest_podkresleniem()
+    {
+        var (fill, area) = RuleCanvas();
+        foreach (var (x, y) in Rect(0, 37, 200, 3)) fill[y * area.Width + x] = true;
+
+        Assert.Null(GlyphCoverBuilder.DetectRules(fill, area.Width, area, 20, _ => true));
+    }
+
+    [Fact]
+    public void Kreska_innego_koloru_niz_tusz_nie_jest_podkresleniem()
+    {
+        var (fill, area) = RuleCanvas();
+        foreach (var (x, y) in Rect(10, 30, 180, 3)) fill[y * area.Width + x] = true;
+
+        Assert.Null(GlyphCoverBuilder.DetectRules(fill, area.Width, area, 20, _ => false));
+    }
+
+    [Fact]
+    public void Ukosne_podkreslenie_nie_zabiera_ogonka_litery_nad_nizszym_koncem()
+    {
+        var (fill, area) = RuleCanvas();
+        for (var x = 10; x < 190; x++)
+        {
+            var top = 30 + (x - 10) * 2 / 180.0;
+            for (var y = (int)Math.Ceiling(top); y < top + 4; y++) fill[y * area.Width + x] = true;
+        }
+        foreach (var (x, y) in Rect(170, 28, 10, 4)) fill[y * area.Width + x] = true;
+
+        var rule = GlyphCoverBuilder.DetectRules(fill, area.Width, area, 20, _ => true);
+
+        Assert.NotNull(rule);
+        Assert.True(rule[33 * area.Width + 100]);
+        Assert.False(rule[31 * area.Width + 175]);
+        Assert.False(rule[29 * area.Width + 175]);
+    }
+
+    [Fact]
+    public void Cien_ogonka_nad_ciemnym_paskiem_jest_zakryty_kolorem_sciany()
+    {
+        const int wall = 0x464646;
+        var frame = Solid(Width, Height, wall);
+        foreach (var (x, y) in Rect(0, 112, Width, Height - 112)) Set(frame, x, y, 0x111111);
+        var glyphs = Word(40, 50, capHeight: 40, stroke: 6).Concat(Rect(82, 90, 6, 14)).ToList();
+        Paint(frame, glyphs, 0x050505, grow: 3, dx: 3, dy: 3);
+        Paint(frame, glyphs, 0x050505, grow: 3);
+        Paint(frame, glyphs, 0xF0F07A);
+
+        var box = new RectPx(36, 46, 200, 62);
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"])!;
+
+        Assert.NotNull(cover);
+        var patchOrigin = (X: box.X + (int)cover.PatchX, Y: box.Y + (int)cover.PatchY);
+        foreach (var (x, y) in new[] { (86, 106), (88, 108), (90, 109) })
+        {
+            var o = ((y - patchOrigin.Y) * cover.PatchPixelWidth + x - patchOrigin.X) * 4;
+            Assert.Equal(255, cover.PatchPbgra[o + 3]);
+            Assert.InRange(cover.PatchPbgra[o + 1], 0x46 - 14, 0x46 + 14);
+        }
+    }
+
+    [Fact]
+    public void Lekka_latka_ma_ten_sam_wzorzec_sledzenia_bez_pikseli()
+    {
+        var frame = Solid(Width, Height, 0x2B3A4C);
+        var glyphs = Word(40, 50, capHeight: 40, stroke: 6);
+        Paint(frame, glyphs, 0x000000, grow: 3);
+        Paint(frame, glyphs, 0xF5F5F5);
+        var box = new RectPx(36, 46, 200, 50);
+
+        var full = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"])!;
+        var light = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"], patch: false)!;
+
+        Assert.True(full.HasPatch);
+        Assert.False(light.HasPatch);
+        Assert.NotNull(light.Track);
+        Assert.Equal(full.Track!.Points, light.Track.Points);
+        Assert.Equal(full.Track.Values, light.Track.Values);
+        Assert.Equal(full.Track.Mask, light.Track.Mask);
+        Assert.Equal(full.Lines.Count, light.Lines.Count);
+        Assert.Equal(full.MaskFraction, light.MaskFraction);
+    }
+
+    [Fact]
+    public void Przesuniecie_lekkiej_latki_przesuwa_kotwice_i_wzorzec()
+    {
+        var frame = Solid(Width, Height, 0x2B3A4C);
+        var glyphs = Word(40, 50, capHeight: 40, stroke: 6);
+        Paint(frame, glyphs, 0xF5F5F5);
+        var box = new RectPx(36, 46, 200, 50);
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"], patch: false)! with { Anchor = box };
+
+        var moved = GlyphCoverBuilder.Shift(cover, 7, -3)!;
+
+        Assert.False(moved.HasPatch);
+        Assert.Equal(box.Offset(7, -3), moved.Anchor);
+        Assert.Equal(cover.Track!.OriginX + 7, moved.Track!.OriginX, 6);
+        Assert.Equal(cover.Track.OriginY - 3, moved.Track.OriginY, 6);
+    }
+
+    private static (bool[] Fill, RectPx Area) RuleCanvas() => (new bool[200 * 40], new RectPx(0, 0, 200, 40));
+
     private static IEnumerable<(int X, int Y)> Word(int x, int top, int capHeight, int stroke, int letters = 4)
     {
         var points = new HashSet<(int, int)>();

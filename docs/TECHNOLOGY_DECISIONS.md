@@ -86,7 +86,7 @@ strumień klatek, poprawne przechwytywanie okien akcelerowanych sprzętowo) — 
 zaplanowane. Rozdzielenie decyzji zmniejsza ryzyko MVP.
 
 **Aktualizacja 2026-10-06.** Tryb live używa WGC (`GraphicsCaptureSource`) w trwającym ruchu
-kamery przy śledzeniu łatek (tryb zakrywania; sesja WGC zamykana po 2 s spokoju; otwarta sesja
+kamery przy śledzeniu napisów (od rundy 2026-10-06 (8) we wszystkich trybach; sesja WGC zamykana po 2 s spokoju; otwarta sesja
 w części przebiegów A/B SceneReplay opóźniała zauważenie zmiany statycznej sceny o ok. 17–45 ms)
 oraz na stałe, w każdym trybie, gdy okno gry nie wspiera PrintWindow — zamiast zrzutu ekranu, także
 na stojącym obrazie:

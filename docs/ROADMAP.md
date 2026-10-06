@@ -7,6 +7,8 @@ kamery — śledzenie napisów między odczytami OCR, odświeżanie łatek z Win
 (w ruchu i zamiast zrzutu ekranu, gdy gra nie wspiera PrintWindow), ponowny OCR pustego odczytu
 w pasach, stabilny krój; zmierzone na nagraniach Escape Academy w narzędziu MotionLab, w grze na
 żywo jeszcze nie oglądane (scenariusze M41–M42 w [MANUAL_TESTING.md](MANUAL_TESTING.md)).
+Po wydaniu (niewydane, runda 2026-10-06 (8)): śledzenie napisów we wszystkich układach nakładki,
+czystsza łatka z bliska, szersze szukanie w szybkim obrocie, publikacja dwufazowa i animowane tło.
 
 Wcześniej **0.5.0** (6 października 2026): stary napis znika razem z oryginałem (sonda
 pikseli `KnownTextAbsenceProbe` także na teksturze, pełny skan co 4 s niezależnie od wycinków,
@@ -48,8 +50,8 @@ wizualnych na kolejnych grach.
 ## Kierunki dalszych prac
 
 1. Rozszerzenie zachowywania stałych napisów: obecny dowód wymaga identycznych RGB; skalowanie, fallback i animowane tło pozostają otwarte.
-2. ✅ Śledzenie położenia napisu między kolejnymi odczytami OCR — runda 2026-10-06 (7) (tylko
-   napisy z łatką, tryb zakrywania; w innych trybach nadal aktualizacja przy odczycie).
+2. ✅ Śledzenie położenia napisu między kolejnymi odczytami OCR — runda 2026-10-06 (7), we
+   wszystkich układach nakładki od rundy (8) (poza zapasowym zrzutem ekranu).
 3. Lepsza czytelność i zakrywanie na wzorzystym oraz animowanym tle.
 4. Dostosowywanie tempa pracy do menu, dialogu i ruchu.
 5. Pokazanie ostrzeżenia kontroli jakości (`TranslationOutcome.QualityWarning`,
@@ -61,8 +63,8 @@ wizualnych na kolejnych grach.
 8. Wpisy nieaktualne po zmianie formatu (`reflow`), dla których dostawca zwraca pusty wynik,
    są ponawiane przy każdym wystąpieniu — potrzebny znacznik ostateczności jak `qa-final`.
 9. Edytor skrótów w oknie (dziś tylko `settings.json`, m.in. `liveToggleHotkey`).
-10. Publikacja dwufazowa: najpierw bloki znane lokalnie, potem tłumaczenia dostawcy w tej
-    samej klatce.
+10. ✅ Publikacja dwufazowa: najpierw bloki znane lokalnie, potem tłumaczenia dostawcy w tej
+    samej klatce — runda 2026-10-06 (8) (na nagraniach zysk w granicach rozrzutu).
 11. HTTP/2 i metryki połączeń (czas zestawienia, ponowne użycie) dla dostawców.
 12. Strumieniowanie odpowiedzi modeli językowych, żeby pierwsze linie pojawiały się wcześniej.
 13. Pilotaż `paragraphCacheKeys` u prawdziwego dostawcy (najpierw PoE2: 21% znaków
@@ -81,11 +83,16 @@ wizualnych na kolejnych grach.
     (ok. 6×/s), gdy zmieni się podpis pola; łatka zbudowana jako miękka zostaje miękka do
     następnego odczytu — runda 2026-10-06 (7).
 19. Wierniejszy krój: kursywa, szerokość (np. Lexend zamiast Lexend Deca), osobny krój dla
-    rodzajów tekstu w profilu (etykiety szeryfowe), kerning — runda 2026-10-06 (5).
-20. Rama przycisku jako granica dopasowania jednoliniowego napisu (dziś wolne miejsce liczone
-    tylko do następnego bloku albo krawędzi monitora) — runda 2026-10-06 (5).
-21. Smugi po wypełnianiu liter: ciemne kleksy w miejscu ogonków („p”, „y”) i rozmyta granica dwóch
-    płaskich teł pod napisem (widoczne w powiększeniu 1:1) — runda 2026-10-06 (5).
+    rodzajów tekstu w profilu (etykiety szeryfowe — np. imię mówiącego w Escape Academy to
+    pogrubiony krój szeryfowy, rysowany dziś Lexend Deca; wymaga dołączenia kroju OFL), kerning —
+    runda 2026-10-06 (5).
+20. Rama przycisku jako granica dopasowania jednoliniowego napisu — ✅ dla wyśrodkowanego napisu
+    na jednolitym tle (kartka, ramka; `ContainerExtent`, runda (8)); napis wyrównany do lewej nadal
+    liczy wolne miejsce do następnego bloku albo krawędzi monitora — runda 2026-10-06 (5).
+21. ✅ Smugi po wypełnianiu liter: ciemne kleksy w miejscu ogonków („p”, „y”) i ciągnięcie koloru
+    innego płaskiego tła pod napisem — runda 2026-10-06 (8) (wypełnianie z boków przy jednolitym tle
+    w kilku wierszach); zostają słabe różowe/szare ślady przy końcach liter tuż nad podkreśleniem —
+    runda 2026-10-06 (5).
 22. Pamięć budowy łatki dialogu w 4K: ok. 21 MB przy liniach ≥ 90 px (liczony w połowie
     rozdzielczości), 72–76 MB przy liniach 36–89 px (pełna rozdzielczość; w rundzie (5) podano
     21–58 MB), pełne odśmiecania przy kolejnych budowach — bufory wielokrotnego użytku albo niższy
@@ -96,18 +103,26 @@ wizualnych na kolejnych grach.
     (dziś liczy się tylko zajęcie całego monitora przy braku PrintWindow) — runda 2026-10-06 (5).
 25. Napis na ścianie przy podchodzeniu (rośnie, obraca się w perspektywie): śledzenie ze skalą
     albo szybki lokalny OCR zgubionego bloku zamiast zdjęcia; tekst ruchomy przy ruchu kamery ma
-    dziś ok. 16% pokrycia (pokój) — runda 2026-10-06 (7).
+    dziś ok. 16% pokrycia (pokój) — runda 2026-10-06 (7). Szerokie szukanie i odświeżanie wzorca
+    z rundy (8) nie zmieniły tej liczby: napisy na ścianie są widoczne ok. 1 s, a OCR w ruchu idzie
+    co 0,9 s — bez wcześniejszego odczytu nie ma czego śledzić.
 26. Windows Graphics Capture w grach na żywo: wpływ otwartej sesji na opóźnienie obrazu gry
     (składanie przez DWM), HDR, wyłączny pełny ekran, Windows 10 bez ukrywania ramki — runda (7).
 27. Koszt WPF przy odświeżaniu łatek do 30×/s przy wielu blokach (dziś zmierzony tylko czas
     śledzenia: ok. 2,5 ms na odświeżenie) — runda 2026-10-06 (7).
 28. MotionLab: fałszywe „miganie”/„zgubione”, gdy offline OCR (prawda) skleja dwa wiersze HUD
     w jeden blok albo czyta ikonę klawisza raz z napisem, raz osobno — runda 2026-10-06 (7).
-29. Śledzenie napisów także poza trybem zakrywania (pod oryginałem, obok): wzorzec liter bez
-    łatki, żeby tłumaczenie jechało za napisem w ruchu we wszystkich układach — runda (7).
+29. ✅ Śledzenie napisów także poza trybem zakrywania (pod oryginałem, pasek napisów): łatka
+    lekka bez wypełniania tła — runda 2026-10-06 (8).
 30. Łatka na animowanym tle bez ruchu kamery (woda, ogień, migające światło pod napisem):
-    odświeżanie częstsze niż przechwytywanie PrintWindow (dziś ok. 6×/s), np. z wycinków WGC,
-    i ostra łatka zamiast miękkiej — runda (7).
+    ✅ częstsze próbkowanie po odświeżeniu łatki (tempo ruchu przez 1 s) i ostra łatka zamiast
+    miękkiej — runda (8), niezmierzone (brak takiej sceny w nagraniach); otwarte: odświeżanie
+    z wycinków WGC bez ruchu kamery — runda (7).
+31. Ikony w środku zdania (klawisz, mysz, „Shift”): dziś zostają widoczne, ale polski tekst
+    przepływa przez nie. Potrzebny znacznik ikony w tekście do tłumaczenia (DeepL: obsługa
+    znaczników), przerwa w polskim tekście o szerokości ikony i przeniesienie jej pikseli
+    w nowe miejsce łatki — runda 2026-10-06 (8) (kartka zrzeczenia w prologu Escape Academy:
+    cztery ikony w czterech zdaniach).
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -1588,3 +1603,68 @@ w grach: wpływ otwartej sesji na opóźnienie obrazu gry, HDR, wyłączny pełn
 kierunek 26. (3) Tekst ruchomy na ścianie przy podchodzeniu (skala, perspektywa) nadal ginie —
 kierunek 25. (4) Śledzenie działa tylko dla bloków z łatką (tryb zakrywania). (5) Fałszywe
 „miganie” w analizatorze przy prawdzie sklejającej wiersze HUD — kierunek 28.
+
+### Runda 2026-10-06 (8) — dopracowanie po 0.6.0
+
+**Cel.** Pięć poprawek z listy po wydaniu 0.6.0: tekst na ścianie w szybkim obrocie, łatka na
+animowanym tle, wygląd z bliska, publikacja dwufazowa i śledzenie we wszystkich układach.
+
+**Metoda.** MotionLab na tych samych nagraniach co w rundzie (7) (Mock 500 ms); OverlayPreview na
+6 klatkach 4K (`wyglad\klatki`: pokój 100/560, prolog 330/447/570/663) z porównaniem masek
+i wypełnienia piksel po pikselu; nowe testy jednostkowe (`GlyphCoverTests`, `GlyphTrackTests`).
+Rozrzut: trzy przebiegi tego samego kodu na prolog-intro dały pokrycie HUD w ruchu kamery
+68,6%, 72% i 90,2%, więc różnice pojedynczych przebiegów poniżej ok. 15 punktów nie są wynikiem.
+
+| Tryb „Pod oryginałem” (śledzenie) | przed | po |
+|---|---:|---:|
+| pokój: pokrycie przy ruchu kamery | 3,4% | 75,3% |
+| pokój: pokrycie HUD przy ruchu kamery | 3,5% | 79,4% |
+| pokój: dziury w tłumaczeniu obecnego napisu | 52,0 s | 7,1 s |
+| pokój: mediana opóźnienia pojawienia | 3158 ms | 47 ms |
+| pokój: nieaktualne tłumaczenie | 1,9 s | 9,1 s |
+| prolog-intro: pokrycie przy ruchu kamery | 10,2% | 51,4% |
+| prolog-intro: utraty HUD | 15 | 5 |
+| prolog-intro: nieaktualne tłumaczenie | 9,1 s | 15,3 s |
+
+„Przed” = kod z poprawkami 1–4 tej rundy, bez śledzenia poza zakrywaniem (`p5-below-przed`).
+Tryb zakrywania względem 0.6.0 (`po24`/`po25` → `p3`, `p5`, `p5b`, `p5c`): pokrycie i utraty w granicach
+rozrzutu, w pokoju nieaktualne tłumaczenie 9,1–9,7 s → 7,7–8,1 s.
+
+**Zmiany.**
+
+- Sesja: `LiveSessionOptions.RenderGlyphCovers` (łatka rysowana tylko przy zakrywaniu) obok
+  `BuildGlyphCovers` (domyślnie zawsze). Bez rysowania `BuildForBlock(..., patch: false)` buduje
+  łatkę lekką (bez `InpaintExcluding`/`BuildPatch`), a śledzenie przesuwa ją
+  `GlyphCoverBuilder.Shift` zamiast `Refill`; dopasowanie w miejscu na zmienionym tle nie jest
+  zmianą. `OverlayBlockRenderer.UsesNativeCover` wymaga `GlyphCover.HasPatch`.
+- Śledzenie: szerokie szukanie (`WideTrackReach` 3×, `GlyphTracker.WideStep` — krok 2 przy
+  grubości kreski od 3, do 60 000 pozycji), tylko gdy blok jechał w poprzedniej klatce i ruch trwa
+  (wcześniejsza wersja szukała szeroko także po cięciu sceny: podstawowe sceny SceneReplay 34 →
+  92 ms); `GlyphTracker.Resample` po dopasowaniu z przesunięciem; `MotionConfirmation` (wspólne
+  potwierdzenie na świeżej klatce).
+- Publikacja dwufazowa `PublishKnownBlocks`; animowane tło: `_lastAnimatedRefill` przyspiesza
+  tempo na 1 s, łatki ostre przy śledzeniu (`allowSoft: !TracksBlocks`).
+- Łatka: maska ograniczona do ramek słów z zalewaniem (`IsInlineIconWord` — tab, shift, ctrl, alt,
+  esc, lmb, rmb); `DetectRules` — pasmo nie może dotykać krawędzi obszaru, ≥ 60% pikseli w kolorze
+  tuszu, rozszerzenie tylko na wiersze z długim odcinkiem, odcinek każdego wiersza osobno; strefa
+  ochronna podkreślenia nie zabiera pikseli liter; `GrowEdge` (dorastanie przez piksele co najmniej
+  tak ciemne jak obrys, tolerancja 8 jasności — pasek o 11 jaśniejszy od obrysu już nie);
+  `BridgeRows` (kawałek do 1,2× wysokości linii, próbki boków 4–16 px o rozpiętości jasności ≤ 24,
+  ten sam kolor z obu stron w ≥ 3 kolejnych wierszach, odchylenie wypełnienia > 6) — także
+  w `Refill`; `ContainerExtent` i `WrappedLines` w układzie napisu.
+- Przyczyna ogonków „Employee”: ciemny pasek okna dialogu w dole łatki był wykrywany jako
+  podkreślenie (wycinał dół liter), a później jasny pasek ściany nad nim (cienki, długi, ale
+  w kolorze tła); cień ogonka nie trafiał do poświaty, bo tło szacowane obok było zaniżone przez
+  pasek; po samym wycięciu wypełnienie ciągnęło czerń paska w górę.
+
+**Regresje.** 1741 testów (1295 Core + 280 Infrastructure + 166 CorpusTool), build bez ostrzeżeń.
+SceneReplay jak w rundzie (7) (stary usunięty po 33–35 ms, 0 strat menu i HUD, błąd położenia
+0 px, stale-* 204–446 ms); `typing-nohold` — 2 zapytania do dostawcy w 2 z 4 przebiegów, 3
+w pozostałych (początek kwestii będący pełnym zdaniem przeczytany dwa razy z rzędu idzie do
+tłumaczenia — reguła dwóch zgodnych odczytów z rundy (7), zależna od rytmu odczytów).
+
+**Otwarte.** Ikony w środku zdania (kierunek 31), krój szeryfowy etykiet (kierunek 19), napis na
+ścianie (kierunek 25), w grze na żywo nieoglądane. Pasek napisów po zmianie (`p5-sub`): pokrycie
+przy ruchu kamery 75,2% (pokój) i 51,4% (prolog-intro) — bez pomiaru „przed”. W trybie „Pod
+oryginałem” litera ikony klawisza zostaje w tłumaczeniu („x Podpowiedź”); w trybie zakrywania jest
+usuwana.

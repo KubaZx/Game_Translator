@@ -16,6 +16,7 @@ public sealed record GlyphCoverLine(double InkLeft, double InkRight, double InkT
 public sealed record GlyphCover
 {
     public required byte[] PatchPbgra { get; init; }
+    public bool HasPatch => PatchPbgra.Length > 0;
     public required int PatchPixelWidth { get; init; }
     public required int PatchPixelHeight { get; init; }
     public required double PatchX { get; init; }
@@ -40,6 +41,8 @@ public sealed record GlyphCover
     public string TailToken { get; init; } = string.Empty;
     public RectPx Anchor { get; init; }
     public GlyphTrack? Track { get; init; }
+    public double ContainerLeftPx { get; init; } = double.PositiveInfinity;
+    public double ContainerRightPx { get; init; } = double.PositiveInfinity;
 
     public GlyphCover AnchorTo(RectPx box) =>
         Relocate(Anchor.X - box.X, Anchor.Y - box.Y) with { Anchor = box };
@@ -130,13 +133,15 @@ public static class GlyphCoverBuilder
 
     public static GlyphCover? Build(
         OcrBitmap frame, RectPx box, IReadOnlyList<RectPx>? lineBoxes = null, IReadOnlyList<string>? lineTexts = null,
-        double nativeScale = 1.0, bool soft = false, IReadOnlyList<OcrWord>? firstLineWords = null, GlyphTrackMap? map = null) =>
+        double nativeScale = 1.0, bool soft = false, IReadOnlyList<OcrWord>? firstLineWords = null, GlyphTrackMap? map = null,
+        IReadOnlyList<RectPx>? wordBoxes = null, bool patch = true) =>
         BuildCore(frame, box, lineBoxes, lineTexts, nativeScale, soft, firstLineWords, Stopwatch.StartNew(), allowScale: true,
-            map ?? new GlyphTrackMap(0, 0, nativeScale));
+            map ?? new GlyphTrackMap(0, 0, nativeScale), wordBoxes, patch);
 
     private static GlyphCover? BuildScaled(
         OcrBitmap frame, RectPx box, IReadOnlyList<RectPx> lines, IReadOnlyList<string> lineTexts, double nativeScale, bool soft,
-        IReadOnlyList<OcrWord>? firstLineWords, double lineHeight, int workScale, Stopwatch watch, GlyphTrackMap map)
+        IReadOnlyList<OcrWord>? firstLineWords, double lineHeight, int workScale, Stopwatch watch, GlyphTrackMap map,
+        IReadOnlyList<RectPx>? wordBoxes, bool patch)
     {
         var frameRect = new RectPx(0, 0, frame.Width, frame.Height);
         var reach = Math.Clamp(Math.Round(lineHeight * 0.16), 3, 24) + Math.Clamp(Math.Round(lineHeight * 0.08), 2, 10);
@@ -180,12 +185,14 @@ public static class GlyphCoverBuilder
             Math.Max(1, rect.Width / workScale), Math.Max(1, rect.Height / workScale));
         var words = firstLineWords?.Select(w => w with { Box = Map(w.Box) }).ToList();
         var smallMap = new GlyphTrackMap(map.OriginX + crop.X * map.Scale, map.OriginY + crop.Y * map.Scale, map.Scale * workScale);
-        return BuildCore(small, Map(box), lines.Select(Map).ToList(), lineTexts, nativeScale * workScale, soft, words, watch, allowScale: false, smallMap);
+        return BuildCore(small, Map(box), lines.Select(Map).ToList(), lineTexts, nativeScale * workScale, soft, words, watch, allowScale: false, smallMap,
+            wordBoxes?.Select(Map).ToList(), patch);
     }
 
     private static GlyphCover? BuildCore(
         OcrBitmap frame, RectPx box, IReadOnlyList<RectPx>? lineBoxes, IReadOnlyList<string>? lineTexts,
-        double nativeScale, bool soft, IReadOnlyList<OcrWord>? firstLineWords, Stopwatch watch, bool allowScale, GlyphTrackMap map)
+        double nativeScale, bool soft, IReadOnlyList<OcrWord>? firstLineWords, Stopwatch watch, bool allowScale, GlyphTrackMap map,
+        IReadOnlyList<RectPx>? wordBoxes = null, bool patch = true)
     {
         if (frame.PixelsBgra32 is null || frame.Width <= 0 || frame.Height <= 0) return null;
         var frameRect = new RectPx(0, 0, frame.Width, frame.Height);
@@ -204,7 +211,7 @@ public static class GlyphCoverBuilder
         double lineHeight = heights[heights.Count / 2];
         var workScale = lineHeight >= 150 ? 3 : lineHeight >= 90 ? 2 : 1;
         if (allowScale && workScale > 1)
-            return BuildScaled(frame, box, lines, lineTexts, nativeScale, soft, firstLineWords, lineHeight, workScale, watch, map);
+            return BuildScaled(frame, box, lines, lineTexts, nativeScale, soft, firstLineWords, lineHeight, workScale, watch, map, wordBoxes, patch);
 
         var margin = (int)Math.Clamp(Math.Round(lineHeight * 0.16), 3, 24);
         var ringWidth = (int)Math.Clamp(Math.Round(lineHeight * 0.08), 2, 10);
@@ -279,18 +286,80 @@ public static class GlyphCoverBuilder
         }
         if (fillCount < 12) return null;
 
+        bool[]? inWords = null;
+        bool[]? wordZone = null;
+        if (wordBoxes is { Count: > 0 })
+        {
+            inWords = new bool[work.Count];
+            var padX = Math.Max(2, (int)Math.Round(lineHeight * 0.18));
+            var padY = Math.Max(2, (int)Math.Round(lineHeight * 0.18));
+            foreach (var word in wordBoxes)
+            {
+                var local = new RectPx(word.X - outer.X - padX, word.Y - outer.Y - padY, word.Width + 2 * padX, word.Height + 2 * padY)
+                    .Intersect(regionLocal);
+                for (var y = local.Y; y < local.Bottom; y++)
+                    for (var x = local.X; x < local.Right; x++)
+                        inWords[y * work.Width + x] = true;
+            }
+            var allowed = Morphology.Dilate(inWords, work.Width, work.Height, (int)Math.Ceiling(lineHeight * 0.45));
+            wordZone = allowed;
+            var connectThreshold = Math.Max(12f, textContrast * 0.15f);
+            var reached = new bool[work.Count];
+            var queue = new Queue<int>();
+            for (var i = 0; i < work.Count; i++)
+            {
+                if (!refined[i] || !inWords[i]) continue;
+                reached[i] = true;
+                queue.Enqueue(i);
+            }
+            while (queue.Count > 0)
+            {
+                var i = queue.Dequeue();
+                var x = i % work.Width;
+                foreach (var j in new[] { x > 0 ? i - 1 : -1, x + 1 < work.Width ? i + 1 : -1, i - work.Width, i + work.Width })
+                {
+                    if (j < 0 || j >= work.Count || reached[j] || !allowed[j] || !inRegion[j]) continue;
+                    if (!refined[j] && ColorDistance(work, background, j) <= connectThreshold) continue;
+                    reached[j] = true;
+                    queue.Enqueue(j);
+                }
+            }
+            for (var i = 0; i < work.Count; i++)
+            {
+                if (!refined[i] || reached[i]) continue;
+                refined[i] = false;
+                fillCount--;
+            }
+            if (fillCount < 12) return null;
+            inWords = Morphology.Dilate(reached, work.Width, work.Height, 2);
+        }
+
         var textRgb = MeanRgb(work, i => refined[i] && contrast[i] > textContrast * 0.75f)
             ?? MeanRgb(work, i => refined[i]) ?? -1;
 
         var backgroundNoise = NoiseLevel(work, i => !nearText[i]);
         var haloThreshold = (float)Math.Clamp(Math.Max(8, backgroundNoise * 4), 8, Math.Max(8, textContrast * 0.15));
+        var foreground = new bool[work.Count];
+        for (var i = 0; i < work.Count; i++)
+            foreground[i] = inRegion[i] && (refined[i] || ColorDistance(work, background, i) > haloThreshold);
+        var rule = DetectRules(foreground, work.Width, regionLocal, lineHeight, i => contrast[i] > textContrast * 0.5f);
+        if (rule is not null)
+        {
+            for (var i = 0; i < work.Count; i++)
+            {
+                if (!rule[i] || !refined[i]) continue;
+                refined[i] = false;
+                fillCount--;
+            }
+            if (fillCount < 12) return null;
+        }
         var haloZone = Morphology.Dilate(refined, work.Width, work.Height, halo);
         var haloMask = new bool[work.Count];
         var outline = new bool[work.Count];
         var outlineCount = 0;
         for (var i = 0; i < work.Count; i++)
         {
-            if (!haloZone[i] || refined[i] || !inRegion[i]) continue;
+            if (!haloZone[i] || refined[i] || !inRegion[i] || (inWords is not null && !inWords[i])) continue;
             if (ColorDistance(work, background, i) <= haloThreshold) continue;
             haloMask[i] = true;
             if (contrast[i] < -haloThreshold * 0.5f)
@@ -327,9 +396,20 @@ public static class GlyphCoverBuilder
             }
         }
 
+        if (outlineRgb >= 0)
+            GrowEdge(work, haloMask, outline, (float)LumaOf(outlineRgb), bright ? 1f : -1f, 8f, haloZone, refined, inRegion,
+                wordZone, contrast, -haloThreshold * 0.25f);
+
         var mask = new bool[work.Count];
         for (var i = 0; i < work.Count; i++) mask[i] = refined[i] || haloMask[i];
         mask = Morphology.Dilate(mask, work.Width, work.Height, lineHeight >= 36 ? 2 : 1);
+        if (rule is not null)
+        {
+            var ruleZone = Morphology.Dilate(rule, work.Width, work.Height, lineHeight >= 36 ? 3 : 2);
+            var glyphCore = Morphology.Dilate(refined, work.Width, work.Height, 1);
+            for (var i = 0; i < work.Count; i++)
+                if (ruleZone[i] && (rule[i] || !glyphCore[i])) mask[i] = false;
+        }
         var maskCount = 0;
         var regionCount = regionLocal.Width * regionLocal.Height;
         for (var i = 0; i < work.Count; i++)
@@ -342,13 +422,18 @@ public static class GlyphCoverBuilder
         var maskFraction = regionCount == 0 ? 1 : (double)maskCount / regionCount;
         if (maskFraction > 0.85) soft = true;
 
-        var filled = work.InpaintExcluding(mask);
-        if (filled is null) return null;
-
+        var bridgeGap = BridgeGap(lineHeight);
         var feather = Math.Max(2, margin / 2);
         var skipLeft = iconSkip > 0 ? textLocal.X - regionLocal.X : 0;
         var skipRight = tailSkip > 0 ? regionLocal.Right - textLocal.Right : 0;
-        var patch = BuildPatch(filled, mask, work.Width, regionLocal, soft, feather, skipLeft, skipRight);
+        byte[] pixels = [];
+        if (patch)
+        {
+            var filled = work.InpaintExcluding(mask);
+            if (filled is null) return null;
+            BridgeRows(filled, Array.ConvertAll(mask, static m => !m), work.Width, regionLocal, bridgeGap);
+            pixels = BuildPatch(filled, mask, work.Width, regionLocal, soft, feather, skipLeft, skipRight);
+        }
         var track = BuildTrack(work, refined, outlineRgb >= 0 && outlinePx >= 1 ? outline : null, outlinePx, contrast, inRegion, mask, regionLocal,
             soft, feather, skipLeft, skipRight, outer, map);
 
@@ -358,7 +443,7 @@ public static class GlyphCoverBuilder
         {
             var glyphArea = refined.Count(static v => v);
             var glyphPerimeter = Morphology.Perimeter(refined, work.Width, work.Height);
-            track = track with { Stroke = glyphPerimeter > 0 ? 2.0 * glyphArea / glyphPerimeter : 0 };
+            track = track with { Stroke = glyphPerimeter > 0 ? 2.0 * glyphArea / glyphPerimeter : 0, BridgeGap = bridgeGap };
         }
         var align = AlignmentOf(coverLines);
 
@@ -366,7 +451,7 @@ public static class GlyphCoverBuilder
         var s = nativeScale;
         return new GlyphCover
         {
-            PatchPbgra = patch,
+            PatchPbgra = pixels,
             PatchPixelWidth = regionLocal.Width,
             PatchPixelHeight = regionLocal.Height,
             PatchX = (regionLocal.X - origin.X) * s,
@@ -526,7 +611,9 @@ public static class GlyphCoverBuilder
             }
         }
         if (!any) return null;
+        var original = track.BridgeGap > 0 ? (bool[])known.Clone() : known;
         PushPull.Fill(channels, known, width, height);
+        if (track.BridgeGap > 0) BridgeRows(channels, original, width, track.Region, track.BridgeGap);
         var useSoft = soft ?? track.Soft;
         var patch = BuildPatch(channels, track.Mask, width, track.Region, useSoft, track.Feather, track.SkipLeft, track.SkipRight);
         var moved = track.Shifted(workDx, workDy);
@@ -536,6 +623,20 @@ public static class GlyphCoverBuilder
         {
             PatchPbgra = patch,
             Soft = useSoft,
+            Track = moved,
+            Anchor = dx == 0 && dy == 0 ? cover.Anchor : cover.Anchor.Offset(dx, dy),
+        };
+    }
+
+    public static GlyphCover? Shift(GlyphCover cover, int workDx, int workDy)
+    {
+        if (cover.Track is not { } track) return null;
+        var moved = track.Shifted(workDx, workDy);
+        var dx = (int)Math.Floor(moved.OriginX) - (int)Math.Floor(track.OriginX);
+        var dy = (int)Math.Floor(moved.OriginY) - (int)Math.Floor(track.OriginY);
+        return cover with
+        {
+            PatchPbgra = [],
             Track = moved,
             Anchor = dx == 0 && dy == 0 ? cover.Anchor : cover.Anchor.Offset(dx, dy),
         };
@@ -574,7 +675,7 @@ public static class GlyphCoverBuilder
         Math.Max(1, (int)(windowBox.Height / scaleBack)));
 
     public static GlyphCover? BuildForBlock(
-        OcrBitmap frame, GameTranslatorOverlay.Core.Text.TextBlock block, RectPx ocrRegion, double scaleBack, bool soft = false)
+        OcrBitmap frame, GameTranslatorOverlay.Core.Text.TextBlock block, RectPx ocrRegion, double scaleBack, bool soft = false, bool patch = true)
     {
         var rows = Rows(block.Lines);
         var lines = rows.Select(r => ToSampleBox(r.Box, ocrRegion, scaleBack)).ToList();
@@ -582,8 +683,78 @@ public static class GlyphCoverBuilder
         var words = rows.Count > 0
             ? rows[0].Words.Select(w => w with { Box = ToSampleBox(w.Box, ocrRegion, scaleBack) }).ToList()
             : null;
-        return Build(frame, ToSampleBox(block.Box, ocrRegion, scaleBack), lines, texts, scaleBack, soft, words,
-            new GlyphTrackMap(ocrRegion.X, ocrRegion.Y, scaleBack));
+        var wordBoxes = block.Lines
+            .SelectMany(static l => l.Words.Where(static w => !IsInlineIconWord(w.Text))
+                .Select(w => new RectPx(w.Box.X, Math.Min(l.Box.Y, w.Box.Y), w.Box.Width,
+                    Math.Max(l.Box.Bottom, w.Box.Bottom) - Math.Min(l.Box.Y, w.Box.Y))))
+            .Select(w => ToSampleBox(w, ocrRegion, scaleBack))
+            .ToList();
+        var sampleBox = ToSampleBox(block.Box, ocrRegion, scaleBack);
+        var built = Build(frame, sampleBox, lines, texts, scaleBack, soft, words,
+            new GlyphTrackMap(ocrRegion.X, ocrRegion.Y, scaleBack), wordBoxes.Count > 0 ? wordBoxes : null, patch);
+        if (built is null) return null;
+        var (left, right) = ContainerExtent(frame, sampleBox);
+        return built with { ContainerLeftPx = left * scaleBack, ContainerRightPx = right * scaleBack };
+    }
+
+    public static (double Left, double Right) ContainerExtent(OcrBitmap frame, RectPx box)
+    {
+        if (box.Height < 4 || box.Width < 4) return (double.PositiveInfinity, double.PositiveInfinity);
+        var rows = new int[5];
+        for (var k = 0; k < rows.Length; k++)
+            rows[k] = Math.Clamp(box.Y + (int)Math.Round(box.Height * (0.15 + 0.175 * k)), 0, frame.Height - 1);
+        var margin = Math.Max(4, (int)Math.Round(box.Height * 0.25));
+        var reach = Math.Max(box.Height * 2.0, box.Width * 1.5);
+        return (Scan(box.X - margin, -1), Scan(box.Right + margin, 1));
+
+        double Scan(int start, int direction)
+        {
+            const int step = 2;
+            const int probe = 6;
+            if (start < 0 || start >= frame.Width) return double.PositiveInfinity;
+            var reference = new double[rows.Length * 3];
+            var count = 0;
+            for (var s = 0; s < probe; s++)
+            {
+                var x = start + direction * s * step;
+                if (x < 0 || x >= frame.Width) return double.PositiveInfinity;
+                for (var r = 0; r < rows.Length; r++)
+                {
+                    var o = rows[r] * frame.Stride + x * 4;
+                    reference[r * 3] += frame.PixelsBgra32[o];
+                    reference[r * 3 + 1] += frame.PixelsBgra32[o + 1];
+                    reference[r * 3 + 2] += frame.PixelsBgra32[o + 2];
+                }
+                count++;
+            }
+            for (var i = 0; i < reference.Length; i++) reference[i] /= count;
+            double Deviation(int x)
+            {
+                double sum = 0;
+                for (var r = 0; r < rows.Length; r++)
+                {
+                    var o = rows[r] * frame.Stride + x * 4;
+                    sum += Math.Abs(frame.PixelsBgra32[o] - reference[r * 3]) + Math.Abs(frame.PixelsBgra32[o + 1] - reference[r * 3 + 1])
+                        + Math.Abs(frame.PixelsBgra32[o + 2] - reference[r * 3 + 2]);
+                }
+                return sum / (rows.Length * 3);
+            }
+            double near = 0;
+            for (var s = 0; s < probe; s++) near += Deviation(start + direction * s * step);
+            if (near / probe > 14) return double.PositiveInfinity;
+            var run = 0;
+            for (var distance = probe * step; distance <= reach; distance += step)
+            {
+                var x = start + direction * distance;
+                if (x < 0 || x >= frame.Width) return double.PositiveInfinity;
+                if (Deviation(x) > 40)
+                {
+                    if (++run >= 3) return margin + distance - (run - 1) * step;
+                }
+                else run = 0;
+            }
+            return double.PositiveInfinity;
+        }
     }
 
     internal static List<(RectPx Box, string Text, List<OcrWord> Words)> Rows(IReadOnlyList<OcrLine> lines)
@@ -648,6 +819,13 @@ public static class GlyphCoverBuilder
     {
         "tab", "esc", "lb", "rb", "lt", "rt", "l1", "r1", "l2", "r2", "f1", "f2", "f3", "f4",
     };
+
+    private static readonly HashSet<string> InlineIconWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "tab", "shift", "ctrl", "alt", "esc", "lmb", "rmb",
+    };
+
+    internal static bool IsInlineIconWord(string token) => InlineIconWords.Contains(token.Trim());
 
     internal static bool IsIconToken(string token)
     {
@@ -776,6 +954,189 @@ public static class GlyphCoverBuilder
             }
         }
         return any >= 12 ? mask : null;
+    }
+
+    private static int BridgeGap(double lineHeight) => Math.Max(4, (int)Math.Round(lineHeight * 1.2));
+
+    private readonly record struct Rgb(double R, double G, double B)
+    {
+        public double Distance(Rgb other) => Math.Max(Math.Abs(R - other.R), Math.Max(Math.Abs(G - other.G), Math.Abs(B - other.B)));
+
+        public Rgb Lerp(Rgb other, double t) => new(R + (other.R - R) * t, G + (other.G - G) * t, B + (other.B - B) * t);
+    }
+
+    private readonly record struct BridgeRun(int Start, int End, Rgb Left, Rgb Right, bool Needed);
+
+    private static void BridgeRows(float[][] filled, bool[] known, int width, RectPx area, int maxGap)
+    {
+        var side = Math.Clamp((int)Math.Round(maxGap / 4.8), 4, 16);
+        const double similar = 18;
+        var candidates = new List<BridgeRun>[area.Height];
+        for (var y = area.Y; y < area.Bottom; y++)
+        {
+            var row = y * width;
+            var list = candidates[y - area.Y] = [];
+            var x = area.X;
+            while (x < area.Right)
+            {
+                if (known[row + x])
+                {
+                    x++;
+                    continue;
+                }
+                var start = x;
+                while (x < area.Right && !known[row + x]) x++;
+                var end = x - 1;
+                var length = end - start + 1;
+                if (length > maxGap || start - side < area.X || end + side >= area.Right) continue;
+                if (Sample(row, start - side, start) is not { } left || Sample(row, end + 1, end + 1 + side) is not { } right) continue;
+                if (left.Distance(right) > similar) continue;
+                double deviation = 0;
+                for (var k = start; k <= end; k++)
+                    deviation += At(row + k).Distance(left.Lerp(right, (k - start + 1) / (double)(length + 1)));
+                list.Add(new BridgeRun(start, end, left, right, deviation / length > 6));
+            }
+        }
+        for (var r = 0; r < candidates.Length; r++)
+        {
+            var row = (area.Y + r) * width;
+            foreach (var run in candidates[r])
+            {
+                if (!run.Needed || 1 + Chain(r, run, -1) + Chain(r, run, 1) < 3) continue;
+                var length = run.End - run.Start + 1;
+                for (var k = run.Start; k <= run.End; k++)
+                {
+                    var color = run.Left.Lerp(run.Right, (k - run.Start + 1) / (double)(length + 1));
+                    filled[0][row + k] = (float)color.R;
+                    filled[1][row + k] = (float)color.G;
+                    filled[2][row + k] = (float)color.B;
+                }
+            }
+        }
+
+        Rgb At(int i) => new(filled[0][i], filled[1][i], filled[2][i]);
+
+        int Chain(int r, BridgeRun run, int direction)
+        {
+            var count = 0;
+            for (var n = r + direction; n >= 0 && n < candidates.Length && count < 2; n += direction)
+            {
+                var current = run;
+                var index = candidates[n].FindIndex(o => o.End >= current.Start && o.Start <= current.End
+                    && o.Left.Distance(current.Left) <= similar && o.Right.Distance(current.Right) <= similar);
+                if (index < 0) break;
+                count++;
+                run = candidates[n][index];
+            }
+            return count;
+        }
+
+        Rgb? Sample(int row, int from, int to)
+        {
+            double r = 0, g = 0, b = 0;
+            float lo = float.MaxValue, hi = float.MinValue;
+            for (var k = from; k < to; k++)
+            {
+                if (!known[row + k]) return null;
+                r += filled[0][row + k];
+                g += filled[1][row + k];
+                b += filled[2][row + k];
+                var luma = 0.299f * filled[0][row + k] + 0.587f * filled[1][row + k] + 0.114f * filled[2][row + k];
+                lo = Math.Min(lo, luma);
+                hi = Math.Max(hi, luma);
+            }
+            if (hi - lo > 24) return null;
+            var n = to - from;
+            return new Rgb(r / n, g / n, b / n);
+        }
+    }
+
+    private static void GrowEdge(Workspace work, bool[] haloMask, bool[] seeds, float edgeLuma, float sign, float tolerance, bool[] haloZone,
+        bool[] refined, bool[] inRegion, bool[]? wordZone, float[] contrast, float maxContrast)
+    {
+        var queue = new Queue<int>();
+        for (var i = 0; i < work.Count; i++)
+            if (seeds[i]) queue.Enqueue(i);
+        while (queue.Count > 0)
+        {
+            var i = queue.Dequeue();
+            var x = i % work.Width;
+            foreach (var j in new[] { x > 0 ? i - 1 : -1, x + 1 < work.Width ? i + 1 : -1, i - work.Width, i + work.Width })
+            {
+                if (j < 0 || j >= work.Count || haloMask[j] || refined[j] || !haloZone[j] || !inRegion[j]) continue;
+                if ((wordZone is not null && !wordZone[j]) || contrast[j] > maxContrast) continue;
+                if (sign * (work.L[j] - edgeLuma) > tolerance) continue;
+                haloMask[j] = true;
+                queue.Enqueue(j);
+            }
+        }
+    }
+
+    internal static bool[]? DetectRules(bool[] fill, int width, RectPx area, double lineHeight, Func<int, bool>? ink = null)
+    {
+        var minRun = Math.Max(area.Width * 0.5, lineHeight * 3);
+        var gapTolerance = Math.Max(2, (int)Math.Round(lineHeight * 0.06));
+        var maxThickness = Math.Max(3, (int)Math.Round(lineHeight * 0.22));
+        var runs = new (int Start, int End)[area.Height];
+        for (var y = area.Y; y < area.Bottom; y++)
+        {
+            var row = y * width;
+            int bestStart = 0, bestEnd = -1, start = -1, last = -1;
+            for (var x = area.X; x < area.Right; x++)
+            {
+                if (!fill[row + x]) continue;
+                if (start < 0 || x - last > gapTolerance + 1) start = x;
+                last = x;
+                if (last - start > bestEnd - bestStart)
+                {
+                    bestStart = start;
+                    bestEnd = last;
+                }
+            }
+            runs[y - area.Y] = (bestStart, bestEnd);
+        }
+        int Length(int r) => runs[r].End - runs[r].Start + 1;
+        bool[]? rule = null;
+        var reach = Math.Max(2, (int)Math.Round(lineHeight * 0.1));
+        for (var i = 0; i < runs.Length;)
+        {
+            if (Length(i) < minRun)
+            {
+                i++;
+                continue;
+            }
+            var first = i;
+            while (i < runs.Length && Length(i) >= minRun) i++;
+            if (i - first > maxThickness || first == 0 || i == runs.Length) continue;
+            if (ink is not null)
+            {
+                int inked = 0, total = 0;
+                for (var r = first; r < i; r++)
+                {
+                    var row = (area.Y + r) * width;
+                    for (var x = runs[r].Start; x <= runs[r].End; x++)
+                    {
+                        if (!fill[row + x]) continue;
+                        total++;
+                        if (ink(row + x)) inked++;
+                    }
+                }
+                if (inked < total * 0.6) continue;
+            }
+            var top = first;
+            while (top > 0 && first - top < reach && Length(top - 1) >= minRun * 0.5) top--;
+            var bottom = i;
+            while (bottom < runs.Length && bottom - i < reach && Length(bottom) >= minRun * 0.5) bottom++;
+            rule ??= new bool[fill.Length];
+            for (var r = top; r < bottom; r++)
+            {
+                var row = (area.Y + r) * width;
+                var inBand = r >= first && r < i;
+                for (var x = runs[r].Start; x <= runs[r].End; x++)
+                    if (inBand || fill[row + x]) rule[row + x] = true;
+            }
+        }
+        return rule;
     }
 
     private static double Enclosure(bool[] set, bool[] other, int width, int height)

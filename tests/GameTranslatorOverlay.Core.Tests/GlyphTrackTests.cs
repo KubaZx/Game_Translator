@@ -41,6 +41,45 @@ public class GlyphTrackTests
     }
 
     [Fact]
+    public void Daleko_przesuniety_napis_jest_znaleziony_szerokim_wyszukiwaniem_zgrubnym()
+    {
+        var first = Scene(seed: 2, x: 40, y: 70);
+        var box = new RectPx(36, 66, 210, 50);
+        var cover = GlyphCoverBuilder.Build(first, box, [box], ["Hill"])!;
+        var step = GlyphTracker.WideStep(cover.Track!, 180);
+        Assert.True(step >= 2, $"krok {step}, kreska {cover.Track!.Stroke:F1}");
+
+        var moved = Scene(seed: 3, x: 197, y: 61);
+        var narrow = GlyphTracker.Locate(cover.Track!, moved, 0, 0, 72);
+        var wide = GlyphTracker.Locate(cover.Track!, moved, 0, 0, 180, 0, 0, step);
+
+        Assert.True(narrow is not { IsConfident: true });
+        Assert.NotNull(wide);
+        Assert.True(wide.Value.IsConfident, $"koszt {wide.Value.Cost:F1}, typowy {wide.Value.Typical:F1}");
+        Assert.Equal(157, wide.Value.WorkDx);
+        Assert.Equal(-9, wide.Value.WorkDy);
+    }
+
+    [Fact]
+    public void Odswiezony_wzorzec_pasuje_do_nowej_klatki_lepiej_niz_stary()
+    {
+        var first = Scene(seed: 2, x: 60, y: 70, background: 0x203040);
+        var box = new RectPx(56, 66, 210, 50);
+        var cover = GlyphCoverBuilder.Build(first, box, [box], ["Hill"])!;
+        var changed = Scene(seed: 2, x: 72, y: 66, background: 0x6A5A30);
+        var match = GlyphTracker.Locate(cover.Track!, changed, 0, 0, 40)!.Value;
+        var moved = cover.Track!.Shifted(match.WorkDx, match.WorkDy);
+
+        var resampled = GlyphTracker.Resample(moved, changed, 0, 0);
+        var before = GlyphTracker.Locate(moved, changed, 0, 0, 0)!.Value.Cost;
+        var after = GlyphTracker.Locate(resampled, changed, 0, 0, 0)!.Value.Cost;
+
+        Assert.Equal(moved.Points, resampled.Points);
+        Assert.True(after < 0.5, $"po {after:F2}");
+        Assert.True(after <= before, $"przed {before:F2}, po {after:F2}");
+    }
+
+    [Fact]
     public void Brak_napisu_nie_daje_pewnego_dopasowania()
     {
         var first = Scene(seed: 4, x: 60, y: 70);

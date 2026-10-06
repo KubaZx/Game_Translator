@@ -26,7 +26,8 @@ public sealed record GlyphTrack(
     int[] PartnerPoints,
     float TemplateContrast,
     bool PartnerIsOutline = false,
-    double Stroke = 0)
+    double Stroke = 0,
+    int BridgeGap = 0)
 {
     public RectPx WindowBounds => new(
         (int)Math.Floor(OriginX),
@@ -70,7 +71,8 @@ public static class GlyphTracker
 {
     public const int CoarsePoints = 256;
 
-    public static GlyphMatch? Locate(GlyphTrack track, OcrBitmap region, int regionX, int regionY, double maxShift, int centerDx = 0, int centerDy = 0)
+    public static GlyphMatch? Locate(GlyphTrack track, OcrBitmap region, int regionX, int regionY, double maxShift, int centerDx = 0, int centerDy = 0,
+        int coarseStep = 0)
     {
         if (track.Points.Length < 8 || region.Width <= 0 || region.Height <= 0) return null;
         var lum = Luminance(region);
@@ -81,7 +83,7 @@ public static class GlyphTracker
             return Match(track, centerDx, centerDy, centerCost, centerCost, 0, centerContrast, false, centerContrast);
 
         var stride = Math.Max(1, track.Points.Length / CoarsePoints);
-        var step = radius > 12 && track.Stroke >= 4 ? 2 : 1;
+        var step = coarseStep > 0 ? coarseStep : radius > 12 && track.Stroke >= 4 ? 2 : 1;
         var coarse = new List<(int X, int Y, double Cost)>((2 * radius / step + 1) * (2 * radius / step + 1));
         for (var sy = centerDy - radius; sy <= centerDy + radius; sy += step)
         {
@@ -128,6 +130,29 @@ public static class GlyphTracker
             && c.Cost <= Math.Max(bestCoarse * 1.2, bestCoarse + 2));
         return Match(track, refinedX, refinedY, refined, centerCost, typical,
             LocalContrast(track, lum, region.Width, region.Height, regionX, regionY, refinedX, refinedY), ambiguous, centerContrast);
+    }
+
+    public const int MaxWidePositions = 60_000;
+
+    public static int WideStep(GlyphTrack track, double maxShift)
+    {
+        var side = 2 * Math.Ceiling(maxShift / track.Step) / 2 + 1;
+        return track.Stroke >= 3 && side * side <= MaxWidePositions ? 2 : 0;
+    }
+
+    public static GlyphTrack Resample(GlyphTrack track, OcrBitmap region, int regionX, int regionY)
+    {
+        var values = new float[track.Values.Length];
+        for (var k = 0; k < track.Points.Length; k++)
+        {
+            var p = track.Points[k];
+            var wx = (int)Math.Floor(track.OriginX + (p % track.Width + 0.5) * track.Step) - regionX;
+            var wy = (int)Math.Floor(track.OriginY + (p / track.Width + 0.5) * track.Step) - regionY;
+            if ((uint)wx >= (uint)region.Width || (uint)wy >= (uint)region.Height) return track;
+            var o = wy * region.Stride + wx * 4;
+            values[k] = 0.114f * region.PixelsBgra32[o] + 0.587f * region.PixelsBgra32[o + 1] + 0.299f * region.PixelsBgra32[o + 2];
+        }
+        return track with { Values = values };
     }
 
     private static GlyphMatch Match(GlyphTrack track, int dx, int dy, double cost, double centerCost, double typical, double? contrast, bool ambiguous, double? centerContrast) =>

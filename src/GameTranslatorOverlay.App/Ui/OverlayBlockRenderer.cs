@@ -163,7 +163,7 @@ public static class OverlayBlockRenderer
 
     public static bool IsNative(Border element) => element.Child is GameTextElement;
 
-    public static bool UsesNativeCover(AppSettings settings, GlyphCover? cover) => cover is not null && IsCoverPlacement(settings);
+    public static bool UsesNativeCover(AppSettings settings, GlyphCover? cover) => cover is { HasPatch: true } && IsCoverPlacement(settings);
 
     public static bool HidesIdenticalText(AppSettings settings) => IsCoverPlacement(settings);
 
@@ -258,6 +258,7 @@ public static class OverlayBlockRenderer
         var alignment = TextAlignment.Left;
         double available;
         double lineAdvance = 0;
+        var screenCentered = false;
         if (lines.Count == 0)
         {
             typeface = OverlayFonts.ChooseWeight(family, string.Empty, 0);
@@ -301,7 +302,8 @@ public static class OverlayBlockRenderer
                 TextAlignHint.Right => TextAlignment.Right,
                 _ => TextAlignment.Left,
             };
-            if (IsScreenCentered(cover, box, monitor, left, right)) alignment = TextAlignment.Center;
+            screenCentered = IsScreenCentered(cover, box, monitor, left, right);
+            if (screenCentered) alignment = TextAlignment.Center;
             anchor = alignment switch
             {
                 TextAlignment.Center => (lines.Average(static l => (l.InkLeft + l.InkRight) / 2) - cover.PatchX) / scale,
@@ -314,9 +316,19 @@ public static class OverlayBlockRenderer
         var limit = lines.Count > 1
             ? Math.Max(1, available) * 1.08
             : alignment == TextAlignment.Center
-                ? Math.Max(1, available) * 1.6
+                ? Math.Max(1, available) * (screenCentered ? 1.6 : 1.25)
                 : Math.Max(Math.Max(1, available) * 1.25, Math.Min(Math.Max(1, available) * 3.0, available + freeRightPx / scale * 0.9));
-        var floor = 0.85;
+        var floor = alignment == TextAlignment.Center && !screenCentered && lines.Count == 1 ? 0.72 : 0.85;
+        if (lines.Count == 1 && alignment == TextAlignment.Center
+            && double.IsFinite(cover.ContainerLeftPx) && double.IsFinite(cover.ContainerRightPx))
+        {
+            var room = Math.Max(1, available) + 2 * Math.Min(cover.ContainerLeftPx, cover.ContainerRightPx) * 0.9 / scale;
+            if (room < limit)
+            {
+                limit = room;
+                floor = 0.72;
+            }
+        }
         if (cover.TailSkipPx > 0)
         {
             limit = Math.Max(1, available) * 1.02;
@@ -326,7 +338,15 @@ public static class OverlayBlockRenderer
         var fitted = natural > limit ? em * Math.Max(floor, limit / natural) : em;
         double wrap = 0;
         if (lines.Count > 1 && WidestLine(text, typeface, fitted) > limit)
+        {
             wrap = Math.Max(Math.Max(1, available) * 1.04, WidestWord(text, typeface, fitted) + 1);
+            var smallest = em * 0.7;
+            while (fitted > smallest && WrappedLines(text, typeface, fitted, wrap, lineAdvance) > lines.Count)
+            {
+                fitted = Math.Max(smallest, fitted * 0.94);
+                wrap = Math.Max(Math.Max(1, available) * 1.04, WidestWord(text, typeface, fitted) + 1);
+            }
+        }
 
         native.Typeface = typeface;
         native.EmSize = fitted;
@@ -406,6 +426,13 @@ public static class OverlayBlockRenderer
             widest = Math.Max(widest, formatted.WidthIncludingTrailingWhitespace);
         }
         return widest;
+    }
+
+    private static int WrappedLines(string text, Typeface typeface, double em, double wrap, double lineAdvance)
+    {
+        var advance = lineAdvance > 0 ? lineAdvance : em * typeface.FontFamily.LineSpacing;
+        var formatted = GameTextElement.Format(text, typeface, em, Brushes.Black, 1.0, wrap, advance);
+        return Math.Max(1, (int)Math.Round(formatted.Height / Math.Max(1, advance)));
     }
 
     private static double WidestLine(string text, Typeface typeface, double em)

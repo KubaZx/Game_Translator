@@ -155,6 +155,8 @@ public sealed class LiveSessionOptions
 
     public Func<bool> BuildGlyphCovers { get; init; } = static () => true;
 
+    public Func<bool> RenderGlyphCovers { get; init; } = static () => true;
+
     public Func<bool> HoldTypingPrefixes { get; init; } = static () => true;
 
     public Func<bool> IdentityEchoSafe { get; init; } = static () => true;
@@ -225,7 +227,10 @@ public sealed class LiveTranslationSession(
     private bool _readingRetryRequested;
     private sealed record HeldPrefix(int Letters, TimeSpan LettersSince, TimeSpan FirstSeen);
     private const double CatchUpReach = 2.5;
-    private sealed record TrackState(GlyphCover Cover, float[] Signature, int Absences = 0, int VelocityX = 0, int VelocityY = 0);
+    private double CatchUpRadius => options.TrackMaxShiftPx * CatchUpReach;
+    private bool RendersPatches => options.RenderGlyphCovers();
+    private const double WideTrackReach = 3.0;
+    private sealed record TrackState(GlyphCover Cover, float[] Signature, int Absences = 0, int VelocityX = 0, int VelocityY = 0, bool Moving = false);
     private readonly Dictionary<string, RectPx> _captureBoxes = new(StringComparer.Ordinal);
     private bool _lastCaptureFallback;
     private GraphicsCaptureSource? _graphicsCapture;
@@ -241,6 +246,7 @@ public sealed class LiveTranslationSession(
     private bool _lastFrameMoving;
     private readonly Dictionary<string, TrackState> _tracks = new(StringComparer.Ordinal);
     private TimeSpan? _lastTrackedMotion;
+    private TimeSpan? _lastAnimatedRefill;
     private readonly HashSet<string> _presentByTracking = new(StringComparer.Ordinal);
     private readonly HashSet<string> _confirmedAtCapture = new(StringComparer.Ordinal);
     private bool _frameCapturedInMotion;
@@ -460,7 +466,7 @@ public sealed class LiveTranslationSession(
 
     private static IReadOnlyList<GlyphCover?> BuildCovers(
         OcrBitmap frame, IReadOnlyList<KeyedTextBlock> keyed, RectPx ocrRegion, double scaleBack,
-        IReadOnlyList<(RectPx Box, GlyphCover? Cover)?> previous)
+        IReadOnlyList<(RectPx Box, GlyphCover? Cover)?> previous, bool allowSoft = true, bool patch = true)
     {
         var frameRect = new RectPx(0, 0, frame.Width, frame.Height);
         var covers = new GlyphCover?[keyed.Count];
@@ -483,14 +489,14 @@ public sealed class LiveTranslationSession(
                         && Math.Abs(prior.Box.Right - block.Box.Right) <= 2 && Math.Abs(prior.Box.Bottom - block.Box.Bottom) <= 2;
                     var difference = GlyphCover.SignatureDifference(old.Signature, signature);
                     var settled = sameSize && sameAnchor && difference < GlyphCoverBuilder.StaticSignatureTolerance;
-                    if (settled && !old.Soft)
+                    if (settled && !old.Soft && (old.HasPatch || !patch))
                     {
                         covers[i] = old;
                         return;
                     }
-                    soft = !settled && sameSize && sameAnchor && difference < 40;
+                    soft = allowSoft && !settled && sameSize && sameAnchor && difference < 40;
                 }
-                covers[i] = GlyphCoverBuilder.BuildForBlock(frame, block, ocrRegion, scaleBack, soft) is { } built
+                covers[i] = GlyphCoverBuilder.BuildForBlock(frame, block, ocrRegion, scaleBack, soft, patch) is { } built
                     ? built with { Signature = signature, Anchor = block.Box }
                     : null;
             }
@@ -611,7 +617,9 @@ public sealed class LiveTranslationSession(
                 var now = clock.Elapsed;
                 // Preserve low FPS settings; at faster rates, avoid adding a full
                 // capture tick after the unchanged stability deadline is reached.
-                var pace = _lastTrackedMotion is { } trackedMotion && now - trackedMotion < TimeSpan.FromSeconds(1) && _tracks.Count > 0
+                var recentRefresh = (_lastTrackedMotion is { } trackedMotion && now - trackedMotion < TimeSpan.FromSeconds(1))
+                    || (_lastAnimatedRefill is { } animated && now - animated < TimeSpan.FromSeconds(1));
+                var pace = recentRefresh && _tracks.Count > 0
                     ? TimeSpan.FromSeconds(1.0 / Math.Clamp(Math.Max(options.Fps, Math.Min(options.MotionFps, options.Fps * 2)), 0.5, 30.0))
                     : interval;
                 var remaining = stabilizer.GetPollingDelay(now, pace - (now - cycleStart), pace);
@@ -1198,15 +1206,19 @@ public sealed class LiveTranslationSession(
             var velocityX = isMoving && !fresh ? state!.VelocityX : 0;
             var velocityY = isMoving && !fresh ? state!.VelocityY : 0;
             var radius = isMoving ? options.TrackMaxShiftPx : Math.Max(4, 2 * track.Step);
-            var reach = radius + Math.Max(Math.Abs(velocityX), Math.Abs(velocityY)) * track.Step;
+            var wideRadius = options.TrackMaxShiftPx * WideTrackReach;
+            var wideStep = isMoving && _lastFrameMoving && !fresh && state!.Moving ? GlyphTracker.WideStep(track, wideRadius) : 0;
+            var reach = (wideStep > 0 ? wideRadius : radius) + Math.Max(Math.Abs(velocityX), Math.Abs(velocityY)) * track.Step;
             var area = track.SearchArea(reach).Intersect(frameRect);
             if (area.IsEmpty || regionOf(area) is not { } region) continue;
             var signatureArea = SignatureArea(block.WindowRelativeBox, block.LineHeight, frameRect);
             var signature = GlyphCoverBuilder.Signature(region, signatureArea.Offset(-area.X, -area.Y).Intersect(new RectPx(0, 0, region.Width, region.Height)));
-            jobs.Add(new TrackJob(key, block, cover, track, area, region, signature, state, fresh, radius, velocityX, velocityY));
+            jobs.Add(new TrackJob(key, block, cover, track, area, region, signature, state, fresh, radius, velocityX, velocityY,
+                wideStep > 0 ? wideRadius : 0, wideStep));
         }
 
         var outcomes = new TrackOutcome[jobs.Count];
+        var renderPatches = RendersPatches;
         var parallel = new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 4) };
         Parallel.For(0, jobs.Count, parallel, i =>
         {
@@ -1222,9 +1234,14 @@ public sealed class LiveTranslationSession(
                 match = GlyphTracker.Locate(job.Track, job.Region, job.Area.X, job.Area.Y, Math.Max(8, 4 * job.Track.Step), job.VelocityX, job.VelocityY);
             if (match is not { IsConfident: true })
                 match = GlyphTracker.Locate(job.Track, job.Region, job.Area.X, job.Area.Y, job.Radius);
-            var refilled = match is { IsConfident: true } confident
-                ? GlyphCoverBuilder.Refill(job.Cover, job.Region, job.Area.X, job.Area.Y, confident.WorkDx, confident.WorkDy)
-                : null;
+            if (match is not { IsConfident: true } && job.WideStep > 0)
+                match = GlyphTracker.Locate(job.Track, job.Region, job.Area.X, job.Area.Y, job.WideRadius,
+                    job.VelocityX, job.VelocityY, job.WideStep);
+            var refilled = match is not { IsConfident: true } confident ? null
+                : renderPatches ? GlyphCoverBuilder.Refill(job.Cover, job.Region, job.Area.X, job.Area.Y, confident.WorkDx, confident.WorkDy)
+                : GlyphCoverBuilder.Shift(job.Cover, confident.WorkDx, confident.WorkDy);
+            if (refilled is { Track: { } movedTrack } && match is { IsStatic: false })
+                refilled = refilled with { Track = GlyphTracker.Resample(movedTrack, job.Region, job.Area.X, job.Area.Y) };
             outcomes[i] = new TrackOutcome(match, refilled, Unchanged: false);
         });
 
@@ -1250,6 +1267,12 @@ public sealed class LiveTranslationSession(
             }
             var dx = refreshed.Anchor.X - job.Cover.Anchor.X;
             var dy = refreshed.Anchor.Y - job.Cover.Anchor.Y;
+            if (!renderPatches && dx == 0 && dy == 0)
+            {
+                _tracks[job.Key] = new TrackState(job.Cover, job.Signature, 0);
+                _presentByTracking.Add(job.Key);
+                continue;
+            }
             var box = dx == 0 && dy == 0 ? job.Block.WindowRelativeBox : job.Block.WindowRelativeBox.Offset(dx, dy);
             if ((dx != 0 || dy != 0) && _displayed.Any(other => other.Key != job.Key && Overlaps(other.Value.WindowRelativeBox, box)))
             {
@@ -1263,11 +1286,13 @@ public sealed class LiveTranslationSession(
             refreshed = refreshed with { Signature = movedSignature };
             _displayed[job.Key] = job.Block with { WindowRelativeBox = box, Cover = refreshed, Misses = 0 };
             if (dx != 0 || dy != 0) _blockFingerprints.Remove(job.Key);
-            _tracks[job.Key] = new TrackState(refreshed, movedSignature, 0, isMoving ? m.WorkDx : 0, isMoving ? m.WorkDy : 0);
+            _tracks[job.Key] = new TrackState(refreshed, movedSignature, 0, isMoving ? m.WorkDx : 0, isMoving ? m.WorkDy : 0,
+                Moving: isMoving && !m.IsStatic);
             _presentByTracking.Add(job.Key);
             changed = true;
         }
         if (isMoving && (changed || lost.Count > 0)) _lastTrackedMotion = sampledAt;
+        if (!isMoving && changed) _lastAnimatedRefill = sampledAt;
         if (lost.Count > 0)
         {
             foreach (var key in lost) _tracks.Remove(key);
@@ -1290,7 +1315,7 @@ public sealed class LiveTranslationSession(
 
     private sealed record TrackJob(
         string Key, LiveOverlayBlock Block, GlyphCover Cover, GlyphTrack Track, RectPx Area, OcrBitmap Region, float[] Signature,
-        TrackState? State, bool Fresh, double Radius, int VelocityX, int VelocityY);
+        TrackState? State, bool Fresh, double Radius, int VelocityX, int VelocityY, double WideRadius, int WideStep);
 
     private readonly record struct TrackOutcome(GlyphMatch? Match, GlyphCover? Refilled, bool Unchanged);
 
@@ -1913,9 +1938,10 @@ public sealed class LiveTranslationSession(
                 .Select(k => _displayed.TryGetValue(k.Key, out var p) ? ((RectPx, GlyphCover?)?)(p.WindowRelativeBox, p.Cover) : null)
                 .ToList();
             var coverKeyed = keyed.ToList();
+            var patch = RendersPatches;
             coverTask = Task.Run(() =>
             {
-                var result = BuildCovers(frame, coverKeyed, ocrRegion, scaleBack, previousCovers);
+                var result = BuildCovers(frame, coverKeyed, ocrRegion, scaleBack, previousCovers, allowSoft: !TracksBlocks, patch);
                 coverBuildMs = coverWatch.Elapsed.TotalMilliseconds;
                 return result;
             }, CancellationToken.None);
@@ -1968,7 +1994,21 @@ public sealed class LiveTranslationSession(
                         await AwaitWithSceneChecksAsync(_translationWork.WaitForCapacityAsync(),
                             clock, cancellationToken, generation).ConfigureAwait(false);
                     }
-                    outcomes = await AwaitWithSceneChecksAsync(translation,
+                    if (coverTask is not null && local.Any(static o => o is not null) && !translation!.IsCompleted)
+                    {
+                        IReadOnlyList<GlyphCover?>? earlyCovers = null;
+                        try
+                        {
+                            earlyCovers = await coverTask.ConfigureAwait(false);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            logger.LogDebug(ex, "Łatka napisu nie powstała");
+                        }
+                        if (earlyCovers is not null && !translation.IsCompleted)
+                            PublishKnownBlocks(keyed, local, earlyCovers, sampledStyles, frame, ocrRegion, scaleBack, generation, cancellationToken);
+                    }
+                    outcomes = await AwaitWithSceneChecksAsync(translation!,
                         clock, cancellationToken, generation).ConfigureAwait(false);
                 }
             }
@@ -2023,30 +2063,7 @@ public sealed class LiveTranslationSession(
             }
         }
 
-        System.Drawing.Bitmap? confirmFrame = null;
-        var confirmTried = false;
-        (bool Present, GlyphCover? Moved) ConfirmInMotion(GlyphCover? candidate)
-        {
-            if (_lastCaptureFallback) return (true, null);
-            if (candidate?.Track is not { } track) return (false, null);
-            if (!confirmTried)
-            {
-                confirmTried = true;
-                var (fresh, freshFallback) = CaptureGameFrame();
-                if (freshFallback) fresh?.Dispose();
-                else confirmFrame = fresh;
-            }
-            if (confirmFrame is null) return (false, null);
-            var confirmRect = new RectPx(0, 0, confirmFrame.Width, confirmFrame.Height);
-            var reach = options.TrackMaxShiftPx * CatchUpReach;
-            var area = track.SearchArea(reach).Intersect(confirmRect);
-            if (ScreenCapture.CopyRegion(confirmFrame, area) is not { } region) return (false, null);
-            var found = GlyphTracker.Locate(track, region, area.X, area.Y, reach);
-            if (found is not { IsConfident: true } f) return (false, null);
-            if (f.IsStatic) return (true, null);
-            var moved = GlyphCoverBuilder.Refill(candidate, region, area.X, area.Y, f.WorkDx, f.WorkDy);
-            return moved is null ? (false, null) : (true, moved);
-        }
+        using var confirmation = new MotionConfirmation(this);
 
         for (var i = 0; i < keyed.Count; i++)
         {
@@ -2056,7 +2073,7 @@ public sealed class LiveTranslationSession(
             GlyphCover? caughtUp = null;
             if (covers is not null && (_frameCapturedInMotion || _motionDuringProcessing) && !_displayed.ContainsKey(keyed[i].Key))
             {
-                var (present, moved) = ConfirmInMotion(i < covers.Count ? covers[i] : null);
+                var (present, moved) = confirmation.Confirm(i < covers.Count ? covers[i] : null);
                 if (!present)
                 {
                     _pendingDirtyRegion = _pendingDirtyRegion?.Union(keyed[i].Block.Box) ?? keyed[i].Block.Box;
@@ -2179,8 +2196,6 @@ public sealed class LiveTranslationSession(
                 freshKeys.Add(key);
             }
         }
-        confirmFrame?.Dispose();
-
         // Okres łaski: bloki, których ten przebieg nie widział, nie znikają od razu —
         // Windows OCR miewa puste przebiegi na niezmienionej scenie, a bez łaski każde
         // takie czknięcie zdejmowało i przywracało całą nakładkę (miganie).
@@ -2353,6 +2368,90 @@ public sealed class LiveTranslationSession(
                 PreserveSubtitleLifetime = preserveSubtitle,
             },
             cancellationToken);
+    }
+
+    private void PublishKnownBlocks(
+        IReadOnlyList<KeyedTextBlock> keyed, IReadOnlyList<TranslationOutcome?> local, IReadOnlyList<GlyphCover?> covers,
+        IReadOnlyList<BlockColors> sampledStyles, OcrBitmap frame, RectPx ocrRegion, double scaleBack, long generation,
+        CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested || !_sceneValidity.IsCurrent(generation) || _pendingTextGone) return;
+        using var confirmation = new MotionConfirmation(this);
+        var added = 0;
+        for (var i = 0; i < keyed.Count && i < local.Count && i < covers.Count; i++)
+        {
+            if (local[i]?.TranslatedText is not { } translated || covers[i] is not { } cover) continue;
+            var key = keyed[i].Key;
+            if (_displayed.ContainsKey(key)) continue;
+            var box = keyed[i].Block.Box;
+            if (_displayed.Values.Any(other => Overlaps(other.WindowRelativeBox, box))) continue;
+            if (_frameCapturedInMotion || _motionDuringProcessing)
+            {
+                var (present, moved) = confirmation.Confirm(cover);
+                if (!present) continue;
+                if (moved is not null)
+                {
+                    box = box.Offset(moved.Anchor.X - cover.Anchor.X, moved.Anchor.Y - cover.Anchor.Y);
+                    cover = moved;
+                    if (_displayed.Values.Any(other => Overlaps(other.WindowRelativeBox, box))) continue;
+                }
+            }
+            if (cover.Anchor != box) cover = cover.AnchorTo(box);
+            var sampled = sampledStyles[i];
+            _displayed[key] = new LiveOverlayBlock(
+                box,
+                translated,
+                TextNormalizer.Normalize(translated),
+                TextBlockMetrics.MedianLineHeight(keyed[i].Block),
+                sampled.TextRgb,
+                sampled.BackgroundRgb,
+                sampled.OutlineRgb,
+                Texture: sampled.Texture,
+                SourceText: keyed[i].NormalizedText,
+                Probe: ProbeReference(frame, keyed[i].Block.Box, ocrRegion, scaleBack, sampled),
+                Cover: cover);
+            _captureBoxes[key] = keyed[i].Block.Box;
+            added++;
+        }
+        if (added == 0) return;
+        var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
+        _lastEmittedBounds = bounds;
+        Emit(new LiveUpdate($"Live: {added} znanych napisów od razu, reszta czeka na tłumaczenie.",
+            BuildDisplayList(bounds), WindowBounds: bounds), cancellationToken);
+    }
+
+    private sealed class MotionConfirmation(LiveTranslationSession session) : IDisposable
+    {
+        private System.Drawing.Bitmap? _frame;
+        private bool _tried;
+
+        public (bool Present, GlyphCover? Moved) Confirm(GlyphCover? candidate)
+        {
+            if (session._lastCaptureFallback) return (true, null);
+            if (candidate?.Track is not { } track) return (false, null);
+            if (!_tried)
+            {
+                _tried = true;
+                var (fresh, freshFallback) = session.CaptureGameFrame();
+                if (freshFallback) fresh?.Dispose();
+                else _frame = fresh;
+            }
+            if (_frame is null) return (false, null);
+            var confirmRect = new RectPx(0, 0, _frame.Width, _frame.Height);
+            var reach = session.CatchUpRadius;
+            var area = track.SearchArea(reach).Intersect(confirmRect);
+            if (ScreenCapture.CopyRegion(_frame, area) is not { } region) return (false, null);
+            var found = GlyphTracker.Locate(track, region, area.X, area.Y, reach, 0, 0, GlyphTracker.WideStep(track, reach));
+            if (found is not { IsConfident: true } f) return (false, null);
+            if (f.IsStatic) return (true, null);
+            var moved = session.RendersPatches
+                ? GlyphCoverBuilder.Refill(candidate, region, area.X, area.Y, f.WorkDx, f.WorkDy)
+                : GlyphCoverBuilder.Shift(candidate, f.WorkDx, f.WorkDy);
+            if (moved is { Track: { } movedTrack }) moved = moved with { Track = GlyphTracker.Resample(movedTrack, region, area.X, area.Y) };
+            return moved is null ? (false, null) : (true, moved);
+        }
+
+        public void Dispose() => _frame?.Dispose();
     }
 
     private static KnownTextReference ProbeReference(

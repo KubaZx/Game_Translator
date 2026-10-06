@@ -187,7 +187,7 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
                 OcrUpscale = upscale.Preferred,
                 AllowAutoUpscale = upscale.AllowAuto,
                 NoticeEcho = _echo,
-                BuildGlyphCovers = () => settings.OverlayPlacement == "cover" && settings.LiveDisplayMode != "subtitle",
+                RenderGlyphCovers = () => settings.OverlayPlacement == "cover" && settings.LiveDisplayMode != "subtitle",
                 HoldTypingPrefixes = () => settings.OverlayPlacement == "cover" && settings.LiveDisplayMode != "subtitle",
                 IdentityEchoSafe = () => (OverlayBlockRenderer.HidesIdenticalText(settings) && settings.LiveDisplayMode != "subtitle")
                     || _host.Window.IsCaptureExclusionActive,
@@ -204,7 +204,7 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
                     sessionOptions.MaxMotionPause.TotalMilliseconds, sessionOptions.SceneCutThreshold,
                     sessionOptions.StabilityDelay.TotalMilliseconds, sessionOptions.ForcedProcessInterval.TotalMilliseconds,
                     sessionOptions.StaticRescanInterval.TotalMilliseconds, sessionOptions.BlockMissGrace, sessionOptions.OcrUpscale,
-                    sessionOptions.AllowAutoUpscale, sessionOptions.BuildGlyphCovers(), sessionOptions.HoldTypingPrefixes(),
+                    sessionOptions.AllowAutoUpscale, sessionOptions.RenderGlyphCovers(), sessionOptions.HoldTypingPrefixes(),
                     sessionOptions.IdentityEchoSafe(), _host.Window.IsCaptureExclusionActive),
                 DisplayedField is not null, _host.ElementsReflection,
                 typeof(ReplayRunner).Assembly.GetName().Version?.ToString() ?? "?");
