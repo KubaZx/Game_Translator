@@ -217,8 +217,11 @@ public sealed class LiveTranslationSession(
     private readonly HashSet<string> _presentByTracking = new(StringComparer.Ordinal);
     private bool _frameCapturedInMotion;
 
-    private TimeSpan MotionPause =>
-        options.TrackCoveredBlocks && options.BuildGlyphCovers() ? options.TrackedMotionPause : options.MaxMotionPause;
+    private bool _motionDuringProcessing;
+
+    private bool TracksBlocks => options.TrackCoveredBlocks && options.BuildGlyphCovers();
+
+    private TimeSpan MotionPause => TracksBlocks ? options.TrackedMotionPause : options.MaxMotionPause;
     private readonly Dictionary<string, HeldPrefix> _heldPrefixes = new(StringComparer.Ordinal);
 
     private const double JitterSimilarityThreshold = 0.5;
@@ -781,6 +784,7 @@ public sealed class LiveTranslationSession(
             _motionDeadline.OnProcessingStarted(_lastProcessedAt);
             _cycleTime = clock.Elapsed;
             _processingRegion = ocrRegion;
+            _motionDuringProcessing = false;
             // Ta klatka obejmuje wszystkie zmiany zauważone do teraz; liczą się już
             // tylko te, które przyjdą w trakcie jej OCR i tłumaczenia.
             _lastObservedChangeAt = null;
@@ -861,9 +865,12 @@ public sealed class LiveTranslationSession(
             ? _changeDetector.Analyze(previous, grid, bitmap.Width, bitmap.Height)
             : new NoiseAwareAnalysis(1.0, 0.0, 1.0, frameRect);
         _previousGrid = grid;
-        _peakChangedFraction = Math.Max(_peakChangedFraction, analysis.ChangedFraction);
 
-        var sceneCut = _sceneValidity.Observe(analysis, hasPrevious);
+        var tolerateMotion = TracksBlocks;
+        var sceneCut = _sceneValidity.Observe(analysis, hasPrevious, tolerateMotion);
+        var continuingMotion = tolerateMotion && _sceneValidity.MotionSamples >= 2;
+        if (!continuingMotion) _peakChangedFraction = Math.Max(_peakChangedFraction, analysis.ChangedFraction);
+        if (continuingMotion && _processingRegion is not null) _motionDuringProcessing = true;
         TrackDisplayedBlocks(bitmap, frameRect, usedScreenFallback,
             sceneCut || analysis.StrongChangedFraction >= options.MotionThreshold, sampledAt, cancellationToken);
         var significant = analysis.SignificantFraction > options.ChangeThreshold;
@@ -1729,7 +1736,7 @@ public sealed class LiveTranslationSession(
             var outcome = outcomes[i];
             if (outcome.TranslatedText is not { } translated) continue;
 
-            if (covers is not null && _frameCapturedInMotion && !_displayed.ContainsKey(keyed[i].Key)
+            if (covers is not null && (_frameCapturedInMotion || _motionDuringProcessing) && !_displayed.ContainsKey(keyed[i].Key)
                 && !ConfirmStaticInMotion(i < covers.Count ? covers[i] : null))
             {
                 _pendingDirtyRegion = _pendingDirtyRegion?.Union(keyed[i].Block.Box) ?? keyed[i].Block.Box;

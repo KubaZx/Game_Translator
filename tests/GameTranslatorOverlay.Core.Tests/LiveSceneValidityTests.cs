@@ -176,4 +176,23 @@ public class LiveSceneValidityTests
         Assert.False(validity.IsCurrent(pendingEpoch));
         Assert.Equal(2, validity.MotionSamples);
     }
+
+    [Fact]
+    public void Ze_sledzeniem_trwajacy_ruch_nie_uniewaznia_a_pierwsza_duza_zmiana_tak()
+    {
+        var validity = CreateValidity();
+        var epoch = validity.Generation;
+
+        Assert.True(validity.Observe(Analysis(0.9, 0.5), hasPreviousFrame: true, tolerateMotion: true));
+        Assert.Equal(epoch + 1, validity.Generation);
+        var during = validity.Generation;
+
+        Assert.False(validity.Observe(Analysis(0.9, 0.5), hasPreviousFrame: true, tolerateMotion: true));
+        Assert.False(validity.Observe(Analysis(0.9, 0.5), hasPreviousFrame: true, tolerateMotion: true));
+        Assert.True(validity.IsCurrent(during));
+        Assert.Equal(3, validity.MotionSamples);
+
+        Assert.False(validity.Observe(Analysis(0.3, 0.2), hasPreviousFrame: true, tolerateMotion: true));
+        Assert.True(validity.IsCurrent(during));
+    }
 }

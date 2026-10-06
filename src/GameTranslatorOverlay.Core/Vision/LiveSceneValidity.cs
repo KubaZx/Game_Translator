@@ -10,7 +10,7 @@ public sealed class LiveSceneValidity(double sceneCutThreshold, double motionThr
     public long Generation { get; private set; }
     public int MotionSamples { get; private set; }
 
-    public bool Observe(NoiseAwareAnalysis analysis, bool hasPreviousFrame)
+    public bool Observe(NoiseAwareAnalysis analysis, bool hasPreviousFrame, bool tolerateMotion = false)
     {
         // The synthetic initial analysis describes a full frame, not a scene cut.
         if (!hasPreviousFrame)
@@ -21,6 +21,12 @@ public sealed class LiveSceneValidity(double sceneCutThreshold, double motionThr
 
         MotionSamples = analysis.StrongChangedFraction >= motionThreshold
             ? MotionSamples + 1 : 0;
+        if (tolerateMotion)
+        {
+            if (MotionSamples >= 2 || analysis.ChangedFraction < sceneCutThreshold) return false;
+            Generation++;
+            return true;
+        }
         if (analysis.ChangedFraction < sceneCutThreshold && MotionSamples < 2)
             return false;
 
