@@ -949,7 +949,14 @@ public sealed class LiveTranslationSession(
         var lost = new List<string>();
         foreach (var (key, block) in _displayed.ToList())
         {
-            if (block.Cover is not { Track: { } track } cover || IsIdentity(block)) continue;
+            if (IsIdentity(block)) continue;
+            if (block.Cover is not { Track: { } track } cover)
+            {
+                if (isMoving && !(_blockFingerprints.TryGetValue(key, out var reference) && reference.FrameRect == frameRect
+                        && reference.Image.Matches(ScreenCapture.ComputeTextFingerprint(bitmap, reference.SourceBox, ref _presenceRowBuffer))))
+                    lost.Add(key);
+                continue;
+            }
             var area = track.SearchArea(options.TrackMaxShiftPx).Intersect(frameRect);
             if (area.IsEmpty) continue;
             var region = ScreenCapture.CopyRegion(bitmap, area);
@@ -957,7 +964,7 @@ public sealed class LiveTranslationSession(
             var signatureArea = SignatureArea(block.WindowRelativeBox, block.LineHeight, frameRect);
             var signature = GlyphCoverBuilder.Signature(region, signatureArea.Offset(-area.X, -area.Y).Intersect(new RectPx(0, 0, region.Width, region.Height)));
             var fresh = !_tracks.TryGetValue(key, out var state) || !ReferenceEquals(state.Cover, cover);
-            if (!fresh && GlyphCover.SignatureDifference(state!.Signature, signature) < GlyphCoverBuilder.StaticSignatureTolerance)
+            if (!fresh && !isMoving && GlyphCover.SignatureDifference(state!.Signature, signature) < 1.5)
             {
                 _presentByTracking.Add(key);
                 continue;

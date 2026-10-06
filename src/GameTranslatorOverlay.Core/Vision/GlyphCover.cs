@@ -539,14 +539,41 @@ public static class GlyphCoverBuilder
     public static GlyphCover? BuildForBlock(
         OcrBitmap frame, GameTranslatorOverlay.Core.Text.TextBlock block, RectPx ocrRegion, double scaleBack, bool soft = false)
     {
-        var lines = block.Lines.Select(l => ToSampleBox(l.Box, ocrRegion, scaleBack)).ToList();
-        var texts = block.Lines.Count > 0 ? block.Lines.Select(static l => l.Text).ToList() : [block.Text];
-        var words = block.Lines.Count > 0
-            ? block.Lines.OrderBy(static l => l.Box.Y).First().Words
-                .Select(w => w with { Box = ToSampleBox(w.Box, ocrRegion, scaleBack) }).ToList()
+        var rows = Rows(block.Lines);
+        var lines = rows.Select(r => ToSampleBox(r.Box, ocrRegion, scaleBack)).ToList();
+        var texts = rows.Count > 0 ? rows.Select(static r => r.Text).ToList() : [block.Text];
+        var words = rows.Count > 0
+            ? rows[0].Words.Select(w => w with { Box = ToSampleBox(w.Box, ocrRegion, scaleBack) }).ToList()
             : null;
         return Build(frame, ToSampleBox(block.Box, ocrRegion, scaleBack), lines, texts, scaleBack, soft, words,
             new GlyphTrackMap(ocrRegion.X, ocrRegion.Y, scaleBack));
+    }
+
+    internal static List<(RectPx Box, string Text, List<OcrWord> Words)> Rows(IReadOnlyList<OcrLine> lines)
+    {
+        var rows = new List<(RectPx Box, List<OcrLine> Lines)>();
+        foreach (var line in lines.OrderBy(static l => l.Box.Y).ThenBy(static l => l.Box.X))
+        {
+            var index = rows.FindIndex(r =>
+            {
+                var overlap = Math.Min(r.Box.Bottom, line.Box.Bottom) - Math.Max(r.Box.Y, line.Box.Y);
+                return overlap >= Math.Max(1, Math.Min(r.Box.Height, line.Box.Height)) * 0.5;
+            });
+            if (index < 0) rows.Add((line.Box, [line]));
+            else
+            {
+                rows[index].Lines.Add(line);
+                rows[index] = (rows[index].Box.Union(line.Box), rows[index].Lines);
+            }
+        }
+        return rows
+            .OrderBy(static r => r.Box.Y)
+            .Select(static r =>
+            {
+                var ordered = r.Lines.OrderBy(static l => l.Box.X).ToList();
+                return (r.Box, string.Join(' ', ordered.Select(static l => l.Text)), ordered.SelectMany(static l => l.Words).ToList());
+            })
+            .ToList();
     }
 
     public static float[] Signature(OcrBitmap frame, RectPx region)

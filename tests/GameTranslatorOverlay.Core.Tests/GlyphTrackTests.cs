@@ -114,6 +114,28 @@ public class GlyphTrackTests
         Assert.True(cover.Track!.OriginX >= 1000);
     }
 
+    [Fact]
+    public void Ikona_i_slowo_jako_osobne_linie_ocr_daja_jeden_wiersz_i_wykryta_ikone()
+    {
+        var frame = Solid(Width, Height, 0x202830);
+        Paint(frame, Word(30, 70, capHeight: 40, stroke: 6, letters: 1), 0xF0F0F0);
+        Paint(frame, Word(110, 70, capHeight: 40, stroke: 6, letters: 4), 0xF0F0F0);
+        var icon = new RectPx(26, 66, 40, 48);
+        var word = new RectPx(106, 66, 200, 48);
+        var block = new GameTranslatorOverlay.Core.Text.TextBlock("X Hint", icon.Union(word),
+        [
+            new OcrLine("Hint", word.Offset(0, -2), [new OcrWord("Hint", word.Offset(0, -2))]),
+            new OcrLine("X", icon, [new OcrWord("X", icon)]),
+        ]);
+
+        var cover = GlyphCoverBuilder.BuildForBlock(frame, block, new RectPx(0, 0, Width, Height), 1.0);
+
+        Assert.NotNull(cover);
+        Assert.Single(cover.Lines);
+        Assert.Equal("X", cover.IconToken);
+        Assert.True(cover.IconSkipPx > 0);
+    }
+
     private static OcrBitmap Scene(int seed, int x, int y, int background = -1)
     {
         var frame = background >= 0 ? Solid(Width, Height, background) : Background(seed);
