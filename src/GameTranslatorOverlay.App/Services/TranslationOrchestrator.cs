@@ -475,6 +475,8 @@ public sealed class TranslationOrchestrator(
 
     public string SourceLanguage => settings.SourceLanguage;
 
+    public bool HasCorpus => Volatile.Read(ref _pipelineState)?.Pipeline.HasCorpus == true;
+
     public bool IsExactCorpusText(string text) =>
         Volatile.Read(ref _pipelineState)?.Pipeline.IsExactCorpusText(text) == true;
 

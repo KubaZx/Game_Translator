@@ -167,6 +167,8 @@ public sealed class LiveSessionOptions
     public double MotionFps { get; init; } = 10;
 
     public TimeSpan TrackedMotionPause { get; init; } = TimeSpan.FromMilliseconds(900);
+
+    public bool ConfirmUnknownReadings { get; init; } = true;
 }
 
 /// <summary>
@@ -218,6 +220,8 @@ public sealed class LiveTranslationSession(
     private bool _frameCapturedInMotion;
 
     private bool _motionDuringProcessing;
+    private readonly Dictionary<string, TimeSpan> _firstReadings = new(StringComparer.Ordinal);
+    private static readonly TimeSpan FirstReadingLifetime = TimeSpan.FromSeconds(5);
 
     private bool TracksBlocks => options.TrackCoveredBlocks && options.BuildGlyphCovers();
 
@@ -380,6 +384,20 @@ public sealed class LiveTranslationSession(
                 SameAsSource = IsIdentity(kv.Value),
             })
             .ToList();
+
+    private bool AwaitsSecondReading(KeyedTextBlock candidate)
+    {
+        if (!options.ConfirmUnknownReadings || !orchestrator.HasCorpus) return false;
+        if (orchestrator.CorpusIdentity(candidate.NormalizedText) is not null || orchestrator.IsExactCorpusText(candidate.NormalizedText))
+            return false;
+        foreach (var expired in _firstReadings.Where(r => _cycleTime - r.Value > FirstReadingLifetime).Select(r => r.Key).ToList())
+            _firstReadings.Remove(expired);
+        if (_firstReadings.Remove(candidate.NormalizedText)) return false;
+        _firstReadings[candidate.NormalizedText] = _cycleTime;
+        _readingRetryRequested = true;
+        _pendingDirtyRegion = _pendingDirtyRegion?.Union(candidate.Block.Box) ?? candidate.Block.Box;
+        return true;
+    }
 
     private bool HoldsTypingPrefix(KeyedTextBlock candidate)
     {
@@ -1515,6 +1533,7 @@ public sealed class LiveTranslationSession(
                     _ghosts.Remove(g.Key);
                     inheritFrom[candidate.Key] = g.Block;
                 }
+                if (AwaitsSecondReading(candidate)) continue;
                 accepted.Add(candidate);
                 continue;
             }

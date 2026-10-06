@@ -369,6 +369,8 @@ public sealed class TranslationPipeline(
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
+    public bool HasCorpus => options.Corpus is { Index.IsEmpty: false };
+
     public bool IsExactCorpusText(string text)
     {
         if (options.Corpus is not { Index.IsEmpty: false } corpus || string.IsNullOrWhiteSpace(text)) return false;

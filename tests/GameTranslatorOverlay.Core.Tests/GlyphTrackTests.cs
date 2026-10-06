@@ -136,6 +136,21 @@ public class GlyphTrackTests
         Assert.True(cover.IconSkipPx > 0);
     }
 
+    [Fact]
+    public void Ciemny_napis_bez_obrysu_nie_pasuje_do_jednolitej_czerni()
+    {
+        var paper = Solid(Width, Height, 0xD8D0C0);
+        Paint(paper, Word(60, 70, capHeight: 40, stroke: 6), 0x202020);
+        var box = new RectPx(56, 66, 210, 50);
+        var cover = GlyphCoverBuilder.Build(paper, box, [box], ["Hill"])!;
+        Assert.True(Math.Abs(cover.Track!.TemplateContrast) > 60);
+
+        var black = Solid(Width, Height, 0x0A0A0A);
+        var match = GlyphTracker.Locate(cover.Track, black, 0, 0, 72);
+
+        Assert.True(match is null || !match.Value.IsConfident, $"koszt {match?.Cost:F1}, kontrast {match?.LocalContrast:F1}");
+    }
+
     private static OcrBitmap Scene(int seed, int x, int y, int background = -1)
     {
         var frame = background >= 0 ? Solid(Width, Height, background) : Background(seed);

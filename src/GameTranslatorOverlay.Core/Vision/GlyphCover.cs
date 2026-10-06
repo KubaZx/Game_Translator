@@ -433,6 +433,24 @@ public static class GlyphCoverBuilder
             }
         }
         var level = glyphCount > 0 ? (float)(contrastSum / glyphCount) : 30f;
+        var glyphPoints = chosen.Where(i => glyph[i]).ToArray();
+        var outlinePoints = chosen.Where(i => outline[i] && !glyph[i]).ToArray();
+        int[] partners;
+        if (outlinePoints.Length >= Math.Max(8, glyphPoints.Length * 0.3))
+        {
+            partners = outlinePoints;
+        }
+        else
+        {
+            var around = Morphology.Dilate(mask, width, height, 2);
+            var ring = new List<int>();
+            for (var i = 0; i < around.Length; i++)
+                if (around[i] && !mask[i] && inRegion[i]) ring.Add(i);
+            partners = ring.ToArray();
+        }
+        float templateContrast = 0;
+        if (glyphPoints.Length > 0 && partners.Length > 0)
+            templateContrast = (float)(glyphPoints.Average(i => work.L[i]) - partners.Average(i => work.L[i]));
         return new GlyphTrack(
             map.OriginX + outer.X * map.Scale,
             map.OriginY + outer.Y * map.Scale,
@@ -447,7 +465,10 @@ public static class GlyphCoverBuilder
             skipRight,
             chosen.ToArray(),
             values,
-            level);
+            level,
+            glyphPoints,
+            partners,
+            templateContrast);
     }
 
     public static GlyphCover? Refill(GlyphCover cover, OcrBitmap region, int regionX, int regionY, int workDx = 0, int workDy = 0, bool? soft = null)
