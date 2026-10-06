@@ -169,6 +169,8 @@ public sealed class LiveSessionOptions
     public TimeSpan TrackedMotionPause { get; init; } = TimeSpan.FromMilliseconds(900);
 
     public bool ConfirmUnknownReadings { get; init; } = true;
+
+    public IReadOnlyList<GameTranslatorOverlay.Core.Profiles.RelativeRegion> IgnoreRegions { get; init; } = [];
 }
 
 /// <summary>
@@ -1426,6 +1428,16 @@ public sealed class LiveTranslationSession(
                     line.Box.Offset(ocrRegion.X, ocrRegion.Y),
                     line.Words.Select(w => new OcrWord(w.Text, w.Box.Offset(ocrRegion.X, ocrRegion.Y))).ToList()))
                 .ToList();
+        }
+
+        if (options.IgnoreRegions.Count > 0 && capturedFrameRect.Width > 0 && capturedFrameRect.Height > 0)
+        {
+            lines = lines.Where(line =>
+            {
+                var relativeX = (line.Box.X + line.Box.Width / 2.0) / capturedFrameRect.Width;
+                var relativeY = (line.Box.Y + line.Box.Height / 2.0) / capturedFrameRect.Height;
+                return !options.IgnoreRegions.Any(region => region.Contains(relativeX, relativeY));
+            }).ToList();
         }
 
         // Komunikat nakładki odfiltrowujemy już na poziomie linii: zgrupowany z tekstem gry

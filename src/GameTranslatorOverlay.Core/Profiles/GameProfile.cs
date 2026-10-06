@@ -21,11 +21,30 @@ public sealed class GameProfile
     public bool? Online { get; set; }
     public CorpusRecipe? Corpus { get; set; }
     public OverlayProfileSettings? Overlay { get; set; }
+    public LiveProfileSettings? Live { get; set; }
 }
 
 public sealed class OverlayProfileSettings
 {
     public string? FontFamily { get; set; }
+}
+
+public sealed class LiveProfileSettings
+{
+    public List<RelativeRegion>? IgnoreRegions { get; set; }
+}
+
+public sealed class RelativeRegion
+{
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+
+    public bool IsValid => X >= 0 && Y >= 0 && Width > 0 && Height > 0 && X + Width <= 1.0001 && Y + Height <= 1.0001;
+
+    public bool Contains(double relativeX, double relativeY) =>
+        relativeX >= X && relativeX <= X + Width && relativeY >= Y && relativeY <= Y + Height;
 }
 
 public sealed class OcrProfileSettings
@@ -108,6 +127,10 @@ public static class ProfileValidator
             && (fontFamily.Trim().Length is 0 or > 64 || fontFamily.IndexOfAny(['\\', '/', ':', '#', '*', '?', '"', '<', '>', '|']) >= 0))
         {
             errors.Add("Pole overlay.fontFamily musi być nazwą kroju (do 64 znaków, bez ścieżki).");
+        }
+        if (profile.Live?.IgnoreRegions is { } regions && regions.Any(static r => r is null || !r.IsValid))
+        {
+            errors.Add("Każdy obszar live.ignoreRegions musi mieć x, y, width, height w ułamkach okna (0–1, dodatnie wymiary, w granicach okna).");
         }
         if (profile.Corpus is { } corpus)
         {

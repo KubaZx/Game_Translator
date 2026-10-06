@@ -11,6 +11,11 @@
   "overlay": {
     "fontFamily": "Lexend Deca"
   },
+  "live": {
+    "ignoreRegions": [
+      { "x": 0.425, "y": 0.0, "width": 0.15, "height": 0.08 }
+    ]
+  },
   "corpus": {
     "format": "unity-textasset",
     "container": "Escape Academy_Data/data.unity3d",

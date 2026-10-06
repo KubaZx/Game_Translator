@@ -190,6 +190,7 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
                 HoldTypingPrefixes = () => settings.OverlayPlacement == "cover" && settings.LiveDisplayMode != "subtitle",
                 IdentityEchoSafe = () => (OverlayBlockRenderer.HidesIdenticalText(settings) && settings.LiveDisplayMode != "subtitle")
                     || _host.Window.IsCaptureExclusionActive,
+                IgnoreRegions = profile?.Live?.IgnoreRegions ?? [],
                 EnableDiagnostics = true,
             };
             header = new ReplayHeaderDto(recording.Directory, recording.Name, _frameCount, recording.Width, recording.Height,
