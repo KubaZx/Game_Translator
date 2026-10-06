@@ -216,6 +216,8 @@ Dotyczy od: Etap 6.
 zostaje nad grą po Alt+Tab i powrocie. W exclusive fullscreen capture/nakładka mogą nie
 działać — to **udokumentowane ograniczenie**; aplikacja ma to komunikować czytelnie
 (sugestia przełączenia na borderless), a nie crashować czy pokazywać czarny obraz bez słowa.
+Od 0.5.0 tryb live ostrzega, gdy okno gry zajmuje cały monitor i nie daje się przechwycić jako
+okno (komunikat w nakładce i status) — scenariusz M40.
 
 **Logi i zgłoszenie:** w logu szukaj wyniku capture (pusta/czarna bitmapa → wpis).
 W zgłoszeniu koniecznie podaj dokładny tryb wyświetlania z ustawień gry.
@@ -822,3 +824,168 @@ odznacz/zaznacz „Komunikaty w nakładce”. Potem zmień dostawcę na inny i z
 **Oczekiwany wynik:** zmiany wyglądu dają status „Wygląd zapisany.”, nie przerywają tłumaczenia
 w locie, a kolejne kwestie trzymają się wcześniejszych form (pamięć dialogu zostaje). Zmiana
 dostawcy daje „Ustawienia zapisane…” i zaczyna pamięć od nowa.
+
+## M36 — Stary napis znika razem z oryginałem (0.5.0)
+
+Automatycznie sprawdzone tylko w SceneReplay (`stale-*`, własne okno, callbacki sesji) —
+w grze na żywo jeszcze nie. Najlepiej Escape Academy (etykieta „Inspect” → „Zbadaj”), ale
+wystarczy dowolna gra z etykietami, które pojawiają się i znikają lokalnie.
+
+**Kroki:**
+1. Uruchom live w trybie „Przy oryginale”; podejdź do przedmiotu, aż pojawi się etykieta
+   („E Inspect”), i poczekaj na tłumaczenie.
+2. Odejdź albo obróć kamerę tak, żeby etykieta zniknęła — raz nad ciemnym, gładkim tłem, raz
+   nad teksturą albo jasnym fragmentem sceny.
+3. Powtórz krok 2, gdy w innym miejscu ekranu coś ciągle się rusza (postać, animowane tło).
+4. Najedź na pozycję menu, która przy najechaniu zmienia kolor; zostaw na ekranie napis, który
+   pulsuje albo przygasa.
+5. Spraw, żeby etykieta zniknęła i wróciła w ciągu 10 s; powtórz przy „Wyświetlanie: Napisy na
+   dole”, także gdy na pasku jest jeszcze inna linia.
+6. Spraw, żeby w miejscu zniknętego napisu pojawił się inny, z wielokropkiem, cyfrą albo
+   znakiem (np. „Loading…”).
+7. Powtórz krok 2 po ręcznym ukryciu `Ctrl+Shift+H` oraz po Stop i ponownym starcie live.
+
+**Oczekiwany wynik:** gdy w miejscu napisu nie zostaje nic jasnego jak on, tłumaczenie znika
+razem z oryginałem (w SceneReplay po 0,3–0,55 s) i nie wraca przy kolejnych odczytach. Gdy w
+polu zostaje coś jasnego, tłumaczenie znika po kilku przebiegach OCR, także przy ruchu w innym
+miejscu ekranu (pełny odczyt ekranu przychodzi co 4 s), zamiast wisieć. Napis, który zmienia
+kolor albo przygasa, a OCR nadal go czyta, zachowuje tłumaczenie i nie miga; wyjątek: napis
+przygaszony poniżej ćwierci dawnej jasności może raz zniknąć na ok. 0,6 s. Śmieciowy odczyt
+nad napisem, który nadal stoi, go nie zdejmuje. Na pasku napisów tłumaczenie znika razem
+z napisem w grze i wraca, gdy napis wróci w ciągu 10 s; gdy pasek pokazuje inne linie, powrót
+nie wydłuża jego czasu. Nowy napis w miejscu poprzedniego dostaje własne tłumaczenie, a stare
+nie wraca; gdy zniknięcia poprzedniego nie widać w pikselach, nowy napis może czekać do 10 s.
+Automatyczne usunięcie nie cofa ręcznego ukrycia i nie przechodzi do nowej sesji. Porównanie
+z teksturą tła działa tylko przy przechwytywaniu okna — przy zapasowym zrzucie ekranu tłumaczenie
+na teksturowanym tle znika dopiero po kilku przebiegach OCR bez napisu (na jednolitym tle —
+jak dotąd — już w pierwszym przebiegu OCR bez napisu). W zgłoszeniu zapisz osobno chwilę
+zniknięcia oryginału i tłumaczenia (najlepiej nagranie ekranu) oraz rodzaj tła w polu napisu.
+
+## M37 — Korpus Escape Academy: extract, translate i wczytanie (0.5.0)
+
+Dotyczy tylko gier z receptą `corpus` w profilu (dziś `escape-academy`). Polecenia
+z katalogu głównego repozytorium; zasady: [README CorpusTool](../tools/GameTranslatorOverlay.CorpusTool/README.md).
+
+**Kroki:**
+1. Zamknij grę i uruchom:
+   `dotnet run --project tools/GameTranslatorOverlay.CorpusTool -c Release -- extract --profile escape-academy --game-dir "<folder instalacji gry>"`.
+2. Uruchom grę i powtórz krok 1; zamknij grę i powtórz krok 1 z `--out` wskazującym plik
+   w folderze gry.
+3. `… translate --profile escape-academy --provider llm --dry-run` (albo `--provider deepl`).
+4. (Opcjonalnie — płatne, decyzja gracza.) Prawdziwy `translate` z kluczem w zmiennej
+   środowiskowej (`GTO_DEEPL_KEY` albo `GTO_LLM_ENDPOINT` + `GTO_LLM_MODEL` + `GTO_LLM_KEY`),
+   potem to samo polecenie drugi raz.
+5. Włącz w aplikacji tryb prywatny, zamknij ją i uruchom `translate` bez `--dry-run`.
+6. Wyłącz tryb prywatny, uruchom aplikację ponownie z profilem Escape Academy (wybranym albo
+   wykrytym automatycznie) i otwórz najnowszy log.
+7. Live w Escape Academy: etykiety, dialogi i napisy; obserwuj licznik zapytań API w oknie.
+8. Zaznacz okno gry na liście, potem ustaw „brak profilu” i uruchom live przyciskiem (skrót
+   live i kliknięcie okna gry na liście włączają profil gry z powrotem); potem przywróć profil,
+   zmień nazwę pliku korpusu i uruchom aplikację ponownie.
+
+**Oczekiwany wynik:** `extract` kończy się kodem 0 i zapisuje
+`%LOCALAPPDATA%\GameTranslatorOverlay\corpus\escape-academy.corpus.jsonl`; w folderze gry nic
+nie przybywa ani się nie zmienia. Przy działającej grze — odmowa (kod 3), zanim narzędzie
+otworzy którykolwiek plik gry; przy `--out` w folderze gry — odmowa (kod 3) bez odczytu
+tekstów i bez zapisu. `--dry-run` działa bez kluczy, podaje liczbę tekstów, znaków i partii
+oraz szacunek kosztu (zasady w README narzędzia; dla `llm` kwota w USD tylko przy adresie
+DeepSeek albo serwera lokalnego w `GTO_LLM_ENDPOINT` lub z `--price-in` / `--price-out` —
+inaczej same tokeny) i kończy się „Przebieg próbny: nic nie wysłano i nic nie zapisano.”. Drugi
+prawdziwy przebieg: „Nie ma nic do tłumaczenia.”. Tryb prywatny: odmowa (kod 3) przed
+wysłaniem czegokolwiek. W logu aplikacji: „Korpus profilu escape-academy: … wpisów, …
+tekstów”; po zapisaniu ustawień, które przebudowują pipeline, status „Ustawienia zapisane (…)”
+zawiera „korpus: N tekstów”. W grze znane teksty — także odczytane z pomyłkami OCR
+(„Ihspect”) — dostają tłumaczenie z korpusu, a po `translate` bez nowych zapytań do
+dostawcy; klawisz obok etykiety zostaje („E Inspect” → „E Zbadaj”); śmieci z ikon i tekstur
+nie idą do dostawcy ani na nakładkę (oryginał zostaje widoczny). Bez profilu albo bez pliku
+korpusu tłumaczenie działa bez korpusu, jak przed 0.5.0 (bez przyciągania odczytów i bez
+odrzucania śmieci przez korpus). Znane ograniczenia: w trybie prywatnym przyciąganie
+działa, ale wpisy z wyprzedzeniem z bazy na dysku nie są czytane; po nowym `extract`/`translate`
+trzeba uruchomić aplikację ponownie.
+
+## M38 — Wygląd napisów „Na oryginale (zakrywa)” w grze (0.5.0)
+
+Sprawdzone dotąd tylko na klatkach 4K przez OverlayPreview i w SceneReplay — nie w oknie gry.
+
+**Kroki:**
+1. Ustaw „Położenie dymków: Na oryginale (zakrywa)”, „Wyświetlanie: Przy oryginale”, „Krój
+   czcionki: Jak w grze (krój z profilu)”, profil Escape Academy; uruchom live.
+2. Menu główne: kilka pozycji menu, wyśrodkowany baner, wybór języka z ikonką ✓, podpowiedź
+   z ikoną klawisza („X Hint”).
+3. Pokój: etykieta „E Inspect”, dłuższa kwestia dialogu, napisy, których tłumaczenie jest
+   takie samo jak oryginał (nazwy, „OK”).
+4. Obróć kamerę tak, żeby tło pod napisem się ruszało, potem zatrzymaj.
+5. Zmień krój na Segoe UI i z powrotem; potem gra, której profil nie ma pola
+   `overlay.fontFamily`, albo „brak profilu” (najpierw zaznacz okno gry na liście, potem ustaw
+   „brak profilu” i uruchom live przyciskiem — skrót live i kliknięcie okna włączają profil).
+6. Uruchom aplikację ze starym `settings.json`, w którym `overlayFontFamily` ma wartość
+   `"Segoe UI"`, a pola `overlayFontRevision` nie ma.
+7. Ustaw „Położenie dymków: Pod oryginałem”, potem z powrotem „Na oryginale (zakrywa)”
+   i „Wyświetlanie: Napisy na dole”.
+8. Powtórz kroki 2–3 przy innej skali DPI albo na innym monitorze.
+
+**Oczekiwany wynik:** z obrazu znikają same litery oryginału — tło wokół nich zostaje żywe,
+bez ciemnego prostokąta, plamy ani smugi. Polski tekst ma zbliżoną wysokość liter (na
+klatkach 4K 0,96–1,10× oryginału), stoi na tej samej linii bazowej, ma kolor, kontur i cień
+jak napis gry, krój Lexend Deca. Pozycje menu w jednym stylu mają tę samą grubość liter;
+wyśrodkowany baner zostaje na środku. Ikona klawisza i ✓ zostają widoczne, a odczytana z nich
+litera nie trafia do tłumaczenia („X Hint” → ikona X + „Podpowiedź”). Tłumaczenie identyczne
+z oryginałem nie jest rysowane (widać grę) i nie miga. Dłuższy polski tekst w dialogu najpierw
+lekko się zmniejsza (najwyżej do 85%), potem łamie w szerokości oryginału; pojedyncza etykieta
+może wejść w wolne miejsce obok i nie wychodzi poza monitor. Przy ruchu tła łatka jest miękka,
+po zatrzymaniu ostra; pojawienie się albo zniknięcie łatki nie powtarza płynnego pojawiania
+się napisu. Bez kroju w profilu — Segoe UI. Stary plik ustawień przechodzi raz na „Jak w grze
+(krój z profilu)”; ponownie wybrany Segoe UI zostaje. W trybach „Pod oryginałem” i „Napisy na
+dole” łatka z wypełnionymi literami nie jest budowana. Znane ograniczenia (opisz, jeśli
+przeszkadzają): kursywa, kerning i szerokość kroju gry nie są odwzorowane, napis szeryfowy
+dostaje Lexend Deca, na ruchomym tle wypełnione litery mogą odstawać od tła do następnego
+odczytu, przy przycisku z ramką dłuższy tekst może wyjść za ramkę. Do zgłoszenia dołącz zrzut
+fragmentu z nakładką i podaj rozdzielczość oraz skalę DPI.
+
+## M39 — Kwestia pisana literami w trybie zakrywania (0.5.0)
+
+**Warunki wstępne:** korpus Escape Academy (M37), najlepiej przetłumaczony z wyprzedzeniem;
+ustawienia jak w M38, krok 1.
+
+**Kroki:**
+1. Wywołaj kwestię dialogu, którą gra wpisuje litera po literze; obserwuj napis w trakcie
+   pisania i po jego końcu.
+2. Powtórz dla kilku kwestii, także dwuwierszowych i z pauzą po przecinku lub kropce.
+3. Obserwuj licznik zapytań API.
+4. Ustaw „Pod oryginałem” i powtórz krok 1.
+5. Zmień nazwę pliku korpusu, uruchom aplikację ponownie i powtórz krok 1.
+
+**Oczekiwany wynik:** w trakcie pisania widać angielski tekst gry — bez polskiego tekstu na
+dopisywanych angielskich literach i bez niepełnego tłumaczenia początku kwestii. Po końcu
+pisania od razu pojawia się całe polskie tłumaczenie: gdy odczyt jest całą linią korpusu —
+w najbliższym przebiegu, inaczej gdy liczba liter nie rośnie przez 0,9 s (w SceneReplay
+ok. 0,1–0,3 s po ostatniej literze); najpóźniej po 8 s od pierwszego odczytu tłumaczenie pojawia
+się nawet w trakcie pisania. Z korpusem przetłumaczonym z wyprzedzeniem kwestie nie dodają
+zapytań; bez tego zwykle jedno zapytanie na kwestię (klucz to pełna linia). „Pod oryginałem”:
+pełne tłumaczenie pojawia się już od początku kwestii (bez wstrzymania). Bez korpusu —
+zachowanie jak przed 0.5.0 (M29, krok 5). Znane ograniczenie: przy pauzie w środku kwestii
+dłuższej niż 0,9 s tłumaczenie pojawi się w tej pauzie, a dopisane potem litery wyjdą spod
+łatki do następnego odczytu.
+
+## M40 — Komunikat o pełnym ekranie (0.5.0)
+
+**Kroki:**
+1. Gra w trybie wyłącznego pełnego ekranu (exclusive fullscreen); uruchom live (przyciskiem
+   albo `Ctrl+Shift+L`).
+2. Zatrzymaj live i uruchom je ponownie.
+3. Przełącz grę na okno bez ramki i uruchom live.
+4. Gra w zwykłym oknie mniejszym niż monitor.
+5. Odznacz „Komunikaty w nakładce” i powtórz krok 1.
+
+**Oczekiwany wynik:** gdy okna gry nie da się przechwycić jako okna (PrintWindow) i zakrywa
+ono cały monitor, nakładka raz na sesję live pokazuje „⚠ Pełny ekran utrudnia nakładkę —
+przełącz na okno bez ramki” na ok. 8 s, status okna aplikacji zaczyna się od „⚠ Przełącz grę
+na okno bez ramki — pełny ekran utrudnia nakładkę.”, a log ma ostrzeżenie „Gra zajmuje cały
+monitor i nie wspiera PrintWindow — zalecany tryb okna bez ramki”. Po ponownym starcie live
+komunikat może pojawić się znowu. Komunikat nie wraca jako przetłumaczony napis. W oknie bez
+ramki, które daje się przechwycić — brak komunikatu. Okno mniejsze niż monitor bez PrintWindow:
+tylko dotychczasowy status „⚠ To okno wymaga przechwytywania ekranu…”, bez komunikatu
+w nakładce. Bez „Komunikaty w nakładce” — tylko status w oknie aplikacji. Jeśli w wyłącznym
+pełnym ekranie nakładki w ogóle nie widać nad grą (M09), sprawdź status i log i zapisz to
+w zgłoszeniu. Znane ograniczenie: okno bez ramki zakrywające cały monitor, którego nie da się
+przechwycić jako okna, też dostaje ten komunikat.

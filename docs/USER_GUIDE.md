@@ -2,11 +2,30 @@
 
 GameTranslatorOverlay tłumaczy na żywo angielski tekst z gier na polski. Działa jak
 zewnętrzna nakładka: przechwytuje obraz, rozpoznaje tekst systemowym OCR Windows
-i wyświetla tłumaczenie nad grą — **nie dotykając plików ani procesu gry**.
+i wyświetla tłumaczenie nad grą — **nie dotykając plików ani procesu gry**. Pliki gry
+(tylko do odczytu, przy wyłączonej grze) może czytać wyłącznie osobne, opcjonalne narzędzie
+`CorpusTool`, które uruchamiasz sam — patrz [Spolszczenie z wyprzedzeniem](#spolszczenie-z-wyprzedzeniem-korpus-gry).
 
 Projekt jest przeznaczony do różnych gier; nie wymaga profilu konkretnego tytułu.
-Instrukcja opisuje wydanie 0.4.0 — szczegóły w
+Instrukcja opisuje wydanie 0.5.0 — szczegóły w
 [historii zmian](https://github.com/KubaZx/Game_Translator/blob/main/CHANGELOG.md).
+
+**Nowe w 0.5.0** (w skrócie):
+
+- tryb **Na oryginale (zakrywa)** wygląda jak napis gry: znikają same litery oryginału, a polski
+  tekst dostaje kolor, kontur, cień i wielkość napisu gry, krój **Jak w grze (krój z profilu)** —
+  [opis](#tryb-na-oryginale-zakrywa--napis-jak-w-grze),
+- tłumaczenie znika razem z napisem w grze, także na teksturowanym tle i z paska napisów,
+- **korpus gry**: teksty gry przetłumaczone z wyprzedzeniem, dopasowanie odczytów z błędami OCR,
+  a w trybie zakrywania kwestia pisana literami czeka na koniec pisania (dziś dla Escape Academy) —
+  [opis](#spolszczenie-z-wyprzedzeniem-korpus-gry),
+- przycisk **DeepSeek** przy modelu językowym (model bez „myślenia”) i komunikat
+  „⚠ Pełny ekran utrudnia nakładkę — przełącz na okno bez ramki”.
+
+Nowego wyglądu, dopasowania etykiet, odrzucania śmieci OCR i czekania na koniec kwestii nikt
+jeszcze nie sprawdzał w grze na żywo: wygląd sprawdzono na klatkach 4K z Escape Academy (narzędzie
+OverlayPreview), a zachowanie w powtórkach syntetycznych (SceneReplay, CorpusEval). Uwagi z gry
+zgłaszaj według [ostatniej sekcji](#jak-zgłosić-problem-jakości).
 
 ## Instalacja
 
@@ -83,6 +102,13 @@ klucz ponownie. Mały model
 lokalny tłumaczy wolniej i słabiej niż usługi w chmurze — sprawdza się najlepiej
 w trybie ręcznym i przy dialogach.
 
+Obok pola **Adres serwera** są przyciski **OpenAI**, **DeepSeek**, **Ollama** i **LM Studio**.
+**DeepSeek** (usługa w chmurze, potrzebny klucz) wpisuje adres `https://api.deepseek.com/v1`,
+model `deepseek-flash` i wyłącza „myślenie” modelu — bez tego model zawsze najpierw rozumował,
+a paczka 5 linii trwała 7–20 s. **Ollama** wyłącza rozumowanie modelu (`reasoning_effort: none`).
+Takie opcje obowiązują tylko dla serwera, dla którego je zapisano; widać je w statusie klucza
+(„Opcje serwera: thinking=disabled.”) i w wyniku **Testuj** („…, opcje serwera: …”).
+
 ### Claude
 
 Domyślnym modelem jest `claude-opus-5-5`; w polu **Model** możesz wybrać tańszy
@@ -118,8 +144,12 @@ nie są nadpisywane; w Cache-only i przy błędzie dostawcy zostaje stary wynik.
    zwykle „Borderless”, „Windowed fullscreen” albo „Pełny ekran w oknie”). Na wyłącznym pełnym
    ekranie gra często nie daje się przechwycić jako okno — aplikacja przechodzi wtedy na zrzut
    ekranu (w kadrze mogą się znaleźć inne okna), a nakładka może migać albo chować się pod grą.
-   Gdy tak się stanie, w nakładce pojawi się komunikat „⚠ Pełny ekran utrudnia nakładkę —
-   przełącz na okno bez ramki”.
+   W trybie live, gdy okna gry nie da się przechwycić, a gra zajmuje cały monitor, w nakładce
+   (przy włączonych **Komunikatach w nakładce**) pojawi się raz na sesję (na 8 s) komunikat „⚠ Pełny ekran utrudnia nakładkę — przełącz na okno
+   bez ramki”, a w oknie aplikacji „⚠ Przełącz grę na okno bez ramki — pełny ekran utrudnia
+   nakładkę.”. Aplikacja nie odróżnia jeszcze wyłącznego pełnego ekranu od okna bez ramki na cały
+   monitor — jeśli gra już działa bez ramki, komunikat znaczy tylko, że live czyta zrzut ekranu
+   (patrz [Uwaga o prywatności w trybie live](#uwaga-o-prywatności-w-trybie-live)).
 2. Wciśnij **Ctrl+Shift+T** — ekran przyciemni się; zaznacz myszą fragment z tekstem
    (tooltip, dialog). **Esc** albo ponowne **Ctrl+Shift+T** anuluje zaznaczanie.
 3. Tłumaczenie pojawi się w panelu obok zaznaczenia (albo w nakładce — do wyboru
@@ -138,13 +168,18 @@ W panelu wyniku możesz:
 2. Program obserwuje okno kilka razy na sekundę; gdy pojawi się nowy, stabilny tekst,
    tłumaczy go automatycznie i pokazuje w nakładce.
 3. „Wyświetlanie” wybiera układ: **Przy oryginale** (dymki przy tekście) albo
-   **Napisy na dole** (pasek jak napisy filmowe — najlepszy do dialogów).
+   **Napisy na dole** (pasek jak napisy filmowe — najlepszy do dialogów). Przy oryginale
+   pole **Położenie dymków** decyduje, czy tłumaczenie stoi **Pod oryginałem**, czy
+   **Na oryginale (zakrywa)** — w miejscu napisu gry
+   ([opis niżej](#tryb-na-oryginale-zakrywa--napis-jak-w-grze)).
 4. **⏹ Stop** (albo ponownie **Ctrl+Shift+L**) kończy tryb live. Minimalizacja gry chowa
    nakładkę automatycznie.
 
 Jeżeli aplikacja rozpozna dostarczony profil, może dobrać go do wybranego okna.
 Pozostałe gry działają na ustawieniach ogólnych. Profil PoE2 w zestawie jest
-opcjonalnym dodatkiem ze słownikiem terminów.
+opcjonalnym dodatkiem ze słownikiem terminów. Profil Escape Academy rozpoznaje grę po nazwie
+procesu (`Escape Academy.exe`; bez zmiany ustawień OCR), wskazuje krój napisów (Lexend Deca)
+i zawiera receptę korpusu dla narzędzia `CorpusTool`; samej recepty aplikacja nie używa.
 
 ### Start i stop live skrótem (Ctrl+Shift+L)
 
@@ -183,13 +218,28 @@ Ograniczenia:
 
 W trakcie gry okno aplikacji jest zwykle schowane, więc ważne zdarzenia pokazują się jako
 krótki, półprzezroczysty pasek wyśrodkowany przy górnej krawędzi okna gry. Pasek znika po
-3–5 s i nie przyjmuje kliknięć. Przykłady:
+3–5 s (komunikat o pełnym ekranie po 8 s) i nie przyjmuje kliknięć. W tabeli „DeepL”
+i „Claude” stoją za nazwą wybranego dostawcy; pełny opis błędu jest w oknie aplikacji.
 
-- „⚠ Brak klucza DeepL”, „⚠ Klucz DeepL został odrzucony”, „⚠ Limit znaków DeepL wyczerpany”,
-- „⏳ DeepL ogranicza zapytania”, „⚠ Brak połączenia z dostawcą”,
-  „⚠ Limit znaków tej sesji wyczerpany”, „⚠ DeepL zwrócił pusty wynik”,
-- „Cache-only: 5 tekstów bez tłumaczenia”, „⚠ Cache niedostępny — tłumaczenia nie są zapisywane”,
-- „▶ Tłumaczenie na żywo włączone”, „■ Tłumaczenie na żywo zatrzymane”.
+| Komunikat w nakładce | Co znaczy | Co zrobić |
+|---|---|---|
+| „▶ Tłumaczenie na żywo włączone”, „■ Tłumaczenie na żywo zatrzymane” | start i stop trybu live | — |
+| „⚠ Brak klucza DeepL” | dostawca nie ma zapisanego klucza | wpisz klucz, **Zapisz klucz**, **Testuj** |
+| „⚠ Klucz DeepL został odrzucony” | dostawca odrzucił klucz | sprawdź klucz ([Rozwiązywanie problemów](#rozwiązywanie-problemów)) |
+| „⚠ Limit znaków DeepL wyczerpany” | wyczerpany limit konta u dostawcy | zmień dostawcę albo włącz Cache-only |
+| „⏳ DeepL ogranicza zapytania”, „⏳ DeepL nie odpowiada na czas” | dostawca chwilowo dławi zapytania albo odpowiada za wolno | zwykle mija samo; gdy się powtarza, sprawdź połączenie |
+| „⚠ Brak połączenia z dostawcą”, „⚠ DeepL chwilowo niedostępny” | brak sieci, serwer nieosiągalny albo awaria usługi | sprawdź internet; lokalny model — uruchom jego serwer |
+| „⚠ Model Claude niedostępny — sprawdź ustawienia”, „⚠ Ustawienia DeepL są niepełne” | zła nazwa modelu albo brak adresu, modelu lub regionu | popraw pola dostawcy w oknie aplikacji |
+| „⚠ Claude odmówił tłumaczenia fragmentu” | filtr treści dostawcy | inny model albo dostawca dla tego fragmentu |
+| „⚠ Tekst za długi dla DeepL”, „⚠ DeepL odrzucił zapytanie” | dostawca nie przyjął tekstu | zaznacz mniejszy fragment (**Ctrl+Shift+T**); szczegóły w logu |
+| „⚠ DeepL zwrócił pusty wynik” | pusty wynik dostawcy (zostaje oryginał) | [Kontrola jakości](#kontrola-jakości-tłumaczeń) |
+| „⚠ Błąd tłumaczenia (DeepL)” | inny, nierozpoznany błąd dostawcy | opis w oknie aplikacji; gdy się powtarza, zajrzyj do logów |
+| „⚠ Limit znaków tej sesji wyczerpany” | osiągnięty limit `sessionCharacterLimit` z `settings.json` | zwiększ albo usuń limit w `settings.json` |
+| „Cache-only: 5 tekstów bez tłumaczenia” | tych tekstów nie ma w lokalnych wynikach | celowe — Cache-only nie pyta dostawcy |
+| „⚠ Cache niedostępny — tłumaczenia nie są zapisywane” | baza tłumaczeń nie działa | [Gdy baza tłumaczeń nie działa](#słownik-i-dane) |
+| „⚠ Pełny ekran utrudnia nakładkę — przełącz na okno bez ramki” | okna gry nie da się przechwycić, a gra zajmuje cały monitor | przełącz grę na okno bez ramki ([wyżej](#tłumaczenie-ręczne-podstawowy-tryb)) |
+| „ℹ Nie rozpoznano tekstu w zaznaczeniu” | ręczne tłumaczenie nie znalazło tekstu | zaznacz większy fragment |
+| „⚠ Tłumaczenie nie powiodło się” | ręczne tłumaczenie skończyło się błędem | zajrzyj do logów (folder danych → `logs\`) |
 
 Ten sam komunikat pojawia się najwyżej raz na 30 s. Błąd wypiera informację, a informacja
 nie przykrywa widocznego błędu. Start i stop live są pokazywane zawsze. Braki w Cache-only
@@ -208,19 +258,10 @@ w oknie aplikacji.
 
 ### Jak uzyskać czytelny wynik
 
-- Do opisów i menu wybierz **Przy oryginale**. Opcja **Na oryginale (zakrywa)**
-  umieszcza tłumaczenie nad tekstem gry; **Pod oryginałem** pokazuje je poniżej.
-- **Na oryginale (zakrywa)** działa jak spolszczenie: z obrazu gry znikają same litery
-  oryginału (ich piksele są wypełniane kolorami tła spod spodu, reszta obrazu zostaje żywa),
-  a polski tekst dostaje kolor, kontur, cień, wysokość liter i linię bazową zmierzone
-  z napisu gry. Ikony klawiszy przed napisem (np. „X Hint”) i ikonka za nim zostają.
-  Gdy tło pod napisem się rusza, łatka staje się miękka (rozmyta), dopóki obraz nie stanie.
-  Tłumaczenie identyczne z oryginałem (nazwy, „OK”, logo) nie jest rysowane — widać grę.
-- **Krój czcionki → Jak w grze (krój z profilu)** (domyślnie) bierze krój z profilu gry —
-  profil Escape Academy używa dołączonego kroju Lexend Deca (licencja OFL), gruby lub cienki
-  wariant jest dobierany do grubości liter w grze. Bez profilu jest to Segoe UI. Wybór innej
-  czcionki z listy ma pierwszeństwo przed profilem. Ustawienia z poprzednich wersji
-  z domyślnym Segoe UI przechodzą raz na „Jak w grze”.
+- Do opisów i menu wybierz **Przy oryginale**. W polu **Położenie dymków** opcja
+  **Na oryginale (zakrywa)** stawia tłumaczenie w miejscu tekstu gry
+  ([opis niżej](#tryb-na-oryginale-zakrywa--napis-jak-w-grze)); **Pod oryginałem** pokazuje
+  je poniżej.
 - Do dialogów możesz wybrać **Napisy na dole**. Jest to wspólny pasek świeżych
   tekstów rozpoznanych przez live, bez automatycznego rozpoznawania rodzaju wypowiedzi.
 - Po ruchu kamery daj obrazowi na chwilę się zatrzymać. Silny ruch nadal może
@@ -232,10 +273,72 @@ Stałe menu może pozostać podczas ruchu tła, jeśli obraz pod jego napisami n
 się ani o piksel. Zmieniony lub zasłonięty napis traci tę ochronę. Animowane tło,
 skalowanie odczytu lub zapasowe przechwytywanie ekranu mogą uniemożliwić zachowanie menu.
 
-Bieżący kod usuwa potwierdzone stare opisy przed nadejściem nowego tłumaczenia
-i dokładniej dopasowuje pozycję. Na wzorzystym tle albo przy niepewnym OCR stary
-napis może być chwilowo podtrzymany. Te mechanizmy ograniczają błędy, ale nie
-zapewniają jednakowego czasu i wyglądu w każdej grze.
+**Znikanie starego napisu.** Gdy napis gry znika, tłumaczenie znika razem z nim. Jeśli
+najbliższy odczyt OCR nie widzi napisu, a w jego miejscu nie zostało nawet ćwierć kontrastu,
+jaki napis miał przy ostatnim odczycie, nakładka zdejmuje tłumaczenie — w powtórkach
+syntetycznych (narzędzie SceneReplay, nie w grze) po 0,3–0,55 s, także na teksturowanym tle
+(przed zmianą: 0,9 s, ok. 6 s albo wcale). Gdy w miejscu napisu zostaje coś jasnego i piksele tego
+nie rozstrzygają, tłumaczenie znika po kilku odczytach OCR — śmieciowy odczyt w tym miejscu go
+nie podtrzymuje, a pełny odczyt ekranu przychodzi co 4 s także wtedy, gdy gdzie indziej coś
+ciągle się rusza. Napis przygaszony albo ciemniejszy, który OCR nadal czyta, zachowuje
+tłumaczenie; napis przygaszony poniżej ćwierci dawnej jasności może raz zniknąć na ok. 0,6 s.
+W **Napisach na dole** tłumaczenie znika z paska razem z napisem gry, a gdy napis wróci
+w ciągu 10 s, wraca też na pasek. Nowy napis w miejscu poprzedniego, gdy zniknięcia
+poprzedniego nie widać w pikselach, może czekać na tłumaczenie do 10 s. Bieżący kod dokładniej
+dopasowuje też pozycję. Te mechanizmy ograniczają błędy, ale nie zapewniają jednakowego czasu
+i wyglądu w każdej grze.
+
+### Tryb „Na oryginale (zakrywa)” — napis jak w grze
+
+Ustaw **Wyświetlanie: Przy oryginale** i **Położenie dymków: Na oryginale (zakrywa)**, a grę
+uruchom w oknie bez ramki. Tryb działa jak spolszczenie, ale nadal wyłącznie na obrazie:
+
+- **Z obrazu gry znikają same litery oryginału** — ich piksele są wypełniane kolorami tła
+  z otoczenia, a reszta obrazu gry zostaje żywa i nietknięta (łatka poza literami jest
+  przezroczysta). Taka łatka powstaje w trybie live; ręczne tłumaczenie regionu w nakładce
+  zakrywa tekst jak dotąd.
+- **Polski tekst wygląda jak napis gry:** kolor, kontur, cień, wysokość liter i linia bazowa są
+  zmierzone z napisu gry. Pomiar na klatkach 4K z Escape Academy: wysokość liter 0,96–1,10×
+  oryginału, linia bazowa w 0–1 px (przed zmianą 0,54–0,58×).
+- **Rozmiar wynika z oryginału.** Pole **Rozmiar czcionki (0 = jak oryginał)** w tym trybie nie
+  działa. **Tło dymków** dotyczy tylko dawnej, rozmytej łatki, której aplikacja używa, gdy
+  łatki z wypełnionymi literami nie udało się zbudować.
+- **Dłuższy polski tekst** w dialogu najpierw lekko się zmniejsza (najwyżej do 85%), potem łamie
+  się w szerokości oryginału z jego odstępem wierszy. Pojedyncza etykieta może wejść w wolne
+  miejsce obok (do następnego napisu albo krawędzi monitora) i nie wychodzi poza monitor.
+  Jednowierszowy napis wyśrodkowany na ekranie rośnie w obie strony.
+- **Ikony zostają:** ikona klawisza przed napisem („X Hint” → ikona X + „Podpowiedź”) i ikonka
+  za napisem (np. ✓) nie są zamazywane, a litera odczytana z ikony nie pojawia się w tłumaczeniu
+  na ekranie.
+- **Tłumaczenie identyczne z oryginałem** (nazwy, „OK”, logo) nie jest rysowane — widać grę.
+- **Jedna grubość w jednym stylu:** napisy o tym samym rozmiarze, kolorze i obrysie (np. pozycje
+  menu) dostają tę samą grubość kroju.
+- **Ruchome tło:** gdy tło pod napisem się rusza, łatka obejmuje całe pole napisu z miękkim
+  brzegiem, dopóki obraz nie stanie.
+- **Kwestia pisana literami** (gdy gra ma korpus) zostaje po angielsku, dopóki gra ją wypisuje —
+  [opis w sekcji o korpusie](#spolszczenie-z-wyprzedzeniem-korpus-gry).
+
+**Krój czcionki → Jak w grze (krój z profilu)** (domyślnie) bierze krój z profilu gry, we
+wszystkich układach nakładki. Profil Escape Academy używa dołączonego kroju Lexend Deca (licencja
+SIL OFL 1.1, patrz `THIRD-PARTY-NOTICES.md`); w trybie zakrywania wariant (od zwykłego do
+pogrubionego) jest dobierany do grubości liter w grze. Bez profilu albo przy profilu bez kroju
+jest to Segoe UI. Wybór innej czcionki z listy ma pierwszeństwo przed profilem. Ustawienia
+z poprzednich wersji z domyślnym Segoe UI przechodzą raz na „Jak w grze” — jeśli wolisz Segoe UI,
+wybierz je ponownie. Krój dla innej gry wskazuje profil gry polem `overlay.fontFamily` (nazwa
+kroju zainstalowanego w Windows albo `Lexend Deca`).
+
+Znane ograniczenia (z przeglądu klatek gry i powtórek):
+
+- Łatka jest liczona z klatki odczytu OCR, więc na przesuwającym się tle wypełnione litery mogą
+  między odczytami odstawać od tła. Na gęstej teksturze w kolorze liter łatka może wygładzić
+  fragment tła albo nie powstać (wtedy dawna, rozmyta łatka).
+- Kursywa, odstępy między literami i szerokość kroju gry nie są odwzorowane; Lexend Deca jest
+  węższy niż krój Escape Academy, a polski wiersz dialogu bywa dłuższy od oryginału. Profil ma
+  jeden krój — także napis szeryfowy dostaje Lexend Deca.
+- Długi pojedynczy wiersz bez wolnego miejsca obok zmniejsza się najwyżej do 85% i dalej wystaje;
+  przy przyciskach z ramką może wyjść poza ramkę.
+- Wygląd sprawdzono tylko na klatkach 4K z Escape Academy (narzędzie OverlayPreview) — nie
+  w oknie gry na żywo ani w innych grach.
 
 ## Spolszczenie z wyprzedzeniem (korpus gry)
 
@@ -245,59 +348,153 @@ przetłumaczyć go w całości. W trakcie gry nakładka rozpoznaje wtedy odczyt 
 (także z błędami OCR, innym zawinięciem wierszy albo WIELKIMI LITERAMI) i pokazuje gotowe
 tłumaczenie z lokalnej bazy, bez czekania na dostawcę. Nakładka nadal nie czyta plików gry —
 robi to wyłącznie osobne narzędzie `CorpusTool`, uruchamiane przez Ciebie przy wyłączonej grze
-([ADR-014](TECHNOLOGY_DECISIONS.md)). Narzędzie nie jest w paczce aplikacji; uruchamiasz je ze
-źródeł projektu (potrzebny .NET 10 SDK), w PowerShellu z folderu repozytorium.
+([ADR-014](https://github.com/KubaZx/Game_Translator/blob/main/docs/TECHNOLOGY_DECISIONS.md)).
 
-1. **Wyłącz grę** (także launcher Steam z jej oknem). Narzędzie odmówi pracy, gdy proces gry
-   działa, gdy gra ma anti-cheat albo zaszyfrowane pliki i dla gier online (np. Path of Exile).
+### Kiedy korpus ma sens
+
+- Gra jest **jednoosobowa i offline**, a jej teksty leżą w plikach jako czytelne tabele opisane
+  „receptą” w profilu gry (sekcja `corpus` w `profiles/<id>/profile.json`). Dziś receptę ma tylko
+  profil Escape Academy; narzędzie czyta rodzinę formatów Unity TextAsset (kontener UnityFS albo
+  luźny plik serializowany Unity).
+- Najwięcej zyskujesz w grze z dużą ilością menu, dialogów i napisów: znane teksty nie czekają na
+  dostawcę, a odczyty z błędami OCR trafiają w poprawne zdanie.
+- Tekst namalowany w teksturach i grafikach nie trafi do korpusu — dalej tłumaczy go OCR
+  i dostawca.
+
+Zasady narzędzia (ADR-014) są zaszyte w kodzie, bez opcji obejścia:
+
+- **gra wyłączona** — odmowa, gdy działa proces gry z profilu albo dowolny program z folderu gry,
+- **bez gier online i z anti-cheatem** — odmowa przy folderach EasyAntiCheat / BattlEye, profilu
+  oznaczonym jako online i grach z listy wykluczeń (Path of Exile 1 i 2),
+- **bez podpisanych i zaszyfrowanych plików** — narzędzie nie ma kodu deszyfrującego,
+- **tylko odczyt** — niczego nie zapisuje w folderze gry; wyniki nie mogą leżeć w folderze gry,
+  pod `steamapps\common` ani w bibliotekach Epic i GOG,
+- **bez sieci przy odczycie** — `extract` niczego nie pobiera ani nie wysyła; jedyny ruch
+  sieciowy to tłumaczenie korpusu (`translate`) u dostawcy, którego sam wskażesz,
+- **tylko lokalnie** — korpus i tłumaczenia zostają w folderze danych aplikacji; teksty gier są
+  chronione prawem autorskim, więc nie przenoś ich i nie udostępniaj,
+- **tryb prywatny** — gdy jest włączony w aplikacji, `translate` odmawia pracy, zanim cokolwiek
+  wyśle (przebieg próbny `--dry-run` tylko ostrzega).
+
+Gry, których to nie obejmuje, tłumaczysz jak dotąd — z obrazu.
+
+### Krok po kroku
+
+Narzędzie nie jest w paczce aplikacji; uruchamiasz je ze źródeł projektu
+(`git clone https://github.com/KubaZx/Game_Translator`, potrzebny .NET 10 SDK), w PowerShellu
+z folderu repozytorium. Pierwsze `dotnet run` najpierw buduje narzędzie.
+
+1. **Wyłącz grę** (także jej launcher z folderu gry, jeśli go ma). Gdy gra działa, narzędzie
+   kończy się komunikatem „Gra jest uruchomiona (proces: …). Zamknij ją i spróbuj ponownie.”.
    Gdy wskażesz podfolder gry, zabezpieczenia sprawdzą cały jej folder (np.
-   `steamapps\common\<gra>`), a wyników nie da się zapisać w folderze gry ani pod `steamapps\common`.
-2. **Odczytaj korpus** (tylko do odczytu, bez sieci, kilka sekund):
+   `steamapps\common\<gra>`).
+2. **Odczytaj korpus** (tylko do odczytu, bez sieci; sam odczyt Escape Academy trwa ok. 0,2 s):
 
    ```powershell
    dotnet run --project tools/GameTranslatorOverlay.CorpusTool -c Release -- extract `
      --profile escape-academy --game-dir "C:\Program Files (x86)\Steam\steamapps\common\Escape Academy"
    ```
 
-   Korpus trafia do `%LOCALAPPDATA%\GameTranslatorOverlay\corpus\escape-academy.corpus.jsonl` —
-   tylko tam szuka go aplikacja. Nie przenoś go i nie udostępniaj (teksty gry są chronione
-   prawem autorskim).
-3. **Przetłumacz korpus** u wybranego dostawcy. Najpierw przebieg próbny — pokazuje liczbę
-   tekstów, znaków i szacunek kosztu, niczego nie wysyła:
-
-   ```powershell
-   dotnet run --project tools/GameTranslatorOverlay.CorpusTool -c Release -- translate `
-     --profile escape-academy --provider llm --dry-run
-   ```
-
-   Potem właściwy przebieg z kluczem w zmiennej środowiskowej (narzędzie nie czyta kluczy
-   zapisanych w aplikacji), np. DeepSeek bez myślenia (ok. 0,12–0,24 USD za całą grę):
+   `--game-dir` to folder instalacji gry (w Steam pokazuje go *Zarządzaj → Przeglądaj pliki
+   lokalne*). Narzędzie wypisuje same liczby (wpisy, unikalne teksty, znaki) i ścieżkę zapisu.
+   Korpus trafia do `%LOCALAPPDATA%\GameTranslatorOverlay\corpus\escape-academy.corpus.jsonl`
+   (**Folder danych** → `corpus\`) — tylko tam szuka go aplikacja.
+3. **Przetłumacz korpus** u wybranego dostawcy. Klucz podajesz w zmiennej środowiskowej —
+   narzędzie nie czyta kluczy zapisanych w aplikacji. Przykład z DeepSeek bez myślenia: najpierw
+   przebieg próbny (liczba tekstów, znaków i partii oraz szacunek kosztu; nic nie wysyła i nic
+   nie zapisuje do bazy), potem właściwy przebieg:
 
    ```powershell
    $env:GTO_LLM_ENDPOINT = "https://api.deepseek.com/v1"
    $env:GTO_LLM_MODEL = "deepseek-flash"
    $env:GTO_LLM_KEY = "<Twój klucz>"
    dotnet run --project tools/GameTranslatorOverlay.CorpusTool -c Release -- translate `
+     --profile escape-academy --provider llm --dry-run
+   dotnet run --project tools/GameTranslatorOverlay.CorpusTool -c Release -- translate `
      --profile escape-academy --provider llm --llm-thinking disabled
    ```
 
-   albo DeepL (`$env:GTO_DEEPL_KEY`, `--provider deepl`; ok. połowy miesięcznego limitu API Free).
-   Przerwany przebieg dokończysz, uruchamiając to samo polecenie jeszcze raz. Przy włączonym
-   trybie prywatnym narzędzie odmówi zapisu. Twoje ręczne poprawki i słownik zostają nietknięte.
+   Przebieg próbny dla Escape Academy: 7 632 teksty, 248 979 znaków, szacunek DeepSeek bez
+   myślenia ok. 0,12–0,24 USD za całą grę. DeepL: `$env:GTO_DEEPL_KEY = "<Twój klucz>"`
+   i `--provider deepl` (szacunek: ok. połowy miesięcznego limitu API Free; terminy słownika
+   trafiają do glosariusza na koncie DeepL, chyba że dodasz `--no-deepl-glossary`). Lokalny
+   serwer (Ollama, LM Studio): adres `http://localhost…` w `GTO_LLM_ENDPOINT`, bez klucza —
+   szacunek kosztu wynosi wtedy 0.
+
+   Przerwany przebieg (Ctrl+C, błąd sieci) dokończysz, uruchamiając to samo polecenie jeszcze
+   raz: zapisane wpisy zostają, a teksty z aktualnym wpisem są pomijane. Twoje ręczne poprawki,
+   wpisy zatwierdzone i słownik zostają nietknięte. Na ekranie są same liczby — teksty gry
+   i tłumaczenia trafiają tylko do lokalnej bazy tłumaczeń (`cache.db` w folderze danych).
 4. **Uruchom aplikację** (jeśli działała — zamknij ją i otwórz ponownie, żeby wczytała korpus
-   i nowe wpisy) i wybierz profil **Escape Academy** (albo zaznacz okno gry na liście — profil
-   włączy się sam). Po zapisaniu ustawień pasek stanu pokazuje „korpus: … tekstów” (to samo
-   trafia do logu przy każdym starcie). Brak tej informacji = aplikacja nie znalazła pliku korpusu.
-5. **Graj z trybem live** jak zwykle (`Ctrl+Shift+L`).
+   i nowe wpisy) i wybierz **Escape Academy** w polu **Profil gry**. Przy profilu „— brak profilu
+   (tryb uniwersalny) —” wystarczy zaznaczyć okno gry na liście — profil włączy się sam
+   z komunikatem „Wykryto grę „Escape Academy” — profil włączony automatycznie.”. Po ręcznym
+   wyborze profilu pasek stanu pokazuje „Ustawienia zapisane (dostawca: …, profil: Escape
+   Academy, korpus: … tekstów).”; liczbę tekstów korpusu zapisuje też log (folder danych →
+   `logs\`) przy starcie i przy każdej przebudowie ustawień tłumaczenia. Brak „korpus: …”
+   = aplikacja nie znalazła pliku korpusu albo nie mogła go wczytać (powód w logu).
+5. **Graj z trybem live** jak zwykle (`Ctrl+Shift+L`). Po przetłumaczeniu korpusu możesz włączyć
+   **Cache-only** — znane teksty działają wtedy bez internetu, a nowe nie są wysyłane.
+
+Najczęściej przydatne opcje (pełna lista: `--help` albo
+[README narzędzia](https://github.com/KubaZx/Game_Translator/blob/main/tools/GameTranslatorOverlay.CorpusTool/README.md)):
+
+| Polecenie | Opcja | Działanie |
+|---|---|---|
+| `extract` | `--out PLIK` | inny plik korpusu (aplikacja czyta tylko domyślne miejsce) |
+| `extract`, `translate` | `--data-dir KATALOG` | inny folder danych niż `%LOCALAPPDATA%\GameTranslatorOverlay` |
+| `extract`, `translate` | `--stats PLIK` | statystyki do pliku JSON — same liczby, bez tekstów gry |
+| `translate` | `--limit N` | najwyżej N tekstów (dialogi, napisy, potem UI) — tani przebieg pilotażowy |
+| `translate` | `--kinds ui,dialog,subtitle` | tylko wybrane rodzaje tekstów |
+| `translate` | `--skip-cached` | pomija teksty, które mają już aktualny automatyczny wpis (także bez profilu, np. z gry na żywo) |
+| `translate` | `--force` | tłumaczy ponownie automatyczne wpisy profilu (nigdy korekt, wpisów zatwierdzonych i słownika) |
+| `translate` | `--player-gender male\|female\|unknown` | płeć postaci gracza dla modelu językowego; domyślnie z ustawień aplikacji |
+| `translate` | `--batch N`, `--parallel N` | mniejsze partie, liczba partii naraz (domyślnie 3, lokalny serwer 1) |
+| `translate` | `--price-in`, `--price-out`, `--price-chars` | własne stawki do szacunku kosztu (USD za 1 mln tokenów modelu albo znaków DeepL) |
+
+Kody wyjścia: 0 — gotowe, 1 — błąd (np. brak korpusu albo klucza), 2 — złe opcje, 3 — odmowa
+(zabezpieczenia, tryb prywatny, brak profilu albo recepty), 4 — część partii `translate`
+nieudana (ponowne uruchomienie je dokończy), 130 — przerwano.
 
 Co się zmienia w grze:
 
-- Znane teksty pojawiają się bez zapytania do dostawcy — w powtórce prawdziwych sesji Escape
-  Academy ok. 60% znaków i połowa bloków była gotowa lokalnie (bez korpusu: 0,3%).
+- Znane teksty pojawiają się bez zapytania do dostawcy — w powtórce 242 bloków z dawnych sesji
+  Escape Academy (przez pipeline z Mockiem, nie w grze) ok. 76% znaków i 62% bloków było gotowych
+  lokalnie (bez korpusu: 0,3% znaków), a do dostawcy poszło 57 zapytań zamiast 241.
 - Odczyt z błędami OCR („Itls”, „11m”, ucięty koniec zdania) dostaje tłumaczenie poprawnego zdania.
-  Gdy gra wypisuje zdanie literka po literce, nakładka może pokazać tłumaczenie całego zdania,
-  zanim gra wypisze je do końca — a gdy tego zdania nie ma jeszcze w bazie, do dostawcy idzie
-  całe zdanie z korpusu, także jego niewyświetlona jeszcze część.
+- **Krótkie etykiety z pomyłkami OCR** („Ihspect” zamiast „Inspect”, „Userltem” zamiast
+  „Use Item”) dostają tłumaczenie etykiety z korpusu. Bez przyciągania zostają odczyty, gdy dwie
+  etykiety są podobnie blisko, gdy odczyt jest innym słowem z gry („Exit” nie zostaje „Edit”),
+  gdy na brzegu brakuje albo przybywa zwykłej litery („The fir” nie zostaje „The Fire”) i gdy
+  nie zgadzają się liczby. Etykieta odczytana raz poprawnie, raz z pomyłką nie jest podmieniana
+  na ekranie.
+- **Dialog pisany literami.** Gdy odczyt jest jednoznacznym początkiem jednej linii dialogu albo
+  napisów z korpusu (od 12 liter i 3 słów), aplikacja zna całą kwestię:
+  - w trybie **Na oryginale (zakrywa)** kwestia zostaje po angielsku, dopóki gra ją wypisuje,
+    a gdy gra skończy, od razu pojawia się całe polskie tłumaczenie (w powtórce syntetycznej
+    ok. 0,1–0,3 s po ostatniej literze, bez polskiego tekstu na dopisywanych angielskich literach).
+    Za koniec pisania aplikacja uznaje pełną linię albo brak nowych liter przez 0,9 s;
+    najdłużej kwestia czeka 8 s. W tym trybie czeka też krótszy początek kwestii z korpusu (od
+    4 liter). Niedokończony początek nie jest w tym czasie wysyłany do dostawcy,
+  - w trybach **Pod oryginałem** i **Napisy na dole** tłumaczenie całej kwestii może pojawić się,
+    zanim gra wypisze ją do końca; dłuższe odczyty tej samej kwestii trafiają w ten sam wpis
+    (bez nowych zapytań) i aktualizują napis w miejscu,
+  - gdy tej kwestii nie ma jeszcze w bazie, do dostawcy idzie całe zdanie z korpusu, także jego
+    niewyświetlona jeszcze część,
+  - ograniczenia: pauza dłuższa niż 0,9 s w środku kwestii pokaże pełne tłumaczenie już w tej
+    pauzie (dopisane potem litery wyjdą spod łatki do następnego odczytu); tekst spoza korpusu,
+    który zaczyna się jak kwestia z korpusu, czeka 0,9 s; dwie kwestie o wspólnym początku czekają,
+    aż odczyt je rozróżni; w trybach z tekstem obok oryginału jednowierszowy początek kwestii
+    dostaje tłumaczenie w jednym wierszu (może wyjść poza okno dialogu), dopóki gra nie zacznie
+    drugiego wiersza.
+- **Śmieci OCR** (zlepki liter odczytane z ikon i tekstur, same liczby typu „11/11”) przy aktywnym
+  korpusie nie idą w trybie live do dostawcy ani na nakładkę — oryginał zostaje widoczny. Termin
+  słownika nie jest śmieciem. Koszt: prawdziwy krótki napis, którego słów nie ma w plikach gry
+  (np. napis z tekstury), też zostaje bez tłumaczenia — dodaj go w **📖 Słownik…** z własnym
+  tłumaczeniem albo przetłumacz ręcznie (**Ctrl+Shift+T**; tłumaczenie regionu nie używa tego filtra).
+- Pomiar na tekstach z pierwszej sesji gracza na wersji z korpusem (36 tekstów, które poszły do
+  DeepL; powtórka z Mockiem): po poprawkach etykiet, dialogu i śmieci 15 obsłużonych lokalnie,
+  11 odrzuconych jako śmieci, do dostawcy 10 zamiast 36.
 - Liczby muszą się zgadzać: odczyt z innym znakiem, walutą albo procentem („-10%” zamiast „+10%”)
   albo z inną liczbą sklejoną z literami („6kg” zamiast „5kg”) nie jest przyciągany do korpusu
   i idzie do tłumaczenia tak, jak go odczytano. Wyjątek: cyfra w miejscu litery, którą OCR myli
@@ -313,6 +510,9 @@ Co się zmienia w grze:
 - Bez pliku korpusu i bez profilu aplikacja działa dokładnie jak dotąd. Cache-only działa także
   z korpusem. **W trybie prywatnym** aplikacja nie czyta bazy z dysku, więc tłumaczenia
   z wyprzedzeniem są wtedy niedostępne (przyciąganie nadal ujednolica odczyty w pamięci).
+- Po nowym `extract` albo `translate` uruchom aplikację ponownie — działająca aplikacja pamięta
+  w RAM tłumaczenia, które już odczytała z bazy, i do restartu może je pokazywać zamiast nowych
+  wpisów korpusu.
 
 Opcja dla zaawansowanych: `"paragraphCacheKeys": true` w `settings.json` zapisuje tłumaczenia
 po akapitach także bez korpusu (każda gra) — ten sam akapit w innym bloku nie jest płacony drugi
@@ -383,6 +583,10 @@ W Cache-only przy niedziałającej bazie nic nie jest wysyłane.
   dodane w tym trybie nigdy do niego nie trafiają. Ostatnia gra nie jest zapisywana
   w `settings.json`.
 - **Tryb Cache-only**: tłumaczenie korzysta z lokalnych wyników i nie wysyła brakującego tekstu do dostawcy.
+- **Korpus gry**: plik korpusu i baza tłumaczeń nie są nigdzie wysyłane. Gdy odczyt z ekranu
+  zostanie dopasowany do tekstu korpusu, do dostawcy może trafić pełne zdanie z korpusu — także
+  jego część, której gra jeszcze nie wyświetliła. `CorpusTool translate` wysyła teksty korpusu
+  wyłącznie do dostawcy, którego sam wskażesz, i tylko na Twoje polecenie.
 - Pełna polityka: `PRIVACY.md`.
 
 ## Skróty
@@ -404,8 +608,19 @@ Skróty można zmienić w pliku `settings.json` w folderze danych (`translateHot
 | „Brak pakietu językowego OCR” | doinstaluj język w ustawieniach Windows (patrz wyżej) |
 | OCR nie widzi tekstu | zaznacz większy fragment; zwiększ rozmiar czcionki w grze; unikaj mocno ozdobnych fontów |
 | Czarny podgląd okna | gra blokuje przechwytywanie okna — przełącz na borderless; tryb regionu (Ctrl+Shift+T) zwykle działa mimo to |
-| „⚠ Pełny ekran utrudnia nakładkę” | gra działa na wyłącznym pełnym ekranie — przełącz ją w ustawieniach grafiki na okno bez ramki (borderless) |
-| Polski napis ma inny krój niż gra | wybierz **Krój czcionki → Jak w grze**; gra bez profilu z krojem dostaje Segoe UI |
+| „⚠ Pełny ekran utrudnia nakładkę” | okna gry nie da się przechwycić, a gra zajmuje cały monitor — przełącz ją w ustawieniach grafiki na okno bez ramki (borderless); jeśli już jest bez ramki, live działa na zrzucie ekranu ([Uwaga o prywatności](#uwaga-o-prywatności-w-trybie-live)) |
+| Polski napis ma inny krój niż gra | wybierz **Krój czcionki → Jak w grze (krój z profilu)**; gra bez profilu (albo z profilem bez `overlay.fontFamily`) dostaje Segoe UI |
+| **Rozmiar czcionki** nic nie zmienia | w trybie **Na oryginale (zakrywa)** rozmiar wynika z napisu gry; własny rozmiar działa **Pod oryginałem** i w **Napisach na dole** |
+| Nad nazwą albo „OK” nie ma tłumaczenia | w trybie zakrywania tłumaczenie identyczne z oryginałem nie jest rysowane — celowo, widać grę |
+| Wypełnione litery odstają od ruchomego tła | łatka jest liczona z odczytu OCR, więc między odczytami nie nadąża za tłem; zatrzymaj na chwilę kamerę albo wybierz **Pod oryginałem** |
+| Kwestia dialogu zostaje po angielsku, dopóki gra ją pisze | celowe w trybie zakrywania z korpusem: tłumaczenie pojawia się po zakończeniu pisania (najdłużej po 8 s); tłumaczenie całej kwestii jeszcze w trakcie pisania dają **Pod oryginałem** i **Napisy na dole** |
+| Pasek stanu nie pokazuje „korpus: … tekstów” | przy automatycznym wykryciu profilu pasek pokazuje „Wykryto grę …”, a liczbę tekstów korpusu znajdziesz w logu; poza tym sprawdź, czy wybrano profil gry i czy w folderze danych jest `corpus\<profil>.corpus.jsonl` (powód błędu wczytania jest w logu) |
+| Krótki prawdziwy napis nie jest tłumaczony przy aktywnym korpusie | filtr śmieci OCR uznał go za śmieć (jego słów nie ma w plikach gry); dodaj go w **📖 Słownik…** z własnym tłumaczeniem albo przetłumacz go ręcznie (**Ctrl+Shift+T**) |
+| CorpusTool: „Gra jest uruchomiona (proces: …)” | zamknij grę i jej launcher z folderu gry, potem uruchom polecenie ponownie |
+| CorpusTool: „Gra ma zabezpieczenie anti-cheat …” albo inna odmowa (kod 3) | celowe zabezpieczenie ADR-014 bez opcji obejścia; tę grę tłumacz z obrazu |
+| CorpusTool: „Brak korpusu … Najpierw uruchom: extract …” | najpierw `extract` dla tego profilu (z tym samym `--data-dir`, jeśli go podajesz) |
+| CorpusTool: „Tryb prywatny jest włączony …” | wyłącz tryb prywatny w aplikacji albo uruchom tylko `--dry-run` |
+| CorpusTool: „Dostawca llm niedostępny: …” albo „Dostawca deepl niedostępny: …” | dla `llm` ustaw `GTO_LLM_ENDPOINT` i `GTO_LLM_MODEL` (i `GTO_LLM_KEY` dla usługi w chmurze), dla `deepl` — `GTO_DEEPL_KEY`, w tym samym oknie PowerShella |
 | „DeepL odrzucił klucz” | sprawdź klucz (darmowy kończy się na `:fx`) i czy plan API jest aktywny |
 | „Azure Translator odrzucił klucz” | sprawdź klucz i **region** zasobu; dla zasobu globalnego zostaw region pusty |
 | „Cloud Translation API nie jest włączone” | włącz Cloud Translation API w projekcie Google, do którego należy klucz |
@@ -420,6 +635,29 @@ Skróty można zmienić w pliku `settings.json` w folderze danych (`translateHot
 | „Przełącz się do gry i wciśnij skrót ponownie.” | kliknij w okno gry i wciśnij skrót; gry UWP/Game Pass wybierz raz na liście |
 | „⚠ Cache niedostępny — tłumaczenia nie są zapisywane” | zamknij program blokujący plik bazy w folderze danych, zwolnij miejsce na dysku; tłumaczenie działa dalej bez zapisu |
 | Inny problem | zajrzyj do logów: folder danych → `logs\` (logi nie zawierają treści z ekranu) |
+
+### Najczęstsze pytania
+
+**Czy korpus zmienia grę albo jej pliki?** Nie. `CorpusTool` otwiera pliki gry tylko do
+odczytu, przy wyłączonej grze, i zapisuje wynik w folderze danych aplikacji (nigdy w folderze
+gry). Nakładka czyta tylko ten wynik, nigdy plików gry.
+
+**Czy zrobię korpus dla innej gry?** Tylko wtedy, gdy jej profil ma receptę `corpus`, gra
+przechodzi zabezpieczenia (offline, bez anti-cheatu, bez podpisanych i zaszyfrowanych plików),
+a jej teksty są w rodzinie formatów Unity TextAsset. Dziś receptę ma tylko Escape Academy.
+Pozostałe gry działają jak dotąd — z obrazu.
+
+**Czy mogę udostępnić korpus albo przetłumaczoną bazę?** Nie rób tego: teksty gier są chronione
+prawem autorskim, więc korpus i jego tłumaczenia mają zostać na Twoim komputerze.
+
+**Czy tryb „Na oryginale (zakrywa)” działa w każdej grze?** Działa na obrazie każdej gry
+w trybie live, ale wygląd strojono na klatkach Escape Academy. Przy kroju „Jak w grze” gra
+bez kroju w profilu dostaje Segoe UI; inne ograniczenia opisuje
+[sekcja o trybie zakrywania](#tryb-na-oryginale-zakrywa--napis-jak-w-grze).
+
+**Czy potrzebuję korpusu, żeby używać trybu zakrywania?** Nie. Korpus dodaje tylko gotowe
+tłumaczenia, dopasowanie odczytów z błędami OCR, odrzucanie śmieci OCR i czekanie na koniec
+kwestii pisanej literami.
 
 ## Uwaga o prywatności w trybie live
 
@@ -436,13 +674,18 @@ z przechwytywania.
 
 Program niczego nie wstrzykuje do gry i nie automatyzuje rozgrywki — działa wyłącznie
 na obrazie ekranu. Mimo to regulaminy niektórych gier różnie traktują nakładki.
-**Sprawdź zasady swojej gry przed użyciem.** Projekt nie jest powiązany z twórcami
+**Sprawdź zasady swojej gry przed użyciem.** Narzędzie korpusu (`CorpusTool`) odmawia pracy
+dla gier oznaczonych w profilu jako online, gier z listy wykluczeń (Path of Exile 1 i 2) i gier
+z wykrytym anti-cheatem EasyAntiCheat albo BattlEye. Projekt nie jest powiązany z twórcami
 żadnej z gier.
 
 ## Jak zgłosić problem jakości
 
-Podaj nazwę gry, rozdzielczość, skalowanie Windows, wybrany profil i sposób
-wyświetlania. Opisz konkretną sytuację: pojawienie się dialogu, otwarcie opisu,
-zamknięcie panelu lub obrót kamery. Rozdziel objawy: spóźnienie, pozostawanie
-starego napisu, znikanie aktualnego tekstu i przesunięcie względem oryginału.
-Nie dołączaj klucza API ani całego folderu danych aplikacji.
+Podaj nazwę gry, rozdzielczość, skalowanie Windows, tryb okna gry (okno, okno bez ramki,
+pełny ekran), wybrany profil, sposób wyświetlania (**Wyświetlanie**, **Położenie dymków**,
+**Krój czcionki**) i liczbę tekstów korpusu (z paska stanu „korpus: … tekstów” albo z logu),
+jeśli go używasz. Opisz konkretną sytuację: pojawienie się dialogu, otwarcie opisu, zamknięcie
+panelu lub obrót kamery.
+Rozdziel objawy: spóźnienie, pozostawanie starego napisu, znikanie aktualnego tekstu,
+przesunięcie względem oryginału i wygląd napisu (krój, wielkość, prześwitujące litery gry).
+Nie dołączaj klucza API, całego folderu danych aplikacji ani pliku korpusu.

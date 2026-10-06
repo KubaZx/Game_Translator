@@ -23,7 +23,7 @@ internal static class Program
           typing   --corpus KORPUS.jsonl --ocr PRYWATNY.jsonl --out KATALOG_LICZB --private KATALOG_PRYWATNY [--wrap 48]
                    Dialog pisany literami: każda linia dopisywana co 3 znaki przez TranslationPipeline (Mock) — zapytania
                    po pierwszym przyciągnięciu, zmiany klucza nakładki i wyświetlanego tekstu.
-          --features off (evaluate, bench, replay) wyłącza etykiety, prefiksy dialogu i odrzucanie szumu (stan sprzed rundy).
+          --features off (evaluate, bench, replay, typing) wyłącza etykiety, prefiksy dialogu i odrzucanie szumu (stan sprzed rundy).
         Do katalogu liczb trafiają wyłącznie liczby, nigdy teksty gry.
         """;
 

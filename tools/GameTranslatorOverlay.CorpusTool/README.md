@@ -106,8 +106,12 @@ i podmiana). Teksty gier są chronione prawem autorskim — korpus zostaje lokal
 **W aplikacji.** Gdy aktywny profil gry ma plik `<folder danych>\corpus\<id>.corpus.jsonl`,
 aplikacja wczytuje go przy zmianie ustawień albo profilu (tylko ten plik — nigdy plików gry)
 i przyciąga odczyty OCR do znanych tekstów: tłumaczenie szuka w cache tekstu z korpusu, a nie
-odczytu z błędami. Po ponownym `extract` albo `translate` uruchom aplikację ponownie. Literalne `\n` w tekstach korpusu są traktowane jak nowy wiersz (także w kluczu cache
-`translate`). Szczegóły: [USER_GUIDE.md → Spolszczenie z wyprzedzeniem](../../docs/USER_GUIDE.md).
+odczytu z błędami. Krótkie etykiety są dopasowywane także z typowymi pomyłkami OCR, początek
+linii dialogu albo napisów dostaje tłumaczenie całej kwestii, a krótki odczyt niepodobny do
+tekstów gry (śmieci z ikon i tekstur) nie idzie do dostawcy. Po ponownym `extract` albo
+`translate` uruchom aplikację ponownie. Literalne `\n` w tekstach korpusu są traktowane jak nowy
+wiersz (także w kluczu cache `translate`). Szczegóły:
+[USER_GUIDE.md → Spolszczenie z wyprzedzeniem](../../docs/USER_GUIDE.md).
 
 ## Tłumaczenie z wyprzedzeniem (`translate`)
 
@@ -143,7 +147,7 @@ dotnet run --project tools/GameTranslatorOverlay.CorpusTool -c Release -- transl
 | `--dry-run` | Liczba tekstów, znaków, partii i szacunek kosztu; bez wysyłania i bez zapisu (baza tylko do odczytu). |
 | `--limit N` | Najwyżej N tekstów, w kolejności: dialogi, napisy, UI (tani przebieg pilotażowy). |
 | `--kinds LISTA` | Tylko wybrane rodzaje: `ui`, `dialog`, `subtitle`. |
-| `--batch N` / `--parallel N` | Mniejsze partie; liczba partii naraz (domyślnie 3, lokalny serwer LLM 1, Mock 4). |
+| `--batch N` / `--parallel N` | Mniejsze partie (nie większe niż limit dostawcy); liczba partii naraz (domyślnie 3, lokalny serwer LLM 1, Mock 4; najwyżej 16). |
 | `--player-gender P` | `male`, `female`, `unknown`; domyślnie `playerGender` z `settings.json`. |
 | `--force` | Tłumacz ponownie automatyczne wpisy profilu (nigdy korekt, zatwierdzonych i słownika). |
 | `--skip-cached` | Pomiń teksty, które mają już aktualny automatyczny wpis (także globalny bez profilu). |

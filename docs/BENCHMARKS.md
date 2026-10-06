@@ -9,7 +9,9 @@ klatki, odcisk regionu tekstu i obróbkę tekstu po OCR. Zastępuje jednorazowe 
 (DeepL/Azure/Google/LLM/Claude). Te etapy wymagają Windows albo sieci i mierzy je licznik czasu
 tłumaczeń w aplikacji oraz narzędzia z `tools/` (zob. [MANUAL_TESTING.md](MANUAL_TESTING.md)).
 Benchmarki niczego nie wysyłają do sieci — dostawca w pomiarze cache rzuca wyjątkiem przy
-każdym wywołaniu.
+każdym wywołaniu. Nie ma tu też dopasowania do korpusu gry ani łatki „Na oryginale” — ich
+pomiar wymaga lokalnego korpusu i klatek z gry (poza repozytorium); liczby są w sekcji
+[Koszty spoza BenchmarkDotNet](#koszty-spoza-benchmarkdotnet-korpus-i-łatka-2026-10).
 
 ## Jak uruchomić
 
@@ -73,7 +75,8 @@ Liczby służą do porównań między commitami na tej samej maszynie, nie jako 
 w grze.
 
 Tabele poniżej to stan sprzed optymalizacji z 2026-10; wyniki po nich (z porównaniem) są
-w sekcji [Optymalizacje 2026-10](#optymalizacje-2026-10).
+w sekcji [Optymalizacje 2026-10](#optymalizacje-2026-10). Optymalizacje weszły po wydaniu
+0.4.0 i są częścią wydania 0.5.0.
 
 Przebieg pełny (domyślne zadanie BenchmarkDotNet), commit z wprowadzeniem benchmarków,
 2026-09-30:
@@ -131,7 +134,8 @@ kopiowania klatki z GPU ani samego przechwytywania.
 | OdciskRegionu | 512x64  |   129.851 μs | 1.4316 μs | 1.2691 μs |     328 B |
 | OdciskRegionu | 64x16   |     5.616 μs | 0.1082 μs | 0.1407 μs |     328 B |
 
-Koszt rośnie liniowo z liczbą pikseli (SHA-256 z każdego piksela RGB); alokacja jest stała.
+Koszt rośnie liniowo z liczbą pikseli (w tej wersji SHA-256 z każdego piksela RGB; od 2026-10
+XxHash128, niżej); alokacja jest stała.
 
 ### Obróbka tekstu
 
@@ -271,3 +275,84 @@ pomiaru, a alokacja niższa tylko o ok. 3 KB na 100 tekstów. Nie warto kompliko
   porównuje bity z wersją komórka po komórce), ale sumy sąsiednich komórek są niezależne —
   procesor nie czeka na każde dodawanie — a odczyty idą po pamięci kolejno.
   `AnalizaZmian` bez zmian w kodzie (różnica w granicach błędu).
+
+## Koszty spoza BenchmarkDotNet (korpus i łatka, 2026-10)
+
+Dwie funkcje wydania 0.5.0 mają koszt mierzony poza projektem `benchmarks/`, bo potrzebują
+danych, których nie ma w repozytorium: dopasowanie odczytu OCR do korpusu gry (korpus
+z `CorpusTool extract`) i łatka trybu „Na oryginale (zakrywa)” (klatki z gry). Wszystkie liczby
+z jednej maszyny: Windows 11 (NT 10.0.26200), 32 wątki logiczne, .NET 10.0.12, Release;
+obciążenia maszyny innymi procesami w czasie pomiarów nie kontrolowano. To nie jest maszyna
+z tabel BenchmarkDotNet wyżej — liczb nie porównuj między sekcjami. Dane gry (korpus, klatki,
+kopie bazy) zostają lokalnie; w dokumencie są same liczby. Szczegóły rund:
+[ROADMAP.md](ROADMAP.md), rundy 2026-10-06 (3)–(5).
+
+### Dopasowanie do korpusu (`CorpusSnapper.SnapBlock`)
+
+`CorpusEval bench` z progami aplikacji podanymi jawnie (`--fuzzy 0.80 --margin 0.08
+--min-length 16`; domyślne progi `bench` są inne), po dwa przebiegi: przed i po rundzie
+2026-10-06 (4) (etykiety z pomyłkami OCR, początek kwestii dialogu, odrzucanie szumu) oraz na
+kodzie wydania 0.5.0 przy aktualizacji tego dokumentu (po rundzie (6), która zmieniała jeszcze
+`CorpusSnapper`), wszystkie 2026-10-06. Każde zapytanie mierzone osobno, jednowątkowo, po
+rozgrzaniu na 200 zapytaniach. Korpus Escape Academy: 7 599 tekstów w indeksie (różnych
+kluczy dopasowania), 1 278 zapytań (bloki z kopii cache z dni Escape Academy i sesji PoE2
+oraz odczyty syntetyczne przez Windows OCR), 5 powtórzeń. Korpus syntetyczny: 150 tys. wpisów
+(141 005 różnych tekstów), 2 000 zapytań syntetycznych (3 powtórzenia) i te same 1 278 zapytań
+(1 powtórzenie). Pamięć indeksu = różnica `GC.GetTotalMemory` przed i po budowie.
+
+| Pomiar | Przed rundą (4) | Po rundzie (4) | Kod wydania 0.5.0 |
+|---|---:|---:|---:|
+| Korpus EA: budowa indeksu | 34–35 ms | 55 ms | 56 ms |
+| Korpus EA: `SnapBlock` p50 | 0,004–0,005 ms | 0,12 ms | 0,11–0,13 ms |
+| Korpus EA: `SnapBlock` p95 | 0,90–0,96 ms | 1,09–1,21 ms | 1,16–1,20 ms |
+| Korpus EA: `SnapBlock` p99 / max | 2,2–2,3 / 6,1–6,2 ms | 2,4–2,6 / 10,0–10,2 ms | 2,4–2,7 / 10,5–10,7 ms |
+| 150 tys.: budowa indeksu / pamięć indeksu | 429–445 ms / 75,1 MB | 560–568 ms / 80,5 MB | 571–586 ms / 80,5 MB |
+| 150 tys.: p95 zapytań syntetycznych | 4,1–5,0 ms | 5,5–5,8 ms | 3,3 ms |
+| 150 tys.: p95 zapytań EA | 3,1–5,4 ms | 9,1–9,4 ms | 5,3 ms |
+
+Wzrost czasów po rundzie (4) to według tej rundy wyszukiwanie etykiet dla krótkich odczytów.
+Na korpusie EA kod wydania mieści się w rozrzucie pomiaru po rundzie (4); na korpusie 150 tys.
+zapytania były wyraźnie szybsze niż po rundzie (4), a zapytania syntetyczne także niż przed nią.
+Przyczyny tej różnicy (zmiany kodu po rundzie (4) czy inne obciążenie maszyny) nie badano.
+W pipeline (`CorpusEval replay`, wariant z korpusem i bazą wypełnioną przez `CorpusTool
+translate`, Mock): próba lokalna bloku dla Escape Academy p50 0,10 ms i p95 0,66 ms w rundzie
+(3), p95 1,8 ms po rundzie (4) (z odrzucaniem szumu); dla bloków PoE2 (korpus EA przy innej
+grze) p50 0,32 ms i p95 1,92 ms w rundzie (3). Na kodzie wydania nie powtarzano.
+
+### Łatka „Na oryginale” (`GlyphCoverBuilder`)
+
+**Czas budowy** (runda 2026-10-06 (5), klatki 4K z Escape Academy, bloki z OverlayPreview):
+etykiety menu 1,7–4,6 ms na blok, szeroki baner ok. 12 ms, dialog 3126×199 px 22–24 ms. W sesji
+live łatki nowych bloków budują się równolegle (`Parallel.For`, najwyżej 4 wątki) w trakcie
+tłumaczenia: cała klatka z samymi nowymi napisami — menu (7 bloków) 15 ms, pokój 2,3 ms,
+dialog 16 ms; ponowne użycie łatki po niezmienionym podpisie pola 0,03–0,11 ms. Powtórzone przy
+aktualizacji tego dokumentu na kodzie wydania (te same klatki i bloki, 3 przebiegi, mediana
+z 9 powtórzeń): menu 14,3–14,8 ms równolegle (28,8–30,5 ms po kolei), pokój (2 bloki)
+2,4–2,6 ms, klatka z dialogiem (4 bloki) 16,5–17,5 ms, podpis pola 0,03–0,11 ms.
+
+**Co z tego widać w sesji** (runda (5)): przy tłumaczeniu z dostawcy czekanie na łatki po
+tłumaczeniu wynosi 0 ms (SceneReplay `glyphCoverWaitMs`: mediana 0, najwyżej 23,6 ms — pierwsza
+miękka łatka z kompilacją JIT); przy tłumaczeniu lokalnym (cache, korpus) dochodzi czas budowy,
+do ok. 16 ms na klatkę 4K. Wątek UI: układ WPF nowych napisów 5–21 ms na klatkę (pomiar grubości
+nowego tekstu), rozgrzanie krojów raz przy starcie live 212 ms.
+
+**Pamięć budowy** (pomiar przy aktualizacji tego dokumentu, 2026-10-06, kod wydania): bajty
+zaalokowane przez jedną budowę łatki (`GC.GetAllocatedBytesForCurrentThread`, po rozgrzaniu;
+budowa jest jednowątkowa), te same klatki 4K i bloki co wyżej, GC stacji roboczej.
+
+| Blok | Alokacja na budowę | Pełne odśmiecania (gen2) w 20 budowach |
+|---|---:|---:|
+| Etykiety i krótkie napisy (11 bloków, od 22×33 do 943×124 px) | 0,3–4,8 MB | 0 |
+| Szeroki napis 1263×69 px | 13,4 MB | 4 |
+| Dialog 3126×199 px, linie ≥ 90 px (liczony w połowie rozdzielczości) | 20,9–21,3 MB | 6–14 |
+| Ten sam dialog, linie 36–89 px (pełna rozdzielczość) | 71,7–75,9 MB | 15–35 |
+
+Wysokość linii w ostatnich dwóch wierszach jest wymuszona w pomiarze (prostokąty linii
+w bloku). Na tej klatce Windows OCR (OverlayPreview) dał dialogowi linie 92 px, czyli wariant
+w połowie rozdzielczości; dialogu z liniami poniżej 90 px w grze nie mierzono. Dialog w pełnej
+rozdzielczości buduje się też dłużej: mediana ok. 47–50 ms na blok (15–16 ms przy liniach
+≥ 90 px; te czasy pochodzą z podziału bloku na równe linie i nie zastępują czasów z rundy (5)
+wyżej). Każda budowa alokuje nowe tablice robocze (bez puli buforów), więc duże bloki
+wywołują pełne odśmiecania przy kolejnych budowach — to jeden z kierunków dalszych prac
+w [ROADMAP.md](ROADMAP.md) („Pamięć budowy łatki”; runda (5) podawała 21–58 MB na dialog,
+pomiar wyżej dał do ok. 76 MB przy liniach poniżej 90 px).

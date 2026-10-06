@@ -42,8 +42,14 @@ CorpusEval prefixes --corpus … --ocr … --cache KOPIA/cache.db --out LICZBY -
 CorpusEval typing --corpus … --ocr … --out LICZBY --private PRYWATNE
 ```
 
-`--features off` (evaluate, bench, replay) wyłącza etykiety, prefiksy dialogu i odrzucanie szumu —
-stan dopasowania sprzed rundy 2026-10-06 (4), do porównań przed/po na tych samych danych.
+`--features off` (evaluate, bench, replay, typing) wyłącza etykiety, prefiksy dialogu i odrzucanie
+szumu — stan dopasowania sprzed rundy 2026-10-06 (4), do porównań przed/po na tych samych danych.
+`session` zawsze liczy oba warianty (przed i po), więc tej opcji nie używa.
+
+Opcje spoza przykładów: `render --mode full|crop` (domyślnie `full`) i `render --examples KATALOG`
+(PNG pierwszych 24 próbek — teksty gry, tylko folder prywatny), `bench --synthetic N` (rozmiar
+korpusu syntetycznego, domyślnie 150 000), `replay` / `session --profile ID` (domyślnie
+`escape-academy`), `typing --wrap N` (szerokość zawijania czystych linii korpusu, domyślnie 48).
 
 `evaluate` liczy klucz prawdy przy ocenie z pola `truth` bieżącym `CorpusText.MatchKey`, a nie
 bierze go z próbki (`truthKey` zapisany przy renderze jest nieaktualny po zmianie klucza, np. po
@@ -57,10 +63,15 @@ pokazałaby nakładka — to teksty gry, więc `--work` musi być folderem prywa
 zapytania, teksty i znaki wysłane do dostawcy, bloki przyciągnięte (ze zmianą treści albo tylko
 wielkości liter), zgodność liczby wierszy wyświetlanego tłumaczenia z odczytem i czas próby lokalnej.
 
-Do katalogu `--out` trafiają wyłącznie liczby (`sweep.json`, `wybrane-progi.json`,
-`wyniki-progi.md`, `czasy-dopasowania.json`). Szczegóły z tekstami gry (błędne przyciągnięcia,
-próbka do ręcznego przeglądu, trafienia kontroli negatywnej) trafiają do `--private` — nigdy do
-repozytorium. Bazę cache czytaj z kopii (razem z `-wal` i `-shm`), w trybie tylko do odczytu.
+Do katalogu `--out` trafiają wyłącznie liczby: `sweep.json`, `wybrane-progi.json`,
+`wyniki-progi.md` (evaluate), `czasy-dopasowania.json` (bench), `powtorka.json` / `.md` (replay),
+`sesja.json` / `.md` (session), `prefiksy.json` / `.md` (prefixes) i `pisanie.json` / `.md`
+(typing). Szczegóły z tekstami gry (błędne przyciągnięcia, próbka do ręcznego przeglądu,
+trafienia kontroli negatywnej, odczyty sesji) trafiają do `--private` albo `--work` — nigdy do
+repozytorium: `bledy-syntetyczne.tsv`, `przeglad-przyblizone.tsv`, `poe2-trafienia.tsv`
+(evaluate), `prefiksy-bledne.tsv` (prefixes z `--only`), `pisanie-problemy.tsv` (typing),
+`przyciagniecia-do-przegladu.tsv` (replay) i `sesja-przeglad.tsv` (session). Bazę cache czytaj
+z kopii (razem z `-wal` i `-shm`), w trybie tylko do odczytu.
 
 Dni w cache są zaszyte w `EvalData` (pomiar z rundy 2026-10-06): Escape Academy 2026-09-04/12/13/15,
 kontrola negatywna — sesja Path of Exile 2 z 2026-08-06 do 12:00 UTC (po 12:00 tego dnia w cache

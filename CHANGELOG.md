@@ -4,6 +4,42 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
+Brak zmian po wydaniu 0.5.0.
+
+## [0.5.0] — 2026-10-06
+
+Duże wydanie: stary napis znika razem z oryginałem, tryb „Na oryginale (zakrywa)” wygląda jak
+napis gry, a dla Escape Academy jest spolszczenie z wyprzedzeniem — osobne narzędzie offline
+`CorpusTool` czyta teksty z plików wyłączonej gry, a aplikacja przyciąga do nich odczyty OCR
+(sama aplikacja plików gry nadal nie czyta, ADR-014). Przeszło 1697 testów xUnit na Windows
+(1251 Core + 280 Infrastructure + 166 CorpusTool), build bez ostrzeżeń; zachowanie sesji live
+sprawdzane w SceneReplay, wygląd na klatkach 4K z Escape Academy przez OverlayPreview. W grze na
+żywo była tylko krótka sesja Escape Academy rano 2026-10-06 na wersji z korpusem — przed
+dopasowaniem etykiet, odrzucaniem śmieci OCR, nowym wyglądem i wstrzymywaniem kwestii pisanej
+literami; tych zmian nikt jeszcze nie oglądał w grze — czekają na scenariusze M36–M40
+([MANUAL_TESTING.md](docs/MANUAL_TESTING.md)).
+
+**Najważniejsze dla gracza:**
+
+- **Tłumaczenie nie wisi po zniknięciu napisu** — znika razem z oryginałem także na
+  teksturowanym tle (w testach SceneReplay po 0,3–0,55 s, gdy w miejscu napisu nie zostaje
+  nawet ćwierć jego dawnego kontrastu; inaczej po kilku odczytach OCR), a gdy napis wróci
+  w ciągu 10 s, wraca też tłumaczenie, również na pasku napisów na dole.
+- **„Na oryginale (zakrywa)” wygląda jak gra:** znikają same litery oryginału (tło gry zostaje),
+  a polski tekst ma kolor, kontur, cień i wielkość liter napisu gry oraz krój z profilu gry
+  (Escape Academy: dołączony Lexend Deca). Ikony klawiszy zostają na miejscu.
+- **Dialog pisany litera po literze** (kwestia znana z korpusu gry) w trybie zakrywania zostaje
+  po angielsku, dopóki gra pisze, a potem od razu pokazuje całe polskie tłumaczenie kwestii
+  (w teście ok. 0,1–0,3 s po ostatniej literze) — bez mieszania języków.
+- **Spolszczenie z wyprzedzeniem dla Escape Academy:** `CorpusTool` raz wyciąga teksty z plików
+  gry i może je przetłumaczyć do lokalnej bazy (DeepL, DeepSeek albo inny serwer zgodny
+  z OpenAI). Odczyty OCR z pomyłkami, ucięte i krótkie etykiety trafiają wtedy w gotowe
+  tłumaczenia, a śmieci odczytane z ikon nie idą do dostawcy. W powtórce 242 bloków z dawnych
+  sesji gry przez pipeline (Mock, nie gra na żywo): z korpusem przetłumaczonym z wyprzedzeniem
+  57 zapytań do dostawcy, bez korpusu 241.
+- **DeepSeek jako gotowy serwer modelu językowego** z wyłączonym myśleniem (bez tego paczka
+  5 linii trwała 7–20 s).
+
 ### Wygląd napisów „Na oryginale (zakrywa)”
 
 - **Tłumaczenie wygląda jak napis gry.** Zamiast rozmytego prostokąta z obrazu znikają same
@@ -25,18 +61,19 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 - **Mniej migania:** tłumaczenie identyczne z oryginałem (nazwy, „OK”, logo) nie jest rysowane
   w trybie zakrywania — widać grę; taki napis nie był też już rozpoznawany jako „własne
   tłumaczenie” nakładki, przez co przy zmiennym tle znikał i wracał co kilka odczytów.
-- **Kwestia pisana literami nie miesza języków.** W trybie zakrywania dialog, który gra wpisuje
-  litera po literze, zostaje po angielsku, dopóki tekst rośnie, a gdy gra skończy pisać, od
-  razu pojawia się całe polskie tłumaczenie kwestii (w teście 0,1–0,4 s po ostatniej literze;
-  wcześniej polski tekst stał na dopisywanych angielskich literach, a krótki początek kwestii
-  migał niepełnym tłumaczeniem z dostawcy).
+- **Kwestia pisana literami nie miesza języków.** W trybie zakrywania dialog z korpusu aktywnego
+  profilu, który gra wpisuje litera po literze, zostaje po angielsku, dopóki tekst rośnie, a gdy
+  gra skończy pisać, od razu pojawia się całe polskie tłumaczenie kwestii (w teście ok. 0,1–0,3 s
+  po ostatniej literze; wcześniej polski tekst stał na dopisywanych angielskich literach,
+  a krótki początek kwestii migał niepełnym tłumaczeniem z dostawcy).
 - **Jedna grubość liter w menu:** napisy w tym samym stylu (rozmiar, kolor, obrys) dostają tę
   samą grubość kroju (wcześniej np. „Graj” cieńsze od „Ustawienia”).
 - **Wyśrodkowany napis zostaje na środku:** jednowierszowy napis wyśrodkowany na ekranie
   (np. baner w menu Escape Academy) rośnie w obie strony zamiast w prawo.
-- **Komunikat o pełnym ekranie:** gdy gra działa na wyłącznym pełnym ekranie i nie daje się
-  przechwycić jako okno, nakładka pokazuje „⚠ Pełny ekran utrudnia nakładkę — przełącz na okno
-  bez ramki” (instrukcja: zalecany tryb okna bez ramki).
+- **Komunikat o pełnym ekranie:** gdy okno gry zajmuje cały monitor i nie daje się przechwycić
+  jako okno (nie wspiera PrintWindow, typowe dla wyłącznego pełnego ekranu), nakładka pokazuje
+  „⚠ Pełny ekran utrudnia nakładkę — przełącz na okno bez ramki” (instrukcja: zalecany tryb okna
+  bez ramki).
 
 ### Tryb live — poprawki błędów
 
@@ -80,13 +117,13 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
   w repozytorium. Obsługiwana rodzina formatów: Unity TextAsset (kontener UnityFS z blokami LZ4
   albo luźny plik serializowany). Nakładka nadal nie czyta plików gry. Opis:
   [README narzędzia](tools/GameTranslatorOverlay.CorpusTool/README.md).
-- **Profil Escape Academy** (`profiles/escape-academy`): rozpoznaje grę po procesie i tytule
-  okna (bez zmiany ustawień OCR) i zawiera receptę korpusu dla narzędzia. Aplikacja włącza go
-  automatycznie, gdy żaden profil nie jest wybrany — nowe wpisy cache z tej gry dostają profil
-  `escape-academy` (dotychczasowe wpisy bez profilu nadal są czytane), a modele językowe
-  dostają nazwę gry w kontekście.
-- Profile gier mogą mieć opcjonalne sekcje `corpus` (recepta: kontener, plik, źródła z wzorcami
-  nazw i parserami `csv` / `srt`) i `online`; stare profile działają bez zmian.
+- **Profil Escape Academy** (`profiles/escape-academy`): rozpoznaje grę po nazwie procesu
+  (`Escape Academy.exe`; bez zmiany ustawień OCR) i zawiera receptę korpusu dla narzędzia.
+  Aplikacja włącza go automatycznie, gdy żaden profil nie jest wybrany — nowe wpisy cache
+  z tej gry dostają profil `escape-academy` (dotychczasowe wpisy bez profilu nadal są
+  czytane), a modele językowe dostają nazwę gry w kontekście.
+- Profile gier mogą mieć opcjonalną sekcję `corpus` (recepta: kontener, plik, źródła z wzorcami
+  nazw i parserami `csv` / `srt`) i pole `online`; stare profile działają bez zmian.
 - **Tłumaczenie korpusu z wyprzedzeniem:** `CorpusTool translate --profile <id> --provider
   deepl|llm|mock` tłumaczy korpus partiami (DeepL do 50, model językowy do 25 tekstów) z opisem
   sceny, mówcą, kluczem i kolumną kontekstu, w kolejności linii dialogu, z kontrolą jakości jak
@@ -94,7 +131,8 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
   `src=corpus`. Aplikacja z aktywnym profilem czyta te wpisy jak każdy inny wpis cache. Ręczne
   korekty, wpisy zatwierdzone i terminy słownika nie są nadpisywane; ponowne uruchomienie
   dokańcza przerwany przebieg, a partia z nieczytelną odpowiedzią albo odmową filtra jest dzielona
-  na połowy (przepadają tylko teksty nie do przetłumaczenia). Tryb prywatny = odmowa zapisu. `--dry-run` podaje liczbę tekstów,
+  na połowy (przepadają tylko teksty nie do przetłumaczenia). Włączony tryb prywatny = odmowa,
+  zanim cokolwiek zostanie wysłane (`--dry-run` tylko ostrzega). `--dry-run` podaje liczbę tekstów,
   znaków i szacunek kosztu (Escape Academy: 7 632 teksty, 248 979 znaków; DeepSeek bez myślenia
   ok. 0,12–0,24 USD, DeepL ok. 50% miesięcznego limitu API Free). Klucze wyłącznie ze zmiennych
   środowiskowych.
@@ -116,7 +154,9 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
   dotąd. Powtórka 242 bloków Escape Academy z kopii cache (Mock, korpus przetłumaczony
   z wyprzedzeniem): lokalnie 60,4% znaków i 49,6% bloków zamiast 0,3% i 0,4%, zapytania do
   dostawcy 241 → 122, znaki 4 214 → 1 678 —
-  [ROADMAP.md → Runda 2026-10-06 (3)](docs/ROADMAP.md).
+  [ROADMAP.md → Runda 2026-10-06 (3)](docs/ROADMAP.md). Z dopasowaniem etykiet i odrzucaniem
+  śmieci (niżej) ta sama powtórka daje 76,0% znaków i 62,0% bloków lokalnie oraz 57 zapytań
+  (runda (4), pomiar (c)).
 - Dokładny tekst korpusu aktywnego profilu (co najmniej 2 litery) przechodzi przez filtr śmieci
   OCR, który odrzuciłby go jako zbyt krótki albo nietypowy (Escape Academy: 14 takich tekstów).
 - Literalne `\n` w tekstach korpusu (30 tekstów interfejsu Escape Academy) jest nowym wierszem
@@ -166,7 +206,9 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
   kwestii — napis może pojawić się, zanim gra dopisze resztę. Kolejne, dłuższe odczyty tej samej
   kwestii trafiają w ten sam wpis tłumaczenia (zero nowych zapytań) i w ten sam blok nakładki:
   napis aktualizuje się w miejscu (rośnie razem z oryginałem), bez podmiany i bez ponownego
-  pojawiania się. Linie o wspólnym początku (np. ta sama kwestia w wersji dla jednego i dla dwóch
+  pojawiania się. Tak jest przy umiejscowieniu „Pod oryginałem” i w stylu „Napisy na dole”;
+  w trybie zakrywania kwestia czeka na koniec pisania (wyżej: „Kwestia pisana literami nie
+  miesza języków”). Linie o wspólnym początku (np. ta sama kwestia w wersji dla jednego i dla dwóch
   graczy) czekają, aż odczyt je rozróżni. Gdy na ekranie są już co najmniej dwa
   wiersze, tłumaczenie od razu dostaje przewidywaną liczbę wierszy całej kwestii.
 - **Śmieci OCR przy aktywnym korpusie** (zlepki liter odczytane z ikon i tekstur, same liczby
@@ -230,61 +272,17 @@ czas tłumaczenia (ten wyznaczają OCR i dostawca). Liczby przed/po:
 - **OverlayPreview** (`tools/GameTranslatorOverlay.OverlayPreview`, Windows): składa prawdziwą
   nakładkę (wspólny `App.Ui.OverlayBlockRenderer`, wydzielony z `OverlayWindow`) na klatce gry
   przez Windows OCR, bramkę live i lokalny pipeline z kopii bazy, zapisuje PNG, porównanie
-  i powiększenia bloków oraz `galeria.md`; sieć zablokowana, brak w bazie = Mock `[PL]`.
+  i powiększenia bloków oraz `galeria.md`; sieć zablokowana, brak w bazie = Mock `[PL]`. Opcje
+  `--cover crisp|soft|off` i `--font-family auto` (domyślnie, jak gracz); rozgrzanie krojów
+  i czasy układu WPF/łatek w konsoli. Galerie PRZED/PO:
+  `GTO Diagnostics\20261005-natywne-spolszczenie\krok-wyglad` (poza repo).
 - **Wstrzymanie niedokończonej kwestii:** `LiveSessionOptions.HoldTypingPrefixes`,
   `TypingPrefixSettleTime` (0,9 s), `TypingPrefixHoldLimit` (8 s), `TranslationPipeline.IsCorpusPrefix`,
   `CorpusSnapper.StartsSpokenLine`; SceneReplay `typing` / `typing-nohold` (pomiar w
   [ROADMAP.md → Runda 2026-10-06 (6)](docs/ROADMAP.md)). `OverlayFonts.ChooseStyleWeight`
   (grubość z głosów bloków w jednym stylu), `LiveSessionOptions.IdentityEchoSafe`.
-- **OverlayPreview:** `--cover crisp|soft|off`, `--font-family auto` (domyślnie, jak gracz),
-  rozgrzanie krojów i czasy układu WPF/łatek w konsoli. Galerie PRZED/PO:
-  `GTO Diagnostics\20261005-natywne-spolszczenie\krok-wyglad` (poza repo).
 - Testy: 24 nowe w Core (łatka, profil tuszu, ikony, kotwica, podpis, komunikat pełnego ekranu,
   `overlay.fontFamily`) i 4 w Infrastructure (migracja kroju) — wyłącznie dane syntetyczne.
-- **Core: przyciąganie odczytu OCR do korpusu gry** (`GameTranslatorOverlay.Core.Corpus`):
-  `CorpusIndex` (trigramy po tekście bez wielkości liter) i `CorpusSnapper` dopasowują cały
-  blok, akapity po `TextReflow.Unwrap` i pojedyncze wiersze (dokładnie, przybliżenie albo
-  fragment; składanie fragmentów z kolejnych wierszy). Zabezpieczenia: liczby 1:1, minimalna
-  długość przybliżeń, odstęp do drugiego kandydata, krótkie etykiety tylko dokładnie. Wpięte
-  w pipeline przez `TranslationUnitPlanner` (patrz wyżej). Pomiar na Escape Academy: 59,4% znaków z prawdziwych sesji obsłużonych
-  lokalnie (dziś 17,0%), 0,14% błędnych przyciągnięć na 880 próbkach przez Windows OCR, p95
-  0,9 ms (150 tys. tekstów: 4,8 ms) — [ROADMAP.md → Runda 2026-10-06](docs/ROADMAP.md).
-- **CorpusEval** (`tools/GameTranslatorOverlay.CorpusEval`, Windows): prawda syntetyczna przez
-  Windows OCR, przegląd progów na kopii cache i czasy dopasowania; do katalogu wyników trafiają
-  same liczby. Nowy projekt testów `tests/GameTranslatorOverlay.CorpusTool.Tests` (85 testów na
-  danych syntetycznych) i 70 nowych testów Core. Polecenie `replay` powtarza bloki z kopii cache
-  przez prawdziwy `TranslationPipeline` z Mockiem (bez korpusu, klucze po akapitach, korpus na
-  pustym cache, korpus na bazie z `translate`).
-- **Pipeline z jednostkami tłumaczenia:** `TranslationPipelineOptions.Corpus` i `SplitParagraphs`,
-  `TranslationOutcome.Parts` (części bloku: tekst z ekranu, klucz cache, pochodzenie, korpus)
-  i `CacheKey` (klucz, pod którym orkiestrator zapisuje ręczną korektę bloku będącego jednym
-  tekstem korpusu), `TranslationPipeline.IsExactCorpusText`, `CorpusCatalog` i
-  `AppPaths.CorpusDirectory` (Infrastructure). Testy: Core +30, Infrastructure +6 (dane
-  syntetyczne).
-- **ProviderEval:** opcje `--llm-thinking`, `--llm-effort`, `--llm-max-tokens`, `--llm-json`
-  i `--llm-no-preset` (pola zapytania serwera LLM bez zmiennych globalnych); po przebiegu suma
-  tokenów z `usage`. `EnvironmentTranslationProviders` (Infrastructure) buduje dostawców
-  z kluczami ze zmiennych środowiskowych dla narzędzi.
-- **Kontekst partii dla dostawców:** `TranslationContext.Scene` i `TextNotes` (opis sceny
-  i notatka do każdego tekstu — wiadomość modelu dostaje `"notes"`, DeepL scenę w `context`);
-  pipeline na żywo ich nie ustawia. `SqliteTranslationCache.PeekManyAsync` (odczyt bez liczników
-  użycia, połączenie tylko do odczytu) i `StoreManyAsync` (zapis partii w transakcji, bez
-  nadpisywania korekt i wpisów zatwierdzonych). `TranslationCacheContext` czyta i składa część
-  `src=…`; `CorpusTranslationKey` liczy klucz cache wpisu korpusu. Testy: Core +15,
-  Infrastructure +28, CorpusTool +62 (dostawcy przez atrapę HTTP, baza SQLite w katalogu
-  tymczasowym).
-- **Poprawki po recenzji korpusu (krok 2b):** `EditDistance.BoundedGuarded` / `GuardedRatio`
-  (odległość edycyjna z ochroną cyfr i znaków liczb), `CorpusText.IsNumberSign`,
-  `IsNumberCharacter`, `HasDigit`, `IsDigitMistakenFor`; `LooseKey` zostawia znak liczby na
-  brzegu. `TranslationOutcome.CacheKey` jest kanoniczny tylko przy dokładnym dopasowaniu
-  (`UnitPlan.CorrectionKey`). CorpusTool: `GameFolderGuard.ResolveGameRoot`, `LibraryDirectory`,
-  `LibraryGameRoot`, `FindDirectoryWithExecutable`, `CheckFolder(..., processNames)`,
-  `RunningGameGuard.FindRunning(..., gameRoot)`, `OutputLocationGuard.CheckOutsideGame`.
-  `CorpusEval evaluate` liczy klucz prawdy przy ocenie (`truthKeysRecomputed`); eksperyment
-  przeliczony na tych samych próbkach: 690 / 880 poprawnych (79,2% → 78,4%), błędne 0,14%,
-  cache EA 59,4% znaków bez zmian, p95 dopasowania 0,9 ms; powtórka przez pipeline bez zmian
-  (EA 217: 64,2% znaków, 52,1% bloków, 104 zapytania) —
-  [ROADMAP.md → Krok 2b](docs/ROADMAP.md). Testy: Core +58, CorpusTool +19.
 - **SceneReplay: scenariusze starego napisu** (`stale-junk`, `stale-junk-ghost`, `stale-texture`,
   `stale-newtext`, `stale-busy`) do zgłoszenia „tłumaczenie Inspect/Zbadaj zostaje po zniknięciu
   etykiety”. Etykieta znika lokalnie (5% okna, bez cięcia sceny) w oknie 1500×900 fizycznych
@@ -311,6 +309,70 @@ czas tłumaczenia (ten wyznaczają OCR i dostawca). Liczby przed/po:
   `LiveSubtitleContent.Restore`; `LiveReadingStabilizer` przyjmuje wiarygodny, niepowiązany
   odczyt gorszej jakości po dwóch kolejnych potwierdzeniach (wcześniej odrzucał go zawsze);
   71 nowych testów jednostkowych (36 + 35).
+- **Core: przyciąganie odczytu OCR do korpusu gry** (`GameTranslatorOverlay.Core.Corpus`):
+  `CorpusIndex` (trigramy po tekście bez wielkości liter) i `CorpusSnapper` dopasowują cały
+  blok, akapity po `TextReflow.Unwrap` i pojedyncze wiersze (dokładnie, przybliżenie albo
+  fragment; składanie fragmentów z kolejnych wierszy). Zabezpieczenia: liczby 1:1, minimalna
+  długość przybliżeń, odstęp do drugiego kandydata, krótkie etykiety dokładnie (od rundy (4)
+  także z typowymi pomyłkami OCR — niżej). Wpięte w pipeline przez `TranslationUnitPlanner`
+  (patrz wyżej). Pomiar na Escape Academy przy pierwszej wersji: 59,4% znaków z prawdziwych sesji
+  obsłużonych lokalnie (wcześniej 17,0%), 0,14% błędnych przyciągnięć na 880 próbkach przez
+  Windows OCR, p95 0,9 ms (150 tys. tekstów: 4,8 ms) —
+  [ROADMAP.md → Runda 2026-10-06](docs/ROADMAP.md).
+- **CorpusEval** (`tools/GameTranslatorOverlay.CorpusEval`, Windows): prawda syntetyczna przez
+  Windows OCR, przegląd progów na kopii cache i czasy dopasowania; do katalogu wyników trafiają
+  same liczby. Nowy projekt testów `tests/GameTranslatorOverlay.CorpusTool.Tests` (85 testów na
+  danych syntetycznych) i 70 nowych testów Core. Polecenie `replay` powtarza bloki z kopii cache
+  przez prawdziwy `TranslationPipeline` z Mockiem (bez korpusu, klucze po akapitach, korpus na
+  pustym cache, korpus na bazie z `translate`).
+- **Pipeline z jednostkami tłumaczenia:** `TranslationPipelineOptions.Corpus` i `SplitParagraphs`,
+  `TranslationOutcome.Parts` (części bloku: tekst z ekranu, klucz cache, pochodzenie, korpus)
+  i `CacheKey` (klucz, pod którym orkiestrator zapisuje ręczną korektę bloku będącego jednym
+  tekstem korpusu), `TranslationPipeline.IsExactCorpusText`, `CorpusCatalog` i
+  `AppPaths.CorpusDirectory` (Infrastructure). Testy: Core +30, Infrastructure +6 (dane
+  syntetyczne).
+- **Kontekst partii dla dostawców:** `TranslationContext.Scene` i `TextNotes` (opis sceny
+  i notatka do każdego tekstu — wiadomość modelu dostaje `"notes"`, DeepL scenę w `context`);
+  pipeline na żywo ich nie ustawia. `SqliteTranslationCache.PeekManyAsync` (odczyt bez liczników
+  użycia, połączenie tylko do odczytu) i `StoreManyAsync` (zapis partii w transakcji, bez
+  nadpisywania korekt i wpisów zatwierdzonych). `TranslationCacheContext` czyta i składa część
+  `src=…`; `CorpusTranslationKey` liczy klucz cache wpisu korpusu. Testy: Core +15,
+  Infrastructure +28, CorpusTool +62 (dostawcy przez atrapę HTTP, baza SQLite w katalogu
+  tymczasowym).
+- **ProviderEval:** opcje `--llm-thinking`, `--llm-effort`, `--llm-max-tokens`, `--llm-json`
+  i `--llm-no-preset` (pola zapytania serwera LLM bez zmiennych globalnych); po przebiegu suma
+  tokenów z `usage`. `EnvironmentTranslationProviders` (Infrastructure) buduje dostawców
+  z kluczami ze zmiennych środowiskowych dla narzędzi.
+- **Poprawki po recenzji korpusu (krok 2b):** `EditDistance.BoundedGuarded` / `GuardedRatio`
+  (odległość edycyjna z ochroną cyfr i znaków liczb), `CorpusText.IsNumberSign`,
+  `IsNumberCharacter`, `HasDigit`, `IsDigitMistakenFor`; `LooseKey` zostawia znak liczby na
+  brzegu. `TranslationOutcome.CacheKey` jest kanoniczny tylko przy dokładnym dopasowaniu
+  (`UnitPlan.CorrectionKey`). CorpusTool: `GameFolderGuard.ResolveGameRoot`, `LibraryDirectory`,
+  `LibraryGameRoot`, `FindDirectoryWithExecutable`, `CheckFolder(..., processNames)`,
+  `RunningGameGuard.FindRunning(..., gameRoot)`, `OutputLocationGuard.CheckOutsideGame`.
+  `CorpusEval evaluate` liczy klucz prawdy przy ocenie (`truthKeysRecomputed`); eksperyment
+  przeliczony na tych samych próbkach: 690 / 880 poprawnych (79,2% → 78,4%), błędne 0,14%,
+  cache EA 59,4% znaków bez zmian, p95 dopasowania 0,9 ms; powtórka przez pipeline bez zmian
+  (EA 217: 64,2% znaków, 52,1% bloków, 104 zapytania) —
+  [ROADMAP.md → Krok 2b](docs/ROADMAP.md). Testy: Core +58, CorpusTool +19.
+- **Etykiety, początek kwestii i szum przy korpusie** (runda 2026-10-06 (4)): `OcrEditDistance`
+  (`Distance`, `Prefix` — odległość edycyjna ważona typowymi pomyłkami OCR), wyszukiwanie
+  krótkich etykiet i początków linii dialogu w `CorpusSnapper` (`CorpusMatch.IsLabel`),
+  `CorpusSnapper.LooksLikeNoise` i bramka live `TranslationPipeline.ShouldTranslateLive`;
+  `TranslationPipeline.CorpusIdentity` z `LiveBlockKeyer.AssignKeys(..., identity)` daje ten sam
+  klucz nakładki kolejnym odczytom tej samej kwestii i drżeniu OCR etykiety. Przełączniki
+  `CorpusSnapOptions.AllowLabels`, `AllowPrefixes`, `RejectNoise`. CorpusEval: polecenia
+  `session`, `prefixes`, `typing` i `--features off` (dopasowanie sprzed rundy). Testy: Core +71
+  (dane syntetyczne). Pomiary: [ROADMAP.md → Runda 2026-10-06 (4)](docs/ROADMAP.md).
+- **Zależności i testy po 0.4.0:** Dependabot podniósł `System.Security.Cryptography.ProtectedData`
+  do 10.0.12, w projektach testów `coverlet.collector` do 10.1.0, `Microsoft.NET.Test.Sdk` do
+  18.10.1 i `xunit.runner.visualstudio` do 4.0.0, a w GitHub Actions `actions/checkout` do v7,
+  `actions/setup-dotnet` do v6, `actions/upload-artifact` do v7, `actions/cache` do v6
+  i `softprops/action-gh-release` do v3. Testy równoległych tłumaczeń nie zakładają już, że
+  wątek zdąży w określonym czasie (padały na wolnym runnerze CI), a sprzątanie bazy po teście
+  liczników działa także na Windows.
+- Testy: 1697 (1251 Core + 280 Infrastructure + 166 CorpusTool), zielone na Windows; build całego
+  rozwiązania bez ostrzeżeń.
 
 ## [0.4.0] — 2026-10-01
 

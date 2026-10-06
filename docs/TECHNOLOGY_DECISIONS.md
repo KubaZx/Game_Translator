@@ -193,6 +193,12 @@ pod tabele przypadków normalizacji i glossary, pierwszorzędne wsparcie `dotnet
 - **NUnit / MSTest** — pełnowartościowe, ale bez przewagi; xUnit ma najświeższą konwencję
   i najlepszą prasę w nowych projektach .NET.
 
+**Dopisek 2026-10-06.** Trzeci projekt testów, `tests/GameTranslatorOverlay.CorpusTool.Tests`
+(xUnit), obejmuje narzędzie z ADR-014 wyłącznie na danych syntetycznych, bez plików gier.
+Zachowanie zależne od pulpitu i czasu (nakładka, sesja live z łatką i wstrzymaniem kwestii)
+mierzą narzędzia dev SceneReplay i OverlayPreview — to pomiary opisane w `docs/ROADMAP.md`,
+nie testy uruchamiane przez `dotnet test`.
+
 ## ADR-010: CI na GitHub Actions, windows-latest
 
 **Kontekst.** Build wymaga Windows (TFM windowsowy, WPF). Repo na GitHubie. CI nie może
@@ -390,3 +396,157 @@ na ekranie w całości).
 - *Pkt 1 i 6 (zapis).* `--out`, `--stats` (`extract`) oraz `--cache`, `--stats` (`translate`)
   nie mogą leżeć w folderze gry, w jej katalogu głównym, pod `steamapps\common` (i analogicznie
   w bibliotekach Epic/GOG) ani w folderze zawierającym plik gry z `processNames` profilu.
+
+**Dopisek 2026-10-06 (4) — inne użycia korpusu w nakładce.** Dopisek (2) ograniczał korpus
+w nakładce do dopasowania odczytu OCR i klucza cache. Od rund 2026-10-06 (4)–(6) nakładka używa
+tego samego pliku (nadal wyłącznie danych z `extract`, nigdy plików gry) także do: odrzucania
+szumu OCR w bramce live (`TranslationPipeline.ShouldTranslateLive` — taki odczyt nie idzie do
+dostawcy ani na nakładkę), wspólnej tożsamości bloku nakładki dla kolejnych odczytów tej samej
+kwestii (`CorpusIdentity`) i — w trybie „Na oryginale (zakrywa)” — wstrzymania kwestii pisanej
+literami (`IsCorpusPrefix`, ADR-017). Przyciąganie początku linii dialogu albo napisów
+(`OcrEditDistance.Prefix`) może wysłać do dostawcy pełny tekst wpisu korpusu, gdy na ekranie
+jest dopiero jego początek — to przypadek z dopisku (3). Żadne z tych użyć nie wysyła pliku korpusu
+i nie dodaje ruchu sieciowego; bez pliku korpusu aktywnego profilu nic się nie zmienia.
+Doprecyzowanie pkt 6: `%LOCALAPPDATA%\GameTranslatorOverlay` jest miejscem domyślnym; `--out`,
+`--data-dir` i `--cache` mogą wskazać inny folder lokalny poza grą (dopisek (3)) i poza
+repozytorium (z wyjątkiem `eval/private/`), ale nakładka czyta korpus wyłącznie z folderu
+`corpus` w swoich danych (`%LOCALAPPDATA%\GameTranslatorOverlay\corpus`) — korpusu zapisanego
+gdzie indziej aplikacja nie widzi.
+
+## ADR-015: Łatka z wypełnionych liter zamiast rozmytej kopii tła (2026-10-06)
+
+**Kontekst.** W trybie „Na oryginale (zakrywa)” nakładka kładła pod tłumaczeniem rozmytą kopię
+tła spod boxu oryginału (`CoverPatchHost`). Galeria OverlayPreview na 4 klatkach 4K z Escape
+Academy (stan po rundzie 2026-10-06 (4)) dała 13 wad, m.in.: łatka ciemniejsza od tła
+o 11–19 poziomów i pusta smuga przy krótszym tekście, prześwitujący cień oryginału (6 px za
+boxem łatka kryła w 0,67), ikony klawiszy zjadane przez łatkę, kolorowe plamy w teksturze łatki,
+tłumaczenie 0,54–0,58× wysokości oryginału i biały kontur pod białym tekstem dialogu (próbnik
+wziął kolor szuflady dialogu #2F3940 za kolor tekstu). Ocena gracza: napisy „wyglądają mocno
+średnio”.
+
+**Decyzja.** Dla każdego bloku `GlyphCoverBuilder` (Core, `Vision/`) liczy z przechwyconej klatki
+łatkę RGBA: maskę liter (odchylenie od tła szacowanego z pierścienia wokół boxu i filtry top-hat,
+doprecyzowane progiem 50% kontrastu) oraz obwódkę (kontur, cień, antyaliasing). Piksele pod
+poszerzoną maską są wypełniane kolorami otoczenia (push-pull); krycie ma tylko miejsce liter,
+reszta łatki jest przezroczysta. Z tych samych pikseli mierzony jest styl: kolor tekstu, kontur,
+cień, linia bazowa i wysokość liter (`InkProfile`), wyrównanie i ikony klawiszy, które zostają
+nietknięte. Łatka powstaje w `LiveTranslationSession` w tle, równolegle z tłumaczeniem; przy
+niezmienionym podpisie pola jest używana ponownie, przy ruchomym tle jest miękka. Rysuje ją App
+(`GameTextElement`, tekst z geometrii). Gdy łatka nie powstanie, zostaje łatka poprzedniego
+przebiegu, a bez niej dawna rozmyta kopia tła.
+
+**Uzasadnienie (pomiar, runda 2026-10-06 (5)).** Na tych samych klatkach i ustawieniach:
+wysokość liter polskiego tekstu nad linią bazową 0,96–1,10× oryginału (wcześniej 0,54–0,58×),
+linia bazowa w 0–1 px od oryginału, kolor dialogu #8C8D8E przy ok. #8F9293 w grze, czarny kontur
+5–6 px z cieniem jak w grze. Poza pikselami liter łatka jest przezroczysta (test jednostkowy),
+więc nie ma ciemnej plamy ani smugi. Koszt na klatce 4K (32 wątki): budowa 1,7–24 ms na blok,
+cała klatka nowych napisów równolegle 2,3–16 ms, ponowne użycie 0,03–0,11 ms. Przy tłumaczeniu
+u dostawcy czekanie na łatkę po tłumaczeniu ma w SceneReplay medianę 0 ms (najwyżej 23,6 ms),
+przy tłumaczeniu lokalnym dochodzi czas budowy (do 16 ms na klatkę 4K). Scenariusze regresji
+SceneReplay bez zmian poza szumem (np. capture → aktualizacja 227–233 → 228–241 ms).
+
+**Odrzucone alternatywy.**
+- **Rozmyta kopia tła pod boxem (dotychczas)** — zmierzone wady z kontekstu; zostaje tylko jako
+  zapas, gdy łatka nie powstanie.
+- **Budowa łatki przy rysowaniu, na wątku UI** — do 24 ms na blok doszłoby do 5–21 ms układu WPF
+  na klatkę; w tle, równolegle z dostawcą, czekanie ma medianę 0 ms.
+
+**Konsekwencje i ryzyka.** Bitmapy i łatki zostają w pamięci komputera — do dostawcy nadal idzie
+wyłącznie tekst (ADR-003). Łatka jest liczona z klatki OCR, więc na ruchomym tle między przebiegami
+(ok. 0,6 s) wypełnione litery mogą odstawać od tła; miękka łatka nadal jest nieruchoma. Na gęstej
+teksturze w kolorze liter maska może objąć tło albo nie powstać. W powiększeniu 1:1 widać smugi
+w miejscu ogonków liter i na granicy dwóch płaskich teł. Budowa łatki dialogu w 4K alokuje
+ok. 21 MB (linie ≥ 90 px) do ok. 76 MB (linie 36–89 px) pamięci (`docs/BENCHMARKS.md`). Ruchome tło, smugi i pamięć budowy łatki są na liście kierunków dalszych prac
+w `docs/ROADMAP.md`.
+Sprawdzone na klatkach Escape Academy i w SceneReplay; nie w grze na żywo ani na innych grach.
+
+## ADR-016: Dołączony krój z licencją OFL i krój z profilu gry (2026-10-06)
+
+**Kontekst.** Nakładka rysowała napisy wyłącznie czcionkami systemowymi, domyślnie Segoe UI.
+W galerii przed rundą 2026-10-06 (5) cienki Segoe UI odstawał od grubego, zaokrąglonego kroju
+Escape Academy; porównanie glifów na klatkach wskazało rodzinę Lexend. Krój gry zwykle nie jest
+zainstalowany w systemie gracza.
+
+**Decyzja.** Aplikacja dołącza krój **Lexend Deca** (Regular, Medium, SemiBold, Bold; wersja
+1.007; SIL Open Font License 1.1) jako zasoby WPF (`src/GameTranslatorOverlay.App/Fonts`), bez
+instalacji w systemie. Pliki są niezmienione i nie są sprzedawane osobno (warunek 1 OFL); tekst
+licencji trafia obok programu jako `licenses/LexendDeca-OFL.txt`, wpis jest w
+`THIRD-PARTY-NOTICES.md`. Krój wskazuje profil gry polem `overlay.fontFamily` (nazwa, nie
+ścieżka, do 64 znaków). Nowe ustawienie kroju „Jak w grze (krój z profilu)” (`auto`) jest
+domyślne; dotychczasowy domyślny Segoe UI przechodzi na nie jeden raz (`overlayFontRevision`),
+inny jawnie wybrany krój zostaje. Bez profilu albo bez pola — Segoe UI. Nazwa jest szukana
+najpierw wśród krojów dołączonych (`OverlayFonts`), potem w systemie; krój bez dostępnych
+grubości zastępuje Segoe UI. Grubość dobiera nakładka do gęstości tuszu oryginału (ten sam
+tekst EN zrasteryzowany w każdej grubości), jedną dla bloków w tym samym stylu.
+
+**Uzasadnienie.** Krój zgodny z rodziną gry, z grubością z pomiaru: w galerii po rundzie
+2026-10-06 (5) jedno menu miało grubości od Normal do SemiBold, po rundzie (6), z jedną grubością
+na styl — całe menu Medium, dialog Normal. Koszt: cztery pliki TTF po ok. 79 KB (razem ok.
+315 KB) w assembly aplikacji i jednorazowe rozgrzanie krojów przy starcie live (ok. 212 ms na
+wątku UI). Licencja OFL pozwala dołączać krój do programu, także komercyjnego.
+
+**Odrzucone alternatywy.**
+- **Tylko czcionki systemowe** — gracz musiałby sam znaleźć i zainstalować krój gry.
+- **Krój z plików gry** — nakładka nie czyta plików gry (ADR-014), a krój w plikach gry jest
+  objęty licencją gry, nie naszą.
+- **Instalacja kroju w systemie przez aplikację** — zmiana systemu poza folderem programu,
+  sprzeczna z paczką portable (ADR-002).
+
+**Konsekwencje i ryzyka.** Kursywa, kerning i szerokość kroju gry nie są odwzorowane, a profil ma
+jeden krój dla wszystkich rodzajów tekstu (szeryfowy napis Escape Academy też dostaje Lexend) —
+kierunek dalszych prac w `docs/ROADMAP.md`. Grubość z gęstości tuszu bywa za cienka, gdy obrys
+gry wchodzi w lico liter. Kolejny dołączony krój wymaga pliku w `App/Fonts`, wpisu na liście
+krojów dołączonych w `OverlayFonts`, tekstu licencji kopiowanego obok programu (wpis w
+`GameTranslatorOverlay.App.csproj`) i wpisu w `THIRD-PARTY-NOTICES.md` — tylko krój, którego
+licencja pozwala go rozpowszechniać z programem.
+
+## ADR-017: Kwestia pisana literami czeka w trybie zakrywania (2026-10-06)
+
+**Kontekst.** Od rundy 2026-10-06 (4) odczyt będący jednoznacznym początkiem jednej linii dialogu
+albo napisów korpusu (od 12 liter i 3 słów, do 10% pomyłek OCR) od razu dostaje tłumaczenie
+całej kwestii (klucz = cała linia): mniej zapytań (CorpusEval `typing`, odczyty OCR dopisywane
+co 3 znaki: 5 188 → 2 214 tekstów do dostawcy) i napis wcześniej. Łatka z ADR-015 zakrywa jednak
+tylko litery widoczne w chwili odczytu. Razem dawało to polski tekst na dopisywanych angielskich
+literach (OverlayPreview: polski tekst 2,95× szerokości łatki nad widoczną częścią linii),
+a krótki początek kwestii poniżej progów migał niepełnym tłumaczeniem z dostawcy.
+
+**Decyzja.** W trybie „Na oryginale (zakrywa)” poza paskiem napisów
+(`LiveSessionOptions.HoldTypingPrefixes`) nowy blok, którego odczyt jest niedokończoną kwestią
+korpusu, nie jest tłumaczony ani pokazywany, dopóki tekst rośnie. Niedokończona kwestia
+(`TranslationPipeline.IsCorpusPrefix`) to przyciągnięcie początku linii, przybliżenie całej linii
+z brakiem co najmniej 3 i co najmniej 7% liter wpisu albo krótki początek poniżej progów
+przyciągania (`CorpusSnapper.StartsSpokenLine`: co najmniej 4 litery lub cyfry, dosłowny
+początek linii dialogu lub napisów dłuższej o co najmniej 3 litery lub cyfry, sam nie jest
+tekstem korpusu). Sesja prosi o kolejny odczyt pola i pokazuje pełne tłumaczenie, gdy odczyt
+przestaje być początkiem kwestii, gdy liczba liter nie rośnie przez 0,9 s
+(`TypingPrefixSettleTime`) albo po 8 s (`TypingPrefixHoldLimit`).
+Blok już wyświetlany pod tym samym kluczem nie jest wstrzymywany. W trybach z tekstem obok
+oryginału zostaje wczesne pełne tłumaczenie z rundy (4).
+
+**Uzasadnienie (pomiar, SceneReplay `typing` / `typing-nohold`).** Dwie syntetyczne linie
+wpisywane po 35 ms na znak z pauzą 450 ms po interpunkcji, korpus syntetyczny, OCR ze skryptu.
+Bez wstrzymywania: pełne tłumaczenie widoczne od ok. 4,2 s przed końcem pisania, na linię
+6 aktualizacji z polskim tekstem w trakcie pisania i 2 mignięcia niepełnego tłumaczenia,
+razem 4 zapytania do dostawcy.
+Ze wstrzymywaniem: 0 aktualizacji z polskim tekstem w trakcie pisania, 0 niepełnych tłumaczeń,
+napis ok. 0,1–0,3 s po ostatniej literze, 2 zapytania (pełne linie). Scenariusze regresji SceneReplay
+po zmianie (displayed, local-occlusion, reading-jitter, hud-motion, ocr-timing, stale-junk,
+stale-dim) dają oczekiwane wyniki.
+
+**Odrzucone alternatywy.**
+- **Wczesne pełne tłumaczenie także w trybie zakrywania** (stan z rundy (4)) — pomiar wyżej;
+  zostaje w trybach, w których tłumaczenie nie zakrywa oryginału.
+- **Tłumaczenie każdego widocznego początku osobno** (stan sprzed rundy (4)) — CorpusEval
+  `typing` na liniach korpusu dopisywanych co 3 znaki: 15 945 tekstów do dostawcy wobec 6 689
+  z przyciąganiem początku, a każdy dłuższy odczyt to nowe tłumaczenie.
+- **Łatka na całą przyszłą szerokość kwestii** — nakładka nie zna szerokości okna dialogu
+  (kierunek dalszych prac w `docs/ROADMAP.md`).
+- **Łatka odświeżana z każdej przechwyconej klatki, żeby zakrywać dopisywane litery** — wymaga
+  dopasowania łatki do tła między przebiegami OCR (kierunek dalszych prac w `docs/ROADMAP.md`);
+  nie zrobione i nie zmierzone.
+
+**Konsekwencje i ryzyka.** W trybie zakrywania tłumaczenie kwestii pojawia się dopiero po końcu
+pisania, a wstrzymany początek nie idzie do dostawcy. Gra z pauzą w środku kwestii dłuższą niż
+0,9 s pokaże pełne tłumaczenie w tej pauzie, a dopisywane potem litery wyjdą spod łatki do
+następnego odczytu. Tekst spoza korpusu, który jest początkiem kwestii korpusu, czeka 0,9 s.
+Nie sprawdzone w oknie gry na żywo.

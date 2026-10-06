@@ -3,7 +3,7 @@
   "name": "Path of Exile 2",
   "profileVersion": 1,
   "author": "GameTranslatorOverlay",
-  "description": "Profil gry Path of Exile 2 (Grinding Gear Games). Dopasowuje okno gry po nazwie procesu i tytule okna, podpina słownik terminów PoE2 (glossaries/path-of-exile-2) i ustawia parametry OCR pod drobny tekst interfejsu (opisy przedmiotów, statystyki). Zalecany tryb: ręczne zaznaczenie regionu (Ctrl+Shift+T) na opisie przedmiotu lub oknie dialogowym.",
+  "description": "Profil gry Path of Exile 2 (Grinding Gear Games). Dopasowuje okno gry po nazwie procesu, podpina słownik terminów PoE2 (glossaries/path-of-exile-2) i ustawia parametry OCR pod drobny tekst interfejsu (opisy przedmiotów, statystyki). Zalecany tryb: ręczne zaznaczenie regionu (Ctrl+Shift+T) na opisie przedmiotu lub oknie dialogowym.",
   "processNames": [
     "PathOfExile.exe",
     "PathOfExileSteam.exe",

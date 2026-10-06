@@ -12,9 +12,9 @@ nie używa kluczy, nie czyta ustawień ani bazy gracza.
 2. Przetwarza ją jak pierwszy pełny przebieg sesji live: skala OCR jak w `LiveTranslationSession`,
    Windows OCR, `TextBlockGrouper`, bramka `ShouldTranslateLive` (JunkFilter + szum korpusu),
    klucze `LiveBlockKeyer`, kolory/kontur/tekstura tła z `BlockColorSampler`, wysokość linii
-   z `TextBlockMetrics`, a w trybie `cover` łatka z wypełnionymi literami
-   (`GlyphCoverBuilder.BuildForBlock`, ta sama co w sesji live). Zamiast OCR można podać gotową
-   listę bloków (`--blocks`).
+   z `TextBlockMetrics`, a przy `--cover crisp|soft` łatka z wypełnionymi literami
+   (`GlyphCoverBuilder.BuildForBlock`, ta sama co w sesji live; rysowana tylko przy
+   `--placement cover`). Zamiast OCR można podać gotową listę bloków (`--blocks`).
 3. Tłumaczy przez prawdziwy `TranslationOrchestrator` (korekty → słownik → baza/korpus), na
    **kopii roboczej** podanej bazy. Tekst, którego nie ma lokalnie, dostaje Mock (`[PL] …`) —
    w aplikacji poszedłby do dostawcy. Kopia robocza powstaje w `<out>\_praca-…` i jest usuwana.
@@ -41,7 +41,7 @@ dotnet run --project tools/GameTranslatorOverlay.OverlayPreview -c Release --no-
 | `--frame PLIK` | — | klatka; można powtórzyć |
 | `--frames-dir KATALOG` | — | klatki z katalogu (rekurencyjnie), filtr `--pattern` (`*.png;*.jpg;*.jpeg`) |
 | `--out KATALOG` | — | galeria; **poza repozytorium** (zawiera obrazy i teksty gry) |
-| `--dpi` | `144` | DPI monitora gracza (144 = 4K przy 150%) |
+| `--dpi` | `144` | DPI monitora gracza (144 = 4K przy 150%), zakres 96–480 |
 | `--cache PLIK` | brak | baza tłumaczeń; czytana wyłącznie przez kopię roboczą |
 | `--corpus PLIK` | brak | korpus gry dla profilu (`*.corpus.jsonl` z CorpusTool) |
 | `--profile ID` | `escape-academy` | profil gry; `none` = bez profilu |
@@ -50,8 +50,8 @@ dotnet run --project tools/GameTranslatorOverlay.OverlayPreview -c Release --no-
 | `--font-size` | `0` | 0 = auto, jak ustawienie gracza |
 | `--font-family` | `auto` | czcionka nakładki; `auto` = krój z profilu gry (`overlay.fontFamily`), jak domyślnie u gracza |
 | `--cover` | `crisp` | `crisp` = wypełnione litery (jak live), `soft` = miękka łatka (tło w ruchu), `off` = dawna łatka z tekstury |
-| `--opacity` | `0.4` | `overlayBackgroundOpacity` z ustawień |
-| `--zoom` | `3` | powiększenie wycinków bloków (zmniejszane, gdy wycinek przekracza 2400 px) |
+| `--opacity` | `0.4` | `overlayBackgroundOpacity` z ustawień (0–1) |
+| `--zoom` | `3` | powiększenie wycinków bloków, 1–6 (zmniejszane, gdy wycinek przekracza 2400 px) |
 
 Kod wyjścia: 0 — galeria zapisana; 2 — błędne opcje; 3 — nie wczytano profilu lub korpusu;
 4 — brak pakietu Windows OCR dla języka źródłowego.
@@ -84,8 +84,12 @@ bez zmienności OCR.
 ## Ograniczenia
 
 - Odtwarza pierwszy pełny przebieg OCR. Wycinki z powiększeniem, histereza stylu, ponowne użycie
-  łatki po podpisie pola i podtrzymywanie bloków między klatkami (`LiveTranslationSession`) nie są
-  symulowane. Tłumaczenia identyczne z oryginałem nie są rysowane (jak w aplikacji).
+  łatki po podpisie pola, podtrzymywanie bloków między klatkami i wstrzymanie niedokończonej
+  kwestii (`HoldTypingPrefixes` w `LiveTranslationSession`) nie są symulowane — niedokończona
+  kwestia korpusu jest tłumaczona od razu (przyciągnięty początek: tłumaczeniem całej kwestii,
+  krótszy początek poniżej progów przyciągania: z bazy albo Mockiem), choć aplikacja w trybie
+  zakrywania by ją wstrzymała. Tłumaczenia identyczne z oryginałem nie są rysowane przy
+  `--placement cover` (jak w aplikacji).
 - `RenderTargetBitmap` rysuje programowo (antyaliasing w skali szarości, jak okno warstwowe
   nakładki); drobne różnice wygładzania względem GPU są możliwe.
 - Okno gry jest traktowane jak cały monitor (gra na pełnym ekranie, początek w 0,0).

@@ -45,7 +45,7 @@ Geometria reading-jitter/reading-whiff: FindWhiteBox uwzględnia piksele, który
 
 Parametry pomiaru czasu: --provider-delay-ms przyjmuje całkowite 0–5000 (domyślnie 2000) i ustawia rzeczywisty Delay dostawcy Mock. --phase-ms przyjmuje całkowite 0–200 (domyślnie 0); displayed/inflight odczekują ten czas po InitialDisplayed, przed pierwszą zmianą na scenę 2. Header zapisuje oba ustawienia. Summary initialDisplayedToScene2Ms obejmuje także dyspozytor/WPF Rendering i pokazuje rzeczywisty odstęp od callbacku początkowego do sceny 2. Dotychczasowe wywołania bez opcji zachowują ustawienia 2000/0.
 
-Niezerowa faza jest dostępna tylko dla displayed/inflight. Stop odrzuca opóźnienie inne niż 2000 lub fazę inną niż 0, bo ma stałe założenie dwóch oczekujących odpowiedzi. local-reading, reading-jitter i reading-whiff odrzucają samo podanie którejkolwiek nowej opcji, nawet z wartością domyślną. Przy zmianie Delay w ABA/churn/inflight trzeba uwzględnić, czy odpowiedź rzeczywiście nadal trwa podczas zmiany sceny; np. inflight przy Delay <250 ms może już nie przerywać oczekiwania.
+Niezerowa faza jest dostępna tylko dla displayed/inflight oraz stale-* (tam przesuwa mierzoną zmianę, opis niżej). Stop odrzuca opóźnienie inne niż 2000 lub fazę inną niż 0, bo ma stałe założenie dwóch oczekujących odpowiedzi. local-reading, reading-jitter i reading-whiff odrzucają samo podanie którejkolwiek nowej opcji, nawet z wartością domyślną. Przy zmianie Delay w ABA/churn/inflight trzeba uwzględnić, czy odpowiedź rzeczywiście nadal trwa podczas zmiany sceny; np. inflight przy Delay <250 ms może już nie przerywać oczekiwania.
 
 Każdy update z diagnostyką zawiera numeric captureMs, ocrMs i translateMs. Warianty displayed/inflight/aba/churn/stop/noisy (`Program.cs`) i stale-* zapisują też `glyphCoverMs` (budowa łatek z wypełnionymi literami w tle, od startu zadania do końca; 0 = łatki z poprzedniego przebiegu) i `glyphCoverWaitMs` (ile przetworzenie czekało na łatki po tłumaczeniu — to, co łatki dokładają do „zmiana → napis”). Sesja w SceneReplay buduje łatki zawsze (`BuildGlyphCovers` domyślnie true), choć narzędzie nie rysuje nakładki. Summary middleFirstOcrCompletedMs mierzy czas od Rendering sceny 2 do pierwszego zakończonego OCR rozpoznającego jej opis Archive; nie jest czasem rozpoczęcia OCR ani faktycznej prezentacji nakładki. middleReadyMs obejmuje także dalsze przetwarzanie/tłumaczenie. Gdy właściwego OCR/wyniku nie ma, odpowiedni pomiar pozostaje null.
 
@@ -177,14 +177,6 @@ mierzoną zmianą: bez niej zmiana wypada zawsze w tej samej fazie zegara przech
   `PreserveSubtitleLifetime`, czas paska 8 s jak domyślne `SubtitleSeconds`) i sprawdza, czy po
   powrocie etykiety jej tłumaczenie wraca także na pasek (`subtitleOldReturnedAfterSecondStepMs`),
   a nie tylko do bloków.
-- `typing` / `typing-nohold` (scripted OCR, `TypingReplay.cs`): okno wpisuje dwie syntetyczne
-  linie dialogu (35 ms na znak, 450 ms pauzy po interpunkcji), aktywny profil z syntetycznym
-  korpusem, Mock 0 ms. OCR czyta wpisaną część z pikseli: białe glify wyznaczają zasięg tuszu,
-  a tło koduje współrzędną x w kanałach RGB, więc wycinek OCR jest czytany od właściwej litery
-  (fragment, gdy wycinek nie obejmuje początku linii). Raport na linię: `shownAfterTypingEndMs`
-  (od zdarzenia końca pisania, po pauzie 450 ms za ostatnią kropką), `shownWhileTypingUpdates`,
-  `partialTranslationUpdates`, `textChanges`; w podsumowaniu zapytania do Mocka. `typing-nohold`
-  wyłącza `HoldTypingPrefixes` dla porównania.
 
 Geometria scripted OCR pochodzi wyłącznie z pikseli: znacznik #900090 8×8 px w środku
 starego pola glifów (rysowany we wszystkich wariantach scripted) wyznacza położenie i skalę także
@@ -254,3 +246,25 @@ stale-newdirty także pokazany nowy tekst); w stale-dim i stale-present-junk nap
 nie zniknął; w stale-blink napis zniknął i wrócił — w blokach i na pasku. JSONL nie
 zawiera pikseli ani treści OCR. To callbacki sesji, nie fizyczna nakładka ani zachowanie
 każdej gry; wariant scripted bada logikę sesji, nie to, czy Windows OCR naprawdę czyta śmieci.
+
+## Kwestia pisana literami
+
+`typing` i `typing-nohold` w `TypingReplay.cs` (scripted OCR): własne okno wpisuje dwie
+syntetyczne linie dialogu (35 ms na znak, 450 ms pauzy po `.`, `,`, `!`, `?`), każda zostaje
+na ekranie 3 s, potem znika. Sesja ma aktywny profil z syntetycznym korpusem (obie linie i trzy
+teksty-zmyłki) w katalogu tymczasowym, Mock 0 ms, tryb prywatny i zablokowane HTTP.
+OCR czyta wpisaną część z pikseli: białe glify wyznaczają zasięg tuszu, a tło koduje współrzędną
+x w kanałach RGB, więc wycinek OCR jest czytany od właściwej litery (fragment, gdy wycinek nie
+obejmuje początku linii). `typing` włącza `HoldTypingPrefixes` (jak aplikacja w trybie
+zakrywania), `typing-nohold` je wyłącza dla porównania. Odrzucane: `--provider-delay-ms`,
+`--phase-ms`, `--ocr-delay-ms`, `--ocr windows` i opcje stale-*.
+
+Raport na linię: `shownAfterTypingEndMs` (od zdarzenia końca pisania, czyli po pauzie 450 ms
+za ostatnią kropką; wartość ujemna = napis pojawił się jeszcze w tej pauzie),
+`shownWhileTypingUpdates`, `partialTranslationUpdates`, `textChanges`; w podsumowaniu
+`fixtureValid`, `holdTypingPrefixes` i zapytania do Mocka. `fixtureValid` wymaga w każdej linii
+końca pisania, co najmniej jednego odczytu niepełnej linii i pokazanego tłumaczenia, zera
+wycinków bez odczytanej współrzędnej (`undecodedCrops`) i braku fallbacku. Nieważna próba albo
+nieudane zamknięcie sesji lub okna kończy się kodem 4, błąd albo timeout w trakcie próby —
+kodem 3. Zdarzenia `ocr` zapisują długości odczytów, nie ich treść; zdarzenia `update` zapisują
+pokazane tłumaczenie Mocka syntetycznych linii.

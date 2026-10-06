@@ -3,7 +3,7 @@
   "name": "Escape Academy",
   "profileVersion": 1,
   "author": "GameTranslatorOverlay",
-  "description": "Profil gry Escape Academy (Coin Crew Games). Dopasowuje okno gry po nazwie procesu i tytule okna; parametry OCR i wykrywania zmian zostają z ustawień aplikacji. Sekcja corpus to recepta dla narzędzia offline CorpusTool (ADR-014): które TextAssety z data.unity3d są tekstem dla gracza — tabele GameplayStrings (klucz, tekst EN, kontekst), angielskie tabele dialogów Yarn (sufiks en-US) i angielskie napisy SRT z mówcą. Aplikacja tej sekcji nie czyta i sama nie otwiera plików gry.",
+  "description": "Profil gry Escape Academy (Coin Crew Games). Dopasowuje okno gry po nazwie procesu; parametry OCR i wykrywania zmian zostają z ustawień aplikacji. Sekcja corpus to recepta dla narzędzia offline CorpusTool (ADR-014): które TextAssety z data.unity3d są tekstem dla gracza — tabele GameplayStrings (klucz, tekst EN, kontekst), angielskie tabele dialogów Yarn (sufiks en-US) i angielskie napisy SRT z mówcą. Aplikacja tej sekcji nie czyta i sama nie otwiera plików gry.",
   "processNames": ["Escape Academy.exe"],
   "windowTitles": ["Escape Academy"],
   "sourceLanguage": "en",

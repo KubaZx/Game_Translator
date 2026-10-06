@@ -13,7 +13,8 @@ na ekranie**. Program:
    (GDI: `CopyFromScreen`/BitBlt dla regionu, `PrintWindow` z `PW_RENDERFULLCONTENT` dla okna;
    Windows Graphics Capture pozostaje możliwym przyszłym ulepszeniem),
 2. rozpoznaje tekst lokalnie systemowym OCR (`Windows.Media.Ocr`),
-3. tłumaczy rozpoznany tekst,
+3. tłumaczy rozpoznany tekst (przy lokalnym korpusie gry z ADR-014 — dopasowany do niego tekst
+   z korpusu),
 4. wyświetla wynik we **własnym, osobnym oknie** nad grą.
 
 Z perspektywy gry program jest nieodróżnialny od użytkownika patrzącego na ekran. Nie komunikuje
@@ -23,7 +24,20 @@ się z procesem gry w żaden sposób i nie wpływa na jej działanie.
 i przy wyłączonej grze — czytać pliki gry **wyłącznie do odczytu**, żeby zbudować lokalny korpus
 tekstów źródłowych. Nie dotyczy gier online ani gier z anti-cheatem, zaszyfrowanych lub
 podpisanych kontenerów, nie obejmuje żadnego zapisu w folderze gry ani obchodzenia zabezpieczeń.
-Sama nakładka plików gry nie czyta.
+Sama nakładka plików gry nie czyta — z danych wytworzonych przez narzędzie czyta tylko plik
+korpusu (`<folder danych>\corpus\<id aktywnego profilu>.corpus.jsonl`) i wpisy, które
+`CorpusTool translate` zapisał w lokalnej bazie tłumaczeń.
+
+Warunki ADR-014 są w kodzie `tools/GameTranslatorOverlay.CorpusTool` jako twarde straże z testami,
+bez opcji obejścia: proces gry jest sprawdzany przed odczytem jakiegokolwiek pliku w folderze
+gry, także nagłówków `.pak`/`.utoc` (`RunningGameGuard`); znaczniki anti-cheata (EasyAntiCheat,
+BattlEye), pliki `.sig` i zaszyfrowane kontenery są szukane w całym katalogu głównym gry, także
+gdy wskazano podfolder
+(`GameFolderGuard`); profile oznaczone jako online i lista wykluczeń (Path of Exile 1/2) dają
+odmowę; pliki gry są otwierane tylko do odczytu, bez blokowania (`FileShare.ReadWrite |
+FileShare.Delete`); wynik nie może leżeć w folderze gry, pod `steamapps\common` (ani
+w bibliotekach Epic/GOG) ani w repozytorium poza `eval/private/` (`OutputLocationGuard`).
+Narzędzie niczego nie pobiera; jedyny ruch sieciowy to jawne `translate --provider deepl|llm`.
 
 ## Techniki ZABRONIONE
 
@@ -65,11 +79,18 @@ per-monitor DPI (manifest PerMonitorV2). W praktyce oznacza to:
 
 - **click-through** — kliknięcia przechodzą przez nakładkę do gry, jakby jej nie było,
 - **bez fokusu** — nakładka nigdy nie zabiera grze fokusu ani sterowania,
-- nakładka jedynie rysuje tekst nad grą, korzystając ze standardowej kompozycji okien Windows.
+- nakładka jedynie rysuje nad grą tekst, korzystając ze standardowej kompozycji okien Windows.
+  W trybie „Na oryginale (zakrywa)” rysuje też łatkę zakrywającą oryginalny napis — wycinek
+  przechwyconej klatki z literami wypełnionymi kolorami tła, policzony w pamięci procesu
+  GameTranslatorOverlay. Obraz gry nie jest zmieniany: łatka i tłumaczenie leżą we własnym
+  oknie nakładki. Dołączony krój Lexend Deca jest zasobem aplikacji (pozostałe to kroje
+  zainstalowane w Windows) — nakładka niczego nie pobiera i nie korzysta z plików gry.
 
 Ograniczenie: exclusive fullscreen nie jest obsługiwany (nakładka nie jest wtedy widoczna);
 obsługiwane są okna i borderless fullscreen. To ograniczenie jest udokumentowane celowo —
-alternatywą byłyby techniki ingerujące w grę, których nie stosujemy.
+alternatywą byłyby techniki ingerujące w grę, których nie stosujemy. Gdy okno gry zajmuje cały
+monitor i nie daje się przechwycić jako okno (`PrintWindow`), nakładka pokazuje komunikat
+„⚠ Pełny ekran utrudnia nakładkę — przełącz na okno bez ramki”.
 
 ## Obowiązkowy disclaimer w aplikacji
 
@@ -96,8 +117,11 @@ Klucze trafiają wyłącznie do nagłówków zapytań (`DeepL-Auth-Key`, `Ocp-Ap
 zgodnego z OpenAI musi używać **HTTPS**; zwykłe HTTP jest dozwolone tylko dla serwera na tym
 komputerze (loopback), a adres z loginem lub parametrami jest odrzucany. Dzięki temu klucz
 i tekst z ekranu nie przechodzą przez sieć otwartym tekstem. Klucz serwera LLM jest przypisany
-do adresu, dla którego go zapisano, i nie jest wysyłany do innego serwera. Klient Claude ma
-jawnie ustawiony adres API, więc zmienne środowiskowe SDK nie przekierują klucza.
+do adresu, dla którego go zapisano, i nie jest wysyłany do innego serwera. Tak samo opcje
+serwera LLM (`llmServerOptions`: `thinking`, `reasoning_effort`, `max_tokens`,
+`response_format`) trafiają do zapytania tylko pod host, dla którego je zapisano; wartości spoza
+liter i cyfr ASCII, `_`, `-` i `.` (albo dłuższe niż 32 znaki) są pomijane. Klient Claude ma jawnie
+ustawiony adres API, więc zmienne środowiskowe SDK nie przekierują klucza.
 
 Czego **NIGDY** nie robimy z kluczami API:
 
@@ -109,8 +133,13 @@ Czego **NIGDY** nie robimy z kluczami API:
 - nie przechowujemy ich w postaci jawnej na dysku.
 
 W środowisku deweloperskim klucze podaje się przez zmienne środowiskowe lub User Secrets —
-nigdy przez pliki commitowane do repo. CI buduje i testuje wyłącznie z `MockTranslationProvider`,
-zero sekretów w pipeline.
+nigdy przez pliki commitowane do repo. Narzędzia `ProviderEval` i `CorpusTool translate` biorą
+klucze wyłącznie ze zmiennych środowiskowych (`GTO_DEEPL_KEY`, `GTO_LLM_ENDPOINT` +
+`GTO_LLM_MODEL` + opcjonalnie `GTO_LLM_KEY` i inne), nigdy z DPAPI aplikacji; `GTO_LLM_KEY` jest
+wysyłany tylko pod adres z `GTO_LLM_ENDPOINT`. Narzędzia bez prawdziwych dostawców
+(`OverlayPreview`, `SceneReplay`, `LiveDiag`) mają HTTP zablokowane i nie używają kluczy;
+`CorpusEval` w ogóle nie tworzy klienta HTTP.
+CI buduje i testuje wyłącznie z `MockTranslationProvider`, zero sekretów w pipeline.
 
 ## Zasady dla kontrybutorów
 
@@ -120,10 +149,15 @@ Każdy pull request musi respektować ten dokument. Konkretnie:
    procesu gry, wysyłanie inputu do gry itd. zostanie odrzucony bez względu na to, jaką
    funkcję realizuje.
 2. **Żadnych sekretów w repo** — klucze API, tokeny i dane dostępowe nie mogą trafić do kodu,
-   testów, fixture'ów ani historii gita. Testy używają `MockTranslationProvider`.
+   testów, fixture'ów ani historii gita. Testy używają `MockTranslationProvider`. To samo
+   dotyczy tekstów i obrazów z gier (korpusy, kopie baz tłumaczeń, klatki, galerie
+   OverlayPreview) — zostają lokalnie, poza repozytorium albo w `eval/private/`; testy korpusu
+   i łatki używają wyłącznie danych syntetycznych.
 3. **Nowe funkcje = pasywne funkcje** — jeżeli funkcja wymaga interakcji z procesem gry,
    nie pasuje do tego projektu. Specyfika gry może żyć wyłącznie w opcjonalnych profilach JSON
-   (`profiles/`) i słownikach (`glossaries/`) — czyli w danych, nie w kodzie ingerującym w grę.
+   (`profiles/`, w tym recepta korpusu ADR-014 w sekcji `corpus` i krój nakładki
+   `overlay.fontFamily`) i słownikach (`glossaries/`) — czyli w danych, nie w kodzie
+   ingerującym w grę.
 4. **Zależności pod lupą** — nie dodajemy bibliotek, których działanie opiera się na technikach
    z listy zabronionych (np. biblioteki overlayowe oparte na hookach graficznych).
 5. **Wątpliwość = pytanie** — jeśli nie masz pewności, czy technika jest dozwolona, opisz ją

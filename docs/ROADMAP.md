@@ -1,24 +1,43 @@
 # Roadmap — GameTranslatorOverlay
 
-## Obecny stan — 1 października 2026
+## Obecny stan — 6 października 2026
 
-Ostatnie wydanie to **0.4.0** (1 października 2026): szybszy tryb live (stabilność liczona od
-zauważonej zmiany, znane ekrany bez kolejki, pomiar „Zmiana → napis”), komunikaty w nakładce,
-start/stop live skrótem `Ctrl+Shift+L`, pamięć dialogu i postać gracza dla modeli językowych,
-kontrola jakości wyniku, glosariusze DeepL ze słownika (w tle), liczba mnoga i zakres „Etykieta”
-w słowniku oraz poprawki cache (pętla płatnych zapytań, odporność na błędy bazy) i prywatności
-(terminy prywatne poza glosariuszem DeepL). Dla deweloperów: ProviderEval, benchmarki
-BenchmarkDotNet, pokrycie kodu z progiem w CI. Linia 0.3 dodała wybór dostawcy tłumaczeń
-i poprawki live po 0.2.2.
+Ostatnie wydanie to **0.5.0** (6 października 2026): stary napis znika razem z oryginałem (sonda
+pikseli `KnownTextAbsenceProbe` także na teksturze, pełny skan co 4 s niezależnie od wycinków,
+śmieciowy odczyt nie podtrzymuje ani nie przywraca napisu, a tłumaczenie napisu, który wróci
+w ciągu 10 s, wraca też na pasek napisów); korpus tekstów gry według ADR-014 — osobne narzędzie
+offline `CorpusTool` (`extract`, `translate`) czyta teksty z plików wyłączonej gry według recepty
+w profilu (pierwsza: Escape Academy) i tłumaczy je z wyprzedzeniem do cache, a aplikacja wczytuje
+tylko jego wynik (`<folder danych>\corpus\<profil>.corpus.jsonl`) i przyciąga do niego odczyty
+OCR, także krótkie etykiety z pomyłkami OCR i początki kwestii dialogu, a śmieci OCR odrzuca;
+opcje serwera LLM przypisane do adresu (gotowy DeepSeek bez myślenia, Ollama
+z `reasoning_effort: none`); tryb „Na oryginale (zakrywa)” wygląda jak napis gry (wypełnione
+litery oryginału zamiast prostokąta, kolor, kontur, cień i linia bazowa z pikseli gry, krój
+z profilu — dołączony Lexend Deca, ustawienie „Jak w grze (krój z profilu)”), a kwestia
+z korpusu pisana literami czeka w nim na koniec pisania. Dla deweloperów: OverlayPreview
+(prawdziwa nakładka na zapisanych klatkach gry), CorpusEval, scenariusze SceneReplay `stale-*`
+i `typing`, projekt testów CorpusTool. Linia 0.4 dała szybszy tryb live, komunikaty w nakładce,
+pamięć dialogu i glosariusze DeepL.
 
-Przeszło **1114 testów** (880 Core + 234 Infrastructure; na Linuksie 3 testy DPAPI pominięte)
-i kompilacja całego rozwiązania. Nic z wydania 0.4.0 nie było uruchamiane w oknie na Windows
-ani z prawdziwymi dostawcami — scenariusze M23–M35 czekają na Windows.
+Przeszło **1697 testów** (1251 Core + 280 Infrastructure + 166 CorpusTool) na Windows; build
+całego rozwiązania bez ostrzeżeń. Zachowanie sesji live zmierzono w SceneReplay (callbacki sesji,
+nie fizyczna nakładka), wygląd — na klatkach 4K z Escape Academy przez OverlayPreview, dopasowanie
+do korpusu — powtórkami bloków z kopii cache przez pipeline z Mockiem (CorpusEval).
+**W grze na żywo** była tylko krótka sesja Escape Academy rano 6 października na wersji
+z korpusem, przed rundami 2026-10-06 (4)–(6). Nie oglądano jeszcze w grze dopasowania etykiet
+i początków kwestii, odrzucania śmieci, nowego wyglądu napisów ani wstrzymywania kwestii pisanej
+literami; w innych grach nic z linii 0.5 nie było sprawdzane na żywo. Scenariusze ręczne
+wydania 0.5.0 to M36–M40 z [MANUAL_TESTING.md](MANUAL_TESTING.md); przejście scenariuszy
+M23–M35 z linii 0.3–0.4 nie jest nigdzie odnotowane.
 
-Produkt jest rozwijany dla różnych gier. Escape Academy służy do pomiarów;
-PoE2 jest jednym z obsługiwanych przypadków z dodatkowym profilem. Aktualny priorytet
-to stabilność i czytelność w rozgrywce. Etapy poniżej zachowują historię powstawania
-produktu; status implementacji nie zastępuje testów wizualnych na kolejnych grach.
+Produkt jest rozwijany dla różnych gier. Escape Academy (profil z receptą korpusu i krojem) służy
+do pomiarów; PoE2 jest jednym z obsługiwanych przypadków z dodatkowym profilem, bez korpusu
+(Path of Exile 1/2 są na liście wykluczeń ADR-014). Aktualny priorytet: sprawdzić 0.5.0 w grze
+na żywo — wygląd w trybie zakrywania, kwestie pisane literami, etykiety i odrzucanie śmieci przy
+korpusie — i dopiero na tej podstawie wybierać kolejne kierunki; dalej stabilność i czytelność
+w rozgrywce.
+Etapy poniżej zachowują historię powstawania produktu; status implementacji nie zastępuje testów
+wizualnych na kolejnych grach.
 
 ## Kierunki dalszych prac
 
@@ -42,7 +61,9 @@ produktu; status implementacji nie zastępuje testów wizualnych na kolejnych gr
 13. Pilotaż `paragraphCacheKeys` u prawdziwego dostawcy (najpierw PoE2: 21% znaków
     powtórzonych w innych blokach) i decyzja o włączeniu domyślnie — runda 2026-10-06 (3).
 14. Tryb prywatny: czytanie (bez zapisu) tłumaczeń korpusu z wyprzedzeniem z bazy na dysku.
-15. Odświeżenie korpusu po nowym `extract`/`translate` bez restartu aplikacji.
+15. Odświeżenie korpusu po nowym `extract`/`translate` bez restartu aplikacji (dziś plik korpusu
+    jest czytany ponownie dopiero przy przebudowie pipeline'u po zmianie ustawień tłumaczenia albo
+    profilu, a tłumaczenia już odczytane z bazy zostają w pamięci trafień do restartu).
 16. Szerokość okna dialogu dla jednowierszowego początku kwestii (geometria bloku z nakładki),
     żeby pełne tłumaczenie od pierwszego odczytu miało docelową liczbę wierszy w trybach z tekstem
     obok oryginału (w trybie zakrywania kwestia czeka na koniec pisania) — rundy 2026-10-06 (4), (6).
@@ -56,9 +77,10 @@ produktu; status implementacji nie zastępuje testów wizualnych na kolejnych gr
     tylko do następnego bloku albo krawędzi monitora) — runda 2026-10-06 (5).
 21. Smugi po wypełnianiu liter: ciemne kleksy w miejscu ogonków („p”, „y”) i rozmyta granica dwóch
     płaskich teł pod napisem (widoczne w powiększeniu 1:1) — runda 2026-10-06 (5).
-22. Pamięć budowy łatki: 21–58 MB na dialog w 4K (linie 36–89 px bez zmniejszania), pełne
-    odśmiecania przy kolejnych budowach — bufory wielokrotnego użytku albo niższy próg
-    zmniejszania — runda 2026-10-06 (5).
+22. Pamięć budowy łatki dialogu w 4K: ok. 21 MB przy liniach ≥ 90 px (liczony w połowie
+    rozdzielczości), 72–76 MB przy liniach 36–89 px (pełna rozdzielczość; w rundzie (5) podano
+    21–58 MB), pełne odśmiecania przy kolejnych budowach — bufory wielokrotnego użytku albo niższy
+    próg zmniejszania — runda 2026-10-06 (5), [BENCHMARKS.md](BENCHMARKS.md).
 23. Praca na wątku UI: rozgrzanie krojów (ok. 212 ms przy starcie live) i pomiar grubości nowego
     tekstu (4 rendery) poza wątkiem UI — runda 2026-10-06 (5).
 24. Odróżnienie wyłącznego pełnego ekranu od okna bez ramki w komunikacie o pełnym ekranie
@@ -145,7 +167,7 @@ Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po naz
 
 **Kryterium ukończenia:** aplikacja wykrywa uruchomione PoE2 i proponuje profil; profil ustawia parametry i słownik; usunięcie profilu nie zmienia działania aplikacji dla innych gier.
 
-### Etap 12 — Dystrybucja portable (wydanie 0.4.0; pełna ocena ręczna według checklisty nadal osobna)
+### Etap 12 — Dystrybucja portable (wydanie 0.5.0; pełna ocena ręczna według checklisty nadal osobna)
 
 Release: `dotnet publish` win-x64, aplikacja portable. Instrukcje użytkownika, `MANUAL_TESTING.md` (testy wymagające pulpitu Windows: OCR na żywo, nakładka, skróty — wyłącznie ręczne), licencje zależności, polityka prywatności, disclaimer. Artefakt Release z CI na tag lub manualnie.
 
@@ -1425,7 +1447,8 @@ tłumaczeń identycznych z oryginałem także w trybach, które je rysują.
   całej linii z brakiem co najmniej 3 liter i 7% liter korpusu (długi początek kwestii mieści się
   w progu przybliżenia 0,80) oraz krótki początek kwestii poniżej progów przyciągania
   (`CorpusSnapper.StartsSpokenLine`: co najmniej 4 litery, początek dłuższej o 3 litery linii
-  dialogu lub napisów, sam nie jest tekstem korpusu) — ten ostatni nie idzie już do dostawcy.
+  dialogu lub napisów, sam nie jest tekstem korpusu) — przy wstrzymywaniu (tryb zakrywania bez
+  paska napisów) ten ostatni nie idzie już do dostawcy; `IsCorpusPrefix` jest używane tylko tam.
 - `OverlayFonts.ChooseStyleWeight`: grubość wybierana z głosów bloków w tym samym stylu (krój,
   wysokość liter ±20%, kolor tekstu, obecność obrysu; górna mediana), głosy wszystkich bloków
   aktualizacji zbierane przed układem.
@@ -1442,9 +1465,13 @@ tłumaczeń identycznych z oryginałem także w trybach, które je rysują.
 przed końcem pisania, 6 aktualizacji z polskim tekstem w trakcie pisania na linię, 2 mignięcia
 niepełnego tłumaczenia początku na linię, 4 zapytania do dostawcy. Ze wstrzymywaniem: 0
 aktualizacji z polskim tekstem w trakcie pisania, 0 niepełnych tłumaczeń, 0 podmian tekstu,
-napis 0,1–0,4 s po ostatniej literze, 2 zapytania (pełne linie; w aplikacji z tłumaczeniem
-korpusu z wyprzedzeniem 0). OverlayPreview (`krok-wyglad\po2`): menu jednolicie Lexend Deca
-Medium, dialog Normal, baner wyśrodkowany pod środkiem ekranu.
+napis ok. 0,1–0,3 s po ostatniej literze, 2 zapytania (pełne linie; w aplikacji z tłumaczeniem
+korpusu z wyprzedzeniem 0). Sprostowanie: wcześniej podano 0,1–0,4 s — to wartości
+`shownAfterTypingEndMs` (−131 i −389 ms) bez znaku; zdarzenie końca pisania przychodzi 450 ms
+po ostatniej kropce, więc napis pojawił się jeszcze w tej pauzie, ok. 0,06–0,33 s po ostatniej
+literze. Czasy „przed końcem pisania” wyżej też liczą się od tego zdarzenia. OverlayPreview
+(`krok-wyglad\po2`): menu jednolicie Lexend Deca Medium, dialog Normal, baner wyśrodkowany pod
+środkiem ekranu.
 
 **Regresje (SceneReplay po zmianach).** displayed: stary usunięty po 13 ms; local-occlusion:
 expected true, 0 strat menu; reading-jitter: B nie pokazany; hud-motion: expected true, 0 strat;

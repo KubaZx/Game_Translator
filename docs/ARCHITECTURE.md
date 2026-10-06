@@ -8,8 +8,9 @@ ingerencji w grę. Decyzje technologiczne (i ich uzasadnienia) są w
 ## 1. Podział na projekty
 
 Rozwiązanie (`GameTranslatorOverlay.slnx`) składa się z trzech projektów produkcyjnych
-i dwóch testowych; osobne projekty w `tools/` służą do lokalnej diagnostyki i ewaluacji,
-a `benchmarks/` do pomiarów wydajności:
+i trzech testowych; osobne projekty w `tools/` służą do lokalnej diagnostyki, ewaluacji
+i pracy offline na korpusie gry (ADR-014), a `benchmarks/` do pomiarów wydajności. Narzędzia
+nie wchodzą do paczki aplikacji:
 
 ```
 src/
@@ -25,7 +26,8 @@ tools/
   GameTranslatorOverlay.ProviderEval          (konsola net10.0: porównanie dostawców na korpusie EN→PL)
   GameTranslatorOverlay.CorpusTool            (konsola net10.0, ADR-014: extract — korpus z plików gry;
                                                translate — tłumaczenie korpusu do cache z profilem)
-  GameTranslatorOverlay.CorpusEval            (Windows: pomiary przyciągania OCR do korpusu)
+  GameTranslatorOverlay.CorpusEval            (Windows: pomiary przyciągania OCR do korpusu — render, evaluate,
+                                               replay, bench, session, prefixes, typing)
   GameTranslatorOverlay.OverlayPreview        (Windows: render nakładki na zapisanych klatkach — galeria wyglądu)
 benchmarks/
   GameTranslatorOverlay.Benchmarks            (BenchmarkDotNet, poza dotnet test; docs/BENCHMARKS.md)
@@ -71,6 +73,30 @@ Zawartość:
   przy liczbie muszą się zgadzać, a cyfra odczytu może różnić się od korpusu tylko naprzeciw
   litery mylonej przez OCR (`EditDistance.BoundedGuarded`). Bez korpusu
   i bez `SplitParagraphs` pipeline działa jak wcześniej (ta sama ścieżka kodu).
+  Dla sesji live pipeline odpowiada też na pytania o pojedynczy odczyt: `ShouldTranslateLive`
+  (bramka: dokładny tekst korpusu albo `JunkFilter` i nie szum), `CorpusIdentity` (tożsamość bloku
+  w pełni obsłużonego korpusem — wspólny klucz nakładki dla kolejnych odczytów tej samej kwestii
+  i drżenia OCR etykiety) i `IsCorpusPrefix` (odczyt jest niedokończoną kwestią korpusu).
+- **Korpus gry** (`Corpus/`): `CorpusEntry` i `CorpusJsonl` (wpis JSONL z `CorpusTool extract`:
+  klucz, tekst EN, kontekst, rodzaj `ui`/`dialog`/`subtitle`, mówca, węzeł dialogu, kolejność,
+  czas napisu), `CorpusIndex` (trigramy po tekście bez wielkości liter, słowa i mówcy korpusu)
+  oraz `CorpusSnapper`, który przyciąga odczyt OCR do tekstu korpusu: cały blok, akapit, wiersz
+  albo część wiersza (dokładnie, przybliżenie, fragment), krótką etykietę z typowymi pomyłkami OCR
+  (`OcrEditDistance` — odległość ważona pomyłkami, jednostka 100), początek linii dialogu albo
+  napisów (`OcrEditDistance.Prefix`, klucz tłumaczenia = cała linia) i rozpoznaje szum
+  (`LooksLikeNoise`). Progi i przełączniki są w `CorpusSnapOptions`. `CorpusTranslationKey` liczy
+  klucz cache wpisu korpusu — ten sam w aplikacji i w `CorpusTool translate`.
+- **Obraz i tryb live** (`Vision/`): bez WPF i API Windows; piksele przychodzą jako bufor BGRA
+  w pamięci (`OcrBitmap`) albo siatka jasności (`LuminanceGrid`) —
+  detekcja zmian (`FrameChangeDetector`, `NoiseAwareChangeDetector`, `ChangeStabilizer`), próbki
+  kolorów (`BlockColorSampler`), stan bloków live (`LiveSceneValidity`, `LiveReadingStabilizer`,
+  `LiveBlockSurvival`, `LiveBlockGeometry`, `LiveSubtitleContent`, `LiveBlockKeyer`), dowody
+  w pikselach (`TextRegionFingerprint`, `TextPresenceProbe`, `KnownTextAbsenceProbe`
+  z wzorcem `KnownTextReference`), zegar pełnego skanu (`FullScanSchedule`) i łatka
+  z wypełnionymi literami (`GlyphCoverBuilder`, `GlyphCover`, `InkProfile`; rozdz. 8).
+- **Profile gier** (`Profiles/`): `GameProfile` z opcjonalnymi sekcjami `ocr`, `changeDetection`,
+  `overlay` (krój napisów) i `corpus` (recepta dla `CorpusTool`, `CorpusRecipe`) oraz polem `online`;
+  `ProfileValidator` sprawdza też receptę (`CorpusRecipeValidator`), ale aplikacja jej nie wykonuje.
 - **Słownik** (`Glossary/`): `GlossaryPrecedence` — jedna reguła pierwszeństwa dla tłumaczenia
   lokalnego i glosariusza DeepL; `PersistableTerms` — terminy, które mogą trafić do trwałego
   glosariusza (bez terminów prywatnych i `scope: label`).
@@ -99,8 +125,13 @@ Implementacje kontraktów z Core, które wymagają świata zewnętrznego, ale ni
   Szczegóły: [API_PROVIDERS.md](API_PROVIDERS.md).
 - **Klucze API**: Windows DPAPI (`ProtectedData`, zakres CurrentUser), osobny sekret na
   dostawcę, zapis w `%LOCALAPPDATA%\GameTranslatorOverlay`.
-- **Korpus gry**: `CorpusCatalog` czyta `<folder danych>\corpus\<profil>.corpus.jsonl` (dane z
-  narzędzia ADR-014, nigdy pliki gry) i trzyma indeks ostatnio użytego profilu do zmiany pliku.
+- **Korpus gry**: `CorpusCatalog` czyta `<folder danych>\corpus\<id profilu>.corpus.jsonl`
+  (`AppPaths.CorpusDirectory`; dane z narzędzia ADR-014, nigdy pliki gry) przy przebudowie
+  pipeline'u (start i zmiana ustawień) i buduje z niego `CorpusIndex` i `CorpusSnapper`. Ostatnio
+  wczytany korpus zostaje w pamięci, dopóki nie zmieni się profil albo rozmiar lub czas zapisu
+  pliku; plik zmieniony w trakcie pracy jest czytany dopiero przy kolejnej przebudowie.
+  Identyfikator profilu ze znakami ścieżki nie wskazuje żadnego pliku; brak pliku = pipeline bez
+  korpusu, plik pusty albo nieczytelny = ostrzeżenie treści i pipeline bez korpusu.
 - **Pliki**: odczyt/zapis profili gier i słowników (JSON, schematy w rozdz. 7),
   `settings.json`. `AppSettings.PipelineSnapshot()` to ustawienia bez pól samego wyglądu
   (czcionka, tło, tryby wyświetlania, skróty, komunikaty, ostatnia gra) — orchestrator
@@ -121,34 +152,63 @@ Celowo **nie ma** osobnego assembly `Providers.DeepL` — DeepL siedzi w Infrast
 - **OCR**: `WindowsOcrProvider` — adapter `Windows.Media.Ocr.OcrEngine` za interfejsem
   `IOcrProvider` (WinRT wymaga TFM windowsowego, więc siedzi w App, nie w Infrastructure).
 - **Nakładka**: osobne okno WPF z `WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE |
-  WS_EX_TOOLWINDOW`, Topmost, click-through, bez fokusu.
+  WS_EX_TOOLWINDOW`, Topmost, click-through, bez fokusu, wykluczone z przechwytywania ekranu
+  (`WDA_EXCLUDEFROMCAPTURE`); na wypadek, gdyby wykluczenie zawiodło, sesja live odfiltrowuje
+  też odczyty własnych tłumaczeń i komunikatów (filtr anty-sprzężeniowy).
+- **Wygląd napisów** (`Ui/`): `OverlayBlockRenderer` buduje i układa element bloku dla
+  `OverlayWindow` i narzędzia OverlayPreview — w trybie „Na oryginale (zakrywa)” z łatką
+  `GlyphCover` jako `GameTextElement` (tekst z geometrii, kontur piórem, cień, łatka jako obraz),
+  bez łatki dawną ścieżką (`CoverPatchHost` z rozmytą kopią tła i `OutlinedTextBlock`).
+  `OverlayFonts` wybiera krój (ustawienie albo — przy „Jak w grze (krój z profilu)”, wartość
+  `auto` — `overlay.fontFamily` profilu, bez profilu Segoe UI) i jego grubość. Dołączony krój
+  Lexend Deca (Regular, Medium, SemiBold, Bold; SIL OFL 1.1) to zasoby WPF z `App/Fonts`,
+  bez instalacji w systemie; licencja trafia obok programu jako `licenses/LexendDeca-OFL.txt`
+  (`THIRD-PARTY-NOTICES.md`, ADR-016).
 - **Skróty globalne** (Ctrl+Shift+T, Ctrl+Shift+H, Ctrl+Shift+L dla start/stop live) — sterują
   wyłącznie tłumaczem, nigdy grą. Okno dla Ctrl+Shift+L wybiera `LiveTargetResolver` (Core).
 - **Komunikaty w nakładce**: krótki pasek przy górnej krawędzi okna gry, sterowany przez
   `OverlayNoticePolicy`; tekst komunikatu nie zawiera treści z ekranu.
+- **Sesja live** (`Services/LiveTranslationSession`): pętla capture/OCR/tłumaczenie z rozdz. 8;
+  w trybie zakrywania liczy w tle łatki z wypełnionymi literami i wstrzymuje kwestię pisaną
+  literami (oba przełączniki w `LiveSessionOptions` ustawia okno główne).
 
 Reguła podziału w jednym zdaniu: **Core = co i dlaczego, Infrastructure = skąd i dokąd
-(dysk/sieć), App = ekran, piksele i klawiatura.**
+(dysk/sieć), App = ekran, piksele i klawiatura.** Analiza pikseli, która nie potrzebuje API
+Windows (detekcja zmian, sondy obecności tekstu, łatka z wypełnionymi literami), mieszka
+w `Core/Vision` na buforach w pamięci i jest testowana bez pulpitu; App przechwytuje obraz,
+wywołuje ją i rysuje wynik.
 
 ## 2. Przepływ danych
 
 1. **Capture:** wybrane okno lub region, PrintWindow/GDI, bitmapa lokalna.
 2. **OCR:** Windows.Media.Ocr zwraca linie i prostokąty.
 3. **Tekst:** normalizacja, grupowanie i filtr śmieci; w live także stabilizacja
-   odczytów i sprawdzenie aktualności sceny.
-4. **Wyniki lokalne:** odczyt ręcznej poprawki, dokładne dopasowanie słownika,
-   następnie zwykły cache. Trafienie kończy wyszukiwanie wyniku bez API.
-5. **Dostawca:** brakujące teksty po deduplikacji i rezerwacji znaków, batchowanie,
+   odczytów i sprawdzenie aktualności sceny. Z korpusem aktywnego profilu bramka live
+   przepuszcza dokładny tekst korpusu i odrzuca szum (rozdz. 1, `ShouldTranslateLive`).
+4. **Korpus (opcjonalnie):** gdy aktywny profil ma lokalny korpus, odczyt jest przyciągany
+   do znanego tekstu gry, a blok dzielony na jednostki z kluczem kanonicznym korpusu.
+5. **Wyniki lokalne:** odczyt ręcznej poprawki, dokładne dopasowanie słownika,
+   następnie zwykły cache (z korpusem — na jednostkach, więc trafiają też wpisy
+   przetłumaczone z wyprzedzeniem przez `CorpusTool translate`). Trafienie kończy
+   wyszukiwanie wyniku bez API.
+6. **Dostawca:** brakujące teksty po deduplikacji i rezerwacji znaków, batchowanie,
    wynik zachowywany w cache, o ile nadal pozwala na to token konfiguracji.
-6. **Prezentacja:** panel lub nakładka. Sesja live odrzuca wynik wykrytej
-   nieaktualnej sceny przed jego publikacją.
+7. **Prezentacja:** panel lub nakładka. Sesja live odrzuca wynik wykrytej
+   nieaktualnej sceny przed jego publikacją. W trybie „Na oryginale (zakrywa)” łatka
+   z wypełnionymi literami powstaje z tej samej klatki równolegle z krokami 5–6 (rozdz. 8).
 
-Do dostawcy trafia wyłącznie tekst; bitmapy pozostają lokalnie. Próbki obrazu
-służą również do stylu nakładki i sprawdzania obecności tekstu. Cache-only wyłącza
-krok dostawcy. OCR i oczekiwanie na sieć nie blokują wątku interfejsu.
+Do dostawcy trafia wyłącznie tekst; bitmapy pozostają lokalnie. Przy przyciągnięciu do
+korpusu może to być pełny tekst wpisu korpusu, którego część dopiero pojawia się na ekranie
+(ADR-014, dopisek (3)). Próbki obrazu służą również do stylu nakładki, łatki z wypełnionymi
+literami i sprawdzania obecności tekstu. Cache-only wyłącza krok dostawcy. OCR, oczekiwanie
+na sieć i budowa łatek nie blokują wątku interfejsu; na nim zostaje układ napisów WPF
+(w rundzie 2026-10-06 (5): 5–21 ms na klatkę z nowymi napisami w 4K) i jednorazowe rozgrzanie
+krojów przy starcie live (ok. 212 ms) — [ROADMAP.md](ROADMAP.md).
 
 Aplikacja działa pasywnie: bez ingerencji w pamięć lub pliki gry, wstrzykiwania
-kodu i wysyłania sterowania do gry. Aktualność live opisuje rozdział 8.
+kodu i wysyłania sterowania do gry. Plików gry aplikacja nie czyta — korpus wytwarza
+osobne narzędzie offline uruchamiane przez gracza (ADR-014). Aktualność live opisuje
+rozdział 8.
 
 ## 3. Kluczowe interfejsy
 
@@ -185,7 +245,8 @@ Trwały cache tłumaczeń (SQLite w Infrastructure; w trybie prywatnym — tylko
 czyszczony po sesji).
 
 - Klucz: znormalizowany tekst źródłowy + para językowa (+ kontekst profilu dla wpisów
-  profilowych i korekt).
+  profilowych i korekt). Przy przyciągnięciu do korpusu tekstem źródłowym jest tekst wpisu
+  korpusu (`CorpusTranslationKey`), wspólny dla różnych odczytów tego samego zdania.
 - Realizuje priorytet: **ręczna korekta > wpis profilu gry > cache globalny**; dopiero
   pełny miss idzie do `ITranslationProvider`.
 - Zapis ręcznych korekt użytkownika (nadpisują wszystko inne).
@@ -217,7 +278,10 @@ Pierwszy działający tryb (Etap 6 roadmapy) — punkt odniesienia dla całej ar
 2. App pokazuje półprzezroczystą warstwę wyboru regionu; użytkownik zaznacza prostokąt
    myszą (współrzędne ekranowe → przeliczenie DPI, rozdz. 6).
 3. Capture regionu przez GDI (`CopyFromScreen`).
-4. Bitmapa przechodzi pion z rozdz. 2: OCR → normalizacja → glossary → cache → (miss) API.
+4. Bitmapa przechodzi pion z rozdz. 2: OCR → normalizacja → (korpus aktywnego profilu,
+   jeśli jest) → glossary → cache → (miss) API. Bloki regionu przechodzą dawny filtr śmieci
+   (`JunkFilter`, z wyjątkiem dokładnego tekstu korpusu); szum korpusu nie odrzuca tu całych
+   bloków jak bramka live.
 5. Wynik ląduje w panelu wyniku / nakładce; użytkownik nie traci sterowania grą
    (nakładka jest click-through i nie kradnie fokusu).
 6. Użytkownik może poprawić tłumaczenie (korekta → cache z najwyższym priorytetem)
@@ -233,8 +297,10 @@ zadanie dostaje `CancellationToken.Cancel()` i jego wynik nigdzie nie trafia.
 |---|---|---|
 | `ScreenCapture` | przechwycenie okna/regionu, geometria i lokalne próbki pikseli | App |
 | `WindowsOcrProvider` | systemowy OCR i jego adapter | App |
-| `LiveTranslationSession` | pętla capture/OCR, aktualność sceny, stan bloków i publikacja aktualizacji | App |
-| `TranslationOrchestrator` | składanie pipeline'u, konfiguracja i jej token życia | App |
+| `LiveTranslationSession` | pętla capture/OCR, aktualność sceny, stan bloków i publikacja aktualizacji; w trybie zakrywania budowa łatek w tle i wstrzymanie kwestii pisanej literami | App |
+| `TranslationOrchestrator` | składanie pipeline'u (z korpusem aktywnego profilu z `CorpusCatalog`), konfiguracja i jej token życia | App |
+| `CorpusCatalog` | wczytanie korpusu aktywnego profilu z folderu danych (plik JSONL z `CorpusTool extract`) | Infrastructure |
+| `CorpusIndex`, `CorpusSnapper`, `OcrEditDistance` | indeks korpusu i przyciąganie odczytu: blok, akapit, wiersz, etykieta z pomyłkami OCR, początek kwestii; rozpoznawanie szumu | Core |
 | `TranslationPipeline`, `UsageTracker` | wyniki lokalne, deduplikacja, dostawca i rezerwacje znaków, kontrola jakości, pamięć dialogu, pamięć awaryjna przy zepsutym cache | Core |
 | `TranslationQualityGate`, `TranslationCacheContext`, `DialogMemory` | ocena wyniku, znacznik wpisu cache, historia dialogu dla dostawców kontekstowych | Core |
 | `ChangeToTextTracker`, `LatencyMonitor` | pomiar „Zmiana → napis” i pozostałych etapów (tylko liczby, w pamięci) | Core |
@@ -242,12 +308,15 @@ zadanie dostaje `CancellationToken.Cancel()` i jego wynik nigdzie nie trafia.
 | `LiveTargetResolver` | wybór okna dla skrótu live | Core |
 | `BoundedTranslationWork` | ograniczona liczba nadzorowanych zadań i ich domknięcie | Core |
 | `LiveSceneValidity`, `LiveReadingStabilizer` | generacja sceny i kolejne potwierdzenia tekstu | Core |
-| `LiveBlockGeometry`, `LiveSubtitleContent` | niezależna stabilizacja położenia/rozmiaru i źródła paska napisów | Core |
+| `LiveBlockGeometry`, `LiveSubtitleContent` | niezależna stabilizacja położenia/rozmiaru i źródła paska napisów (także powrót linii ze wskrzeszonym blokiem) | Core |
+| `LiveBlockSurvival`, `FullScanSchedule` | okres łaski bloków, wycinek OCR obejmujący bloki z brakami; zegar pełnego OCR liczony od ostatniego pełnego skanu | Core |
+| `LiveBlockKeyer` | klucz bloku nakładki z treści odczytu albo z tożsamości korpusu | Core |
 | `TextPresenceProbe` | konserwatywna ocena całego jednolitego pola starego tekstu | Core |
+| `KnownTextAbsenceProbe`, `KnownTextReference` | dowód zniknięcia znanego tekstu także na teksturze; wzorzec kolorów i liczba pikseli rdzenia liter z ostatniego potwierdzającego odczytu | Core |
 | `OverlayWindow` | prezentacja bloków/paska, click-through, DPI i ręczne ukrywanie | App |
-| `OverlayBlockRenderer` | wygląd i pozycja bloku (łatka, kontur, dopasowanie czcionki) — wspólny dla `OverlayWindow` i OverlayPreview | App |
-| `GlyphCoverBuilder` / `GlyphCover` / `InkProfile` | łatka „natywna”: maska liter (odchylenie od tła z pierścienia + top-hat), wypełnienie pikseli liter z otoczenia (push-pull), kolor tekstu, kontur, cień, linia bazowa, wysokość, wyrównanie, ikony klawiszy; liczona w tle przy OCR | Core.Vision |
-| `GameTextElement` / `OverlayFonts` | tekst z geometrii (kontur piórem, cień), łatka jako obraz; krój z profilu (dołączony Lexend Deca), grubość i rozmiar z profilu tuszu oryginału | App |
+| `OverlayBlockRenderer` | wygląd i pozycja bloku (łatka, kontur, dopasowanie czcionki, wyrównanie, pominięcie tłumaczeń identycznych z oryginałem w trybie zakrywania) — wspólny dla `OverlayWindow` i OverlayPreview | App |
+| `GlyphCoverBuilder` / `GlyphCover` / `InkProfile` | łatka „natywna”: maska liter (odchylenie od tła z pierścienia + top-hat), wypełnienie pikseli liter z otoczenia (push-pull), kolor tekstu, kontur, cień, linia bazowa, wysokość, wyrównanie, ikony klawiszy; liczona w `LiveTranslationSession` równolegle z tłumaczeniem | Core (`Vision/`) |
+| `GameTextElement` / `OverlayFonts` | tekst z geometrii (kontur piórem, cień), łatka jako obraz; krój z ustawień albo profilu (dołączony Lexend Deca), rozmiar z wysokości liter nad linią bazową, grubość z gęstości tuszu oryginału — jedna dla bloków w tym samym stylu | App |
 
 Tryb ręczny, live w blokach i pasek napisów są zaimplementowane. Automatyczne
 wydzielanie tooltipów, History Mode i wyjaśnianie przez LLM pozostają poza obecną
@@ -265,7 +334,11 @@ implementacją. Capture live nadal używa GDI/PrintWindow; WGC jest opcją do ro
 - Nakładka pozycjonuje się względem prostokąta okna gry (fizyczne piksele), więc
   przeniesienie gry na inny monitor = przeliczenie od nowa, bez „rozjechanych" ramek.
 - Ograniczenie (udokumentowane): **exclusive fullscreen nie jest obsługiwany** — GDI ani
-  nakładka nie widzą takiego trybu. Działa okno i borderless fullscreen.
+  nakładka nie widzą takiego trybu. Działa okno i borderless fullscreen. Gdy okno gry nie
+  wspiera PrintWindow i zajmuje cały monitor, sesja live pokazuje raz na sesję komunikat
+  „⚠ Pełny ekran utrudnia nakładkę — przełącz na okno bez ramki”
+  (`OverlayNotices.ExclusiveFullscreen`, 8 s). Warunek nie odróżnia wyłącznego pełnego ekranu
+  od okna bez ramki bez obsługi PrintWindow.
 
 ## 7. Schematy JSON
 
@@ -296,8 +369,15 @@ rdzeń aplikacji jest uniwersalny. Konwencja pól: camelCase.
   `1.0` = bez powiększania, `1.0`–`4.0` = stały współczynnik.
 - `overlay.fontFamily` (opcjonalne, np. `"Lexend Deca"`): krój napisów nakładki, gdy w ustawieniach
   wybrano „Jak w grze”. Najpierw szukany wśród krojów dołączonych do aplikacji (`App/Fonts`, licencja
-  OFL), potem wśród czcionek systemowych; grubość (Regular/Medium/SemiBold/Bold) dobiera nakładka.
-  Nazwa kroju, nie ścieżka (do 64 znaków). Starsze wersje aplikacji pole pomijają.
+  OFL), potem wśród czcionek systemowych; krój nieznaleziony (bez żadnej grubości 300–800) zastępuje
+  Segoe UI. Grubość (dla Lexend Deca: Regular/Medium/SemiBold/Bold) dobiera nakładka. Nazwa kroju,
+  nie ścieżka (do 64 znaków). Starsze wersje aplikacji pole pomijają.
+- `online` (opcjonalne): `true` oznacza grę online — `CorpusTool` odmawia dla niej pracy (ADR-014).
+- `corpus` (opcjonalne): recepta korpusu dla narzędzia `CorpusTool` — rodzina formatów
+  (`format`, np. `unity-textasset`), kontener i plik w folderze gry oraz źródła z wzorcami nazw,
+  parserem (`csv`, `srt`) i rodzajem tekstu (`ui`, `dialog`, `subtitle`). Opis pól:
+  [README narzędzia](../tools/GameTranslatorOverlay.CorpusTool/README.md). Aplikacja receptę tylko
+  waliduje; plików gry nie otwiera.
 - `minAppVersion` (SemVer, np. `0.2.2`; przyrostek `-beta` jest pomijany): profil wymagający
   nowszej aplikacji nie jest wczytywany, a problem trafia do logu.
 
@@ -328,9 +408,14 @@ przed krótszymi, priorytety rozstrzygają konflikty; konflikty (ten sam `source
 
 Jedna pętla sesji obsługuje capture, OCR i stan nakładki. Domyślnie próbkuje obraz
 przy 6 FPS, wymaga 250 ms stabilności, może wymusić przetwarzanie po 600 ms,
-a przy ruchu ma maksymalną pauzę OCR 2,5 s. Niezmieniony obraz jest też ponownie
-skanowany co 4 s; powtórki mogą wynikać z potwierdzania odczytu lub podejrzenia whiffa.
-Parametry profilu mogą zmieniać część tego zachowania.
+a przy ruchu ma maksymalną pauzę OCR 2,5 s. Pełny OCR całej klatki jest należny
+4 s (`StaticRescanInterval`) po poprzednim **pełnym** OCR (`FullScanSchedule`): wycinki go nie
+odsuwają, a należny skan obejmuje całą klatkę także przy oczekującym regionie zmian. Powtórki
+mogą wynikać też z potwierdzania odczytu, podejrzenia whiffa, podejrzenia zniknięcia napisu
+i wstrzymanej kwestii. Wycinek OCR obejmuje bloki z brakami
+(`LiveBlockSurvival.UnconfirmedRegion`), o ile ich suma z regionem zmian (z zapasem 24 px)
+nie przekracza połowy klatki (`PartialOcrSeed`). Parametry profilu mogą zmieniać część tego
+zachowania.
 
 ### Generacja sceny i praca w toku
 
@@ -363,10 +448,37 @@ Parametry profilu mogą zmieniać część tego zachowania.
 ### Tekst lokalny i prezentacja
 
 Podobny nowy odczyt wymaga kolejnych wiarygodnych potwierdzeń. Powrót starego tekstu
-albo brak obserwacji w badanym obszarze przerywa serię. Potwierdzona zamiana usuwa
-stary blok przed oczekiwaniem na dostawcę. Brak OCR nad całym dawnym polem, które
-stało się jednolite i miało znany kontrast, również pozwala na lokalne usunięcie.
-Cienkie znaki, tekstura, niepewne kolory i ucięte pole nie są dowodem pustego obszaru.
+albo brak obserwacji w badanym obszarze przerywa serię. Potwierdzona zmiana treści
+(podobieństwo odczytów < 0,5) usuwa stary blok przed oczekiwaniem na dostawcę; potwierdzony
+wariant tego samego napisu (≥ 0,5) zostaje do aktualizacji z nowym tłumaczeniem, więc napis
+nie znika na czas tłumaczenia. Brudniejszy, niepowiązany i niewiarygodny odczyt
+(`LiveReadingStabilizer.IsImplausibleReading`) nie potwierdza bloku i liczy się jak brak,
+chyba że odcisk pola się nie zmienił (wtedy potwierdza) albo przechwycenie pokazuje w polu
+0,5–2× tyle pikseli rdzenia liter co ostatnie potwierdzenie (`KnownTextReference.IsPresent`;
+blok zostaje bez nowego braku). Wiarygodny, ale brudniejszy niepowiązany odczyt zastępuje
+wyświetlany blok dopiero po dwóch identycznych odczytach z rzędu; czysty nowy napis (jakość
+odczytu co najmniej 0,9) — od razu.
+
+Brak OCR nad całym dawnym polem, które stało się jednolite i miało znany kontrast, pozwala
+na lokalne usunięcie (`TextPresenceProbe`), także od razu przy przechwyceniu. Na teksturze
+dowodem jest `KnownTextAbsenceProbe`: w całym, nieuciętym polu bloku żaden piksel (poza 0,1%)
+nie zachował ćwierci dawnego kontrastu luminancji między tekstem a tłem (kontrast kolorów
+wzorca co najmniej 48). Wzorzec (`KnownTextReference`) pochodzi z ostatniego odczytu, który
+potwierdził blok. Gdy sonda mówi „nieobecny” już przy przechwyceniu z istotną zmianą nachodzącą
+na blok (bez cięcia sceny i bez zapasowego zrzutu ekranu), blok jest tylko podejrzany: jego pole
+wchodzi do najbliższego OCR, a trwający przebieg, który go obejmuje, jest porzucany i ponawiany.
+Blok znika, gdy OCR obejmujący całe jego pole go nie widzi, a sonda na tej klatce mówi
+„nieobecny”. Przygaszenie i zmiana barwy przy najechaniu nie są
+zniknięciem, dopóki zostaje ćwierć kontrastu. Zapasowy zrzut ekranu, ucięte pole i niepewne
+kolory nie dają dowodu — wtedy blok znika po okresie łaski (trzeci przebieg OCR bez niego).
+
+Blok zdjęty bez cięcia sceny po okresie łaski albo z dowodem zniknięcia w pikselach (sonda
+tekstury, jednolite przykrycie wykryte przy przechwyceniu) zostaje na 10 s duchem. Podobny
+odczyt (≥ 0,5) go wskrzesza; jeśli jego linia zniknęła z paska napisów razem z blokiem, wraca
+na pasek (`LiveSubtitleContent.Restore`; pasek z innymi liniami nie odnawia czasu).
+Niewiarygodny odczyt (`IsImplausibleReading`) nad duchem jest odrzucany; wiarygodny niepowiązany
+odczyt nad duchem usuniętym z dowodem w pikselach jest nowym napisem i dziedziczy styl, a nad
+duchem po samych brakach OCR brudniejszy niepowiązany odczyt nadal jest odrzucany.
 
 Podczas oczekiwania kontrolowane są też pola zaakceptowanych źródeł. Jeśli źródło
 zostało jednoznacznie przykryte, klatka nie jest publikowana, a wszystkie jej
@@ -377,10 +489,10 @@ które jeszcze nie dostało wyniku. Lokalne usunięcie aktualizuje tylko powiąz
 Położenie ma tolerancję 2 fizycznych pikseli na każdej osi, oddzielną od stabilizacji
 rozmiaru. To aktualizacja przy odczycie OCR, nie śledzenie między odczytami.
 `TextRegionFingerprint` porównuje wszystkie RGB źródła z marginesem 3 px, ignorując
-alpha i padding. W pamięci pozostają tylko SHA-256, geometria pola i rozmiar całej
-klatki. Referencja powstaje z natywnej klatki OCR; każda kontrola wykorzystuje już
-przechwycony obraz i bufor jednego wiersza. Pole musi być pełne, mieć 4–262144 pikseli,
-niejednolity obraz i znany kontrast tekstu. Skalowany odczyt, fallback, zmiana rozmiaru
+alpha i padding. W pamięci pozostają tylko skrót XxHash128 (niekryptograficzny), geometria
+pola i rozmiar całej klatki. Referencja powstaje z natywnej klatki OCR; każda kontrola
+wykorzystuje już przechwycony obraz i bufor jednego wiersza. Pole musi być pełne, mieć
+4–262144 pikseli, niejednolity obraz i znany kontrast tekstu. Skalowany odczyt, fallback, zmiana rozmiaru
 lub brak dowodu zachowują wcześniejsze reguły usuwania. Dowód może też zachować
 pominięty przez OCR blok, jeśli żaden nowy zaakceptowany blok nie zajmuje jego miejsca.
 
@@ -388,14 +500,67 @@ Jest to ochrona identycznego obrazu, bez semantycznego rozpoznawania HUD-u. Anim
 lub przezroczyste tło może ją wyłączyć. Generacja sceny nadal odrzuca wszystkie stare
 wyniki w toku, także pierwsze tłumaczenie jeszcze niewyświetlonego menu.
 
+### Korpus w sesji live
+
+Z korpusem aktywnego profilu bloki po OCR przechodzą bramkę `ShouldTranslateLive` (szum nie
+idzie do dostawcy ani na nakładkę), a `LiveBlockKeyer` liczy klucz bloku z `CorpusIdentity`:
+kolejne, dłuższe odczyty tej samej kwestii i drżenie OCR etykiety są tym samym blokiem
+nakładki — aktualizacja w miejscu, bez stabilizatora podmian i bez nowego wpisu na pasku
+napisów. Bez korpusu bramka to `JunkFilter`, a klucz liczy się z tekstu odczytu jak dotąd.
+Filtr anty-sprzężeniowy (odczyt równy wyświetlanemu tłumaczeniu nie wraca do tłumaczenia)
+pomija bloki o tłumaczeniu identycznym z oryginałem tylko przy umiejscowieniu „Na oryginale
+(zakrywa)”, w którym nakładka takich bloków nie rysuje, albo gdy działa wykluczenie nakładki
+z przechwytywania (`LiveSessionOptions.IdentityEchoSafe`).
+
+### Tryb „Na oryginale (zakrywa)”: łatka i kwestia pisana literami
+
+Oba mechanizmy włącza okno główne tylko przy umiejscowieniu „Na oryginale (zakrywa)” poza
+trybem paska napisów (`LiveSessionOptions.BuildGlyphCovers`, `HoldTypingPrefixes`).
+
+- **Łatka liczona równolegle z tłumaczeniem.** Po OCR i próbkach kolorów sesja uruchamia
+  w tle budowę łatek dla bloków klatki (`GlyphCoverBuilder.BuildForBlock`, `Parallel.For`
+  na najwyżej 4 wątkach) i równocześnie próbę lokalną oraz tłumaczenie; po tłumaczeniu czeka
+  na łatki (`LiveFrameDiagnostics.GlyphCoverMs`, `GlyphCoverWaitMs`). Łatka powstaje z tej samej
+  przechwyconej klatki co OCR i zostaje w pamięci. Gdy podpis pola (siatka 12×4 jasności)
+  różni się mniej niż `GlyphCoverBuilder.StaticSignatureTolerance` przy tym samym boxie
+  (±2 px), ostra łatka poprzedniego przebiegu jest używana ponownie bez obliczeń; podpis
+  zmieniony umiarkowanie (tło się rusza, najechany wiersz) przy tym samym boxie daje łatkę
+  miękką (całe pole, wygaszony brzeg), a gdy obraz stanie, następny przebieg wraca do ostrej.
+  Nieudana budowa zostawia łatkę poprzedniego przebiegu, a bez łatki blok jest rysowany
+  dawną ścieżką (rozmyta kopia tła). Koszt i zachowanie: ADR-015 i
+  [ROADMAP.md → Runda 2026-10-06 (5)](ROADMAP.md).
+- **Prezentacja.** `OverlayWindow` najpierw zbiera głosy grubości wszystkich bloków aktualizacji,
+  potem `OverlayFonts.ChooseStyleWeight` daje jedną grubość blokom w tym samym stylu (krój,
+  wysokość liter, kolor tekstu, obrys), a
+  `OverlayBlockRenderer.LayoutNativeElement` ustawia polski tekst na linii bazowej oryginału,
+  z rozmiarem z wysokości liter nad linią bazową, wyrównaniem i dopasowaniem szerokości;
+  jednowierszowy napis bez ikon i o nieznanym wyrównaniu, którego środek tuszu leży w 1%
+  szerokości monitora (co najmniej 8 px) od środka monitora, jest wyśrodkowany.
+  Tłumaczenie identyczne z oryginałem nie jest rysowane (widać grę), a ikona klawisza przed
+  napisem i ikonka za nim zostają nietknięte.
+- **Wstrzymanie kwestii pisanej literami.** Nowy blok, którego odczyt jest niedokończoną kwestią
+  korpusu (`TranslationPipeline.IsCorpusPrefix`), nie trafia ani do tłumaczenia, ani na
+  nakładkę, dopóki tekst rośnie: sesja prosi o kolejny odczyt jego pola. Pełne tłumaczenie
+  idzie, gdy odczyt przestaje być początkiem kwestii (np. jest całą linią), gdy liczba liter nie
+  rośnie przez `TypingPrefixSettleTime` (0,9 s) albo po `TypingPrefixHoldLimit` (8 s). Blok już
+  wyświetlany pod tym samym kluczem nie jest wstrzymywany. Decyzja: ADR-017.
+
 ### Diagnostyka i ograniczenia
 
-`LiveFrameDiagnostics` opisuje czas przygotowania aktualizacji, operację OCR oraz
-liczbę i koszt kontroli obrazu. Etapy czasowo nakładają się, a odrzucona klatka
+`LiveFrameDiagnostics` opisuje czas przygotowania aktualizacji, operację OCR,
+liczbę i koszt kontroli obrazu oraz czas budowy łatek i czekania na nie po tłumaczeniu
+(`GlyphCoverMs`, `GlyphCoverWaitMs`). Etapy czasowo nakładają się, a odrzucona klatka
 nie ma diagnostyki ukończonego przebiegu. Te dane nie mierzą faktycznego rysowania.
 
 [LiveDiag](../tools/GameTranslatorOverlay.LiveDiag/README.md) i
 [SceneReplay](../tools/GameTranslatorOverlay.SceneReplay/README.md) używają Mocka,
-prywatnego cache i zablokowanego HTTP. Wyniki porównawcze oraz ich ograniczenia
+prywatnego cache i zablokowanego HTTP. SceneReplay ma scenariusze starego napisu (`stale-*`)
+i kwestii pisanej literami (`typing`, `typing-nohold`).
+[OverlayPreview](../tools/GameTranslatorOverlay.OverlayPreview/README.md) składa prawdziwą
+nakładkę (`OverlayBlockRenderer`) na zapisanych klatkach gry przez Windows OCR i kopię roboczą
+bazy (HTTP zablokowane, brak w bazie = Mock), a
+[CorpusEval](../tools/GameTranslatorOverlay.CorpusEval/README.md) mierzy przyciąganie do korpusu
+(m.in. `replay` przez prawdziwy `TranslationPipeline` z Mockiem). Żadne z tych narzędzi nie
+pokazuje fizycznej nakładki nad działającą grą. Wyniki porównawcze oraz ich ograniczenia
 opisuje [ROADMAP.md](ROADMAP.md); testy integracji z rzeczywistym pulpitem należy
 odróżniać od czystej logiki [TESTING.md](TESTING.md).

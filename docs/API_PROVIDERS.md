@@ -65,6 +65,23 @@ importują się jak dotąd). Ręczne korekty nigdy nie są tłumaczone ponownie.
 
 DeepL dostaje `formality: prefer_less` (forma „ty”; `DeepLOptions.Formality = null` wyłącza).
 
+### Tekst z korpusu gry zamiast odczytu (ADR-014)
+
+Gdy aktywny profil gry ma lokalny korpus (`<folder danych>\corpus\<id>.corpus.jsonl` z narzędzia
+`CorpusTool`), pipeline (`TranslationPipelineOptions.Corpus`) dzieli znormalizowany blok OCR na
+jednostki (`TranslationUnitPlanner`): tekst korpusu dopasowany do całego bloku, akapitu, wiersza
+albo jego części (klucz cache `CorpusTranslationKey`, ten sam co w `CorpusTool translate`),
+akapity nieznanej reszty i tekst dosłowny (np. imię mówcy, klawisz obok etykiety, śmieciowy
+akapit). Ręczna korekta i termin słownika dla całego odczytu mają pierwszeństwo przed
+jednostkami. Każda jednostka przechodzi przez korektę, słownik i cache; do dostawcy idą tylko
+brakujące — tekst z korpusu zamiast odczytu z błędami OCR, a nieznana reszta osobnymi akapitami
+tej samej partii. Wynik jest składany z powrotem w wiersze odczytu. Automatyczny wpis całego
+odczytu sprzed korpusu nadal obsługuje blok bez zapytania, gdy jednostki nie są znane lokalnie;
+nieaktualny (stary format, `qa=…`, inna płeć gracza) jest zapasem, gdy dostawca zawiedzie (sieć,
+limit). Bez korpusu plan jest pusty i zapytania są takie jak dotąd; ustawienie
+`paragraphCacheKeys` w `settings.json` (domyślnie wyłączone) włącza klucze po akapitach także bez
+korpusu. Co z tego wynika dla prywatności: [PRIVACY.md](PRIVACY.md).
+
 ## Połączenia i rozgrzewka
 
 `ProviderHttpClientFactory.Create()` tworzy `HttpClient` z pulą bezczynnych połączeń na
@@ -195,7 +212,8 @@ niczego więcej nie konfiguruje.
 - **Batch do 50 tekstów** w jednym żądaniu — provider grupuje oczekujące teksty i wysyła je
   razem zamiast strzelać pojedynczo (mniej żądań = mniejsza szansa na rate limit i szybszy
   łączny czas).
-- Wysyłany jest wyłącznie rozpoznany tekst (nigdy obrazy — patrz `docs/PRIVACY.md`).
+- Wysyłany jest wyłącznie tekst — rozpoznany na ekranie albo dopasowany do niego tekst lokalnego
+  korpusu gry (nigdy obrazy — patrz `docs/PRIVACY.md`).
 
 ### /v2/glossaries — glosariusz ze słownika
 
@@ -409,7 +427,8 @@ dotnet run --project tools/GameTranslatorOverlay.ProviderEval -c Release -- \
 
 Prawdziwe linie z gier trzymaj w `eval/private/` (w `.gitignore`). chrF na 42 liniach to
 sygnał, nie werdykt — różnice warto potwierdzić lekturą najgorszych linii z raportu. CI
-uruchamia narzędzie tylko z Mockiem. Wyników dla prawdziwych dostawców jeszcze nie zebrano.
+uruchamia narzędzie tylko z Mockiem. Wyników chrF dla prawdziwych dostawców jeszcze nie zebrano;
+pomiary czasu i kosztu DeepL i DeepSeek opisuje sekcja „Pomiary: DeepL i DeepSeek” niżej.
 
 Opcje serwera LLM w ProviderEval: `--llm-thinking TYP`, `--llm-effort POZIOM`,
 `--llm-max-tokens N`, `--llm-json` (`response_format: json_object`) i `--llm-no-preset`. Bez
@@ -425,8 +444,47 @@ mówcy i kolumny kontekstu, kolejnością linii dialogu i kontrolą jakości jak
 zachowanie znaczników `{0}`, `[X]`, `%s`). Wpisy trafiają do cache z profilem gry, prawdziwą
 nazwą dostawcy i znacznikiem `src=corpus`; ręczne korekty, wpisy zatwierdzone i terminy
 słownika nie są nadpisywane, a tryb prywatny oznacza odmowę zapisu. `--dry-run` podaje liczbę
-tekstów, znaków i szacunek kosztu bez wysyłania. Klucze tylko ze zmiennych środowiskowych.
-Opis: [README narzędzia](../tools/GameTranslatorOverlay.CorpusTool/README.md).
+tekstów, znaków i szacunek kosztu bez wysyłania. Klucze tylko ze zmiennych środowiskowych
+(`GTO_DEEPL_KEY`, `GTO_LLM_ENDPOINT` + `GTO_LLM_MODEL` + opcjonalnie `GTO_LLM_KEY`), nigdy z DPAPI
+aplikacji. DeepL domyślnie korzysta z glosariusza na koncie DeepL (`--no-deepl-glossary` wyłącza),
+a adres DeepSeek dostaje `thinking: disabled`, Ollama `reasoning_effort: none` (opcje
+`--llm-thinking`, `--llm-effort`, `--llm-max-tokens`, `--llm-json`, `--llm-no-preset` jak
+w ProviderEval). Opis: [README narzędzia](../tools/GameTranslatorOverlay.CorpusTool/README.md).
+
+**Szacunek kosztu** (`CorpusCostEstimate`, ±30%): DeepL — znaki wysłanego tekstu, odsetek
+miesięcznego limitu API Free (500 tys.) i koszt po stawce Growth 27,50 USD za 1 mln znaków
+(źródło wtórne); LLM — tokeny z promptów złożonych tak jak przy wysyłce, dla `api.deepseek.com`
+po stawkach `deepseek-flash` z badania 2026-10-05 (0,15 / 0,60 USD za 1 mln tokenów wejścia /
+wyjścia poza szczytem, 0,30 / 1,20 w szczycie; bez trafień cache i bez tokenów rozumowania), dla
+serwera lokalnego 0, dla innych — po podaniu `--price-in` / `--price-out`. Po prawdziwym przebiegu
+LLM narzędzie podaje sumę tokenów z `usage`. Tłumaczenie korpusu to w praktyce jednorazowy
+koszt na grę: w aplikacji (live i tłumaczenie regionu), przy aktywnym profilu gry i poza trybem
+prywatnym, teksty przetłumaczone z wyprzedzeniem są obsługiwane z cache, bez zapytań. Wyjątki są
+takie jak przy każdym wpisie cache: wynik z uwagą kontroli jakości (`qa=…`) i linia zwracająca
+się do gracza, przetłumaczona z inną płcią gracza niż ustawiona przy dostawcy świadomym płci,
+idą do dostawcy jeszcze raz.
+
+## Pomiary: DeepL i DeepSeek
+
+Liczby z badania 2026-10-05/06 (surowe dane poza repozytorium; opis
+w [TECHNOLOGY_DECISIONS.md](TECHNOLOGY_DECISIONS.md) — ADR-013, dopisek 2026-10-06, i ADR-014 —
+oraz w [ROADMAP.md](ROADMAP.md), rundy 2026-10-06 (2) i (3)). To czasy i koszty, nie ocena
+jakości tłumaczeń — pomiaru jakości obu dostawców (np. chrF z ProviderEval) ta dokumentacja
+jeszcze nie zawiera.
+
+- **Nowy tekst w trybie live** (2026-10-05): gotowy napis po 0,50–0,59 s z DeepL i 1,0–1,3 s
+  z modelem językowym; tekst znany z cache albo słownika — po ok. 0,33 s.
+- **DeepSeek V4.1 Flash (`deepseek-flash`) a myślenie** (2026-10-05): przy minimalnym zestawie
+  pól zapytania (bez `thinking`) model zawsze myśli — mediana 0,96 s na linię, paczka 5 linii
+  7–20 s; z `thinking: disabled` mediana 0,71 s. Stąd opcje serwera i gotowy serwer DeepSeek
+  z wyłączonym myśleniem.
+- **Cały korpus Escape Academy z wyprzedzeniem — szacunek przed przebiegiem** (`--dry-run`,
+  hipoteza ±30%): DeepL — 200 zapytań, 248 979 znaków = 49,8% miesięcznego limitu API Free;
+  DeepSeek bez myślenia — 343 zapytania, ok. 333 tys. tokenów wejścia i 114 tys. wyjścia,
+  0,12–0,24 USD (poza szczytem – w szczycie).
+- **Prawdziwy przebieg** (2026-10-06, DeepSeek V4.1 Flash bez rozumowania): 7 581 tekstów,
+  337 partii bez błędu, 8 z uwagą kontroli jakości, ok. 0,12–0,24 USD, 5 min 23 s. Przebiegu
+  z DeepL nie było.
 
 ## Kontrola kosztów
 
@@ -454,6 +512,27 @@ na kilku warstwach:
     u modeli językowych i 2 u DeepL/Azure/Google (`qa-final` kończy ponowienia).
 12. **Pamięć awaryjna przy zepsutej bazie** — gdy cache SQLite nie działa, wyniki są pamiętane
     w RAM (do 2000 tekstów, do przebudowy pipeline'u), żeby ten sam tekst nie szedł drugi raz.
+13. **Korpus gry (ADR-014)** — przy aktywnym profilu z korpusem różne odczyty tego samego zdania
+    (inne zawinięcie, wielkość liter, pomyłki OCR) dzielą jeden wpis cache i jedno zapytanie,
+    a teksty przetłumaczone z wyprzedzeniem (`CorpusTool translate`) nie kosztują nic w trakcie
+    gry (poza trybem prywatnym, który nie czyta bazy z dysku). Powtórka 242 bloków Escape
+    Academy przez pipeline z Mockiem (korpus przetłumaczony z wyprzedzeniem): zapytania
+    241 → 122, znaki do dostawcy 4 214 → 1 678 ([ROADMAP.md → Runda 2026-10-06 (3)](ROADMAP.md)).
+14. **Etykiety, kwestie i śmieci przy aktywnym korpusie** — krótka etykieta z pomyłkami OCR
+    trafia w etykietę korpusu, kolejne odczyty kwestii pisanej literami — w ten sam wpis,
+    a w trybie live krótki odczyt (do 16 liter), w którym większość liter nie tworzy słów znanych
+    z tekstów gry albo który ma dużo nietypowych znaków, bez żadnego dopasowania i bez
+    podobieństwa do tekstu korpusu, nie idzie do dostawcy (`CorpusSnapper.LooksLikeNoise`; termin
+    słownika nie jest śmieciem). W trybie „Na oryginale (zakrywa)” niedokończona kwestia czeka na
+    koniec pisania (`LiveSessionOptions.HoldTypingPrefixes`), więc jej początek nie jest wysyłany
+    (SceneReplay `typing`, 2 linie: 4 zapytania bez wstrzymywania, 2 ze wstrzymywaniem). Odczyty
+    pierwszej sesji na wersji z korpusem (powtórka z Mockiem): do dostawcy 10 zamiast 36 tekstów,
+    171 zamiast 571 znaków; ta sama powtórka 242 bloków co w pkt 13: zapytania 122 → 57, znaki
+    1 678 → 737 ([ROADMAP.md → Runda 2026-10-06 (4)](ROADMAP.md)).
+15. **Klucze cache po akapitach bez korpusu** — `paragraphCacheKeys` w `settings.json`
+    (domyślnie wyłączone): ten sam akapit w innym bloku nie jest płacony drugi raz. Powtórka sesji
+    PoE2 z Mockiem: zapytania 247 → 218, 21,3% znaków lokalnie zamiast 0%
+    ([ROADMAP.md → Runda 2026-10-06 (3)](ROADMAP.md)).
 
 ## Jak dodać nowego dostawcę
 
@@ -478,6 +557,8 @@ Procedura dla kolejnego dostawcy (np. własny serwer HTTP):
 6. Dopisz dostawcę do `ProviderFactory` w ProviderEval i porównaj go z innymi na korpusie.
 7. Dopisz dostawcę do tego dokumentu (endpointy, limity, mapowanie błędów).
 
-Wymóg niezmienny dla każdego dostawcy: do API idzie **wyłącznie rozpoznany tekst**
-(nigdy obrazy) — dla dostawców kontekstowych także nazwa gry i pasujące terminy słownika —
-a użytkownik jest jasno informowany, dokąd tekst trafia.
+Wymóg niezmienny dla każdego dostawcy: do API idzie **wyłącznie tekst** (nigdy obrazy) —
+rozpoznany na ekranie albo dopasowany do niego tekst lokalnego korpusu gry, a przy
+`CorpusTool translate` teksty korpusu na polecenie użytkownika; dla dostawców kontekstowych
+także nazwa gry i pasujące terminy słownika — a użytkownik jest jasno informowany, dokąd tekst
+trafia.
