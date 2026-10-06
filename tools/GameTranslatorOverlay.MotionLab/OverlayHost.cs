@@ -212,8 +212,10 @@ internal sealed class OverlayHost
                 ? default
                 : new Box((int)Math.Floor(bounds.X * Scale), (int)Math.Floor(bounds.Y * Scale),
                     (int)Math.Ceiling(bounds.Width * Scale), (int)Math.Ceiling(bounds.Height * Scale));
+            var native = element.Child as GameTextElement;
             result.Add(new ElementDto(key, box, Math.Round(element.Opacity, 3), RuntimeHelpers.GetHashCode(element),
-                OverlayBlockRenderer.IsNative(element)));
+                OverlayBlockRenderer.IsNative(element), native?.Typeface?.Weight.ToOpenTypeWeight(),
+                native is null ? null : Math.Round(native.EmSize, 2)));
         }
         return result;
     }

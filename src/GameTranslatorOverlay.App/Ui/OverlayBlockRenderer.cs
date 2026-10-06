@@ -232,6 +232,16 @@ public static class OverlayBlockRenderer
 
     private static Color ToColor(int rgb) => Color.FromRgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 
+    private const double StyleAscentTolerance = 0.08;
+
+    private static bool CloseColor(int a, int b)
+    {
+        if (a < 0 || b < 0) return a == b;
+        return Math.Abs(((a >> 16) & 0xFF) - ((b >> 16) & 0xFF))
+            + Math.Abs(((a >> 8) & 0xFF) - ((b >> 8) & 0xFF))
+            + Math.Abs((a & 0xFF) - (b & 0xFF)) <= 90;
+    }
+
     public static void LayoutNativeElement(
         Border element, RectPx box, MonitorArea monitor, AppSettings settings, string? profileFont, double freeRightPx = 0)
     {
@@ -260,7 +270,23 @@ public static class OverlayBlockRenderer
         {
             var (reference, referenceText) = WeightReference(cover, text)!.Value;
             var ascent = (reference.Baseline - reference.InkTop) / scale;
-            typeface = OverlayFonts.ChooseStyleWeight(family, referenceText, reference.Density, ascent, cover.TextRgb, cover.OutlinePx > 0);
+            var style = $"{family}|{cover.OutlinePx > 0}";
+            if (native.StyleReference == style && native.StyleAscent > 0 && CloseColor(native.StyleTextRgb, cover.TextRgb)
+                && Math.Abs(ascent - native.StyleAscent) <= Math.Max(1.0, native.StyleAscent * StyleAscentTolerance))
+            {
+                ascent = native.StyleAscent;
+                typeface = native.Typeface;
+            }
+            else
+            {
+                typeface = OverlayFonts.ChooseStyleWeight(family, referenceText, reference.Density, ascent, cover.TextRgb, cover.OutlinePx > 0);
+                if (native.StyleReference == style
+                    && Math.Abs(typeface.Weight.ToOpenTypeWeight() - native.Typeface.Weight.ToOpenTypeWeight()) <= 100)
+                    typeface = native.Typeface;
+                native.StyleReference = style;
+                native.StyleTextRgb = cover.TextRgb;
+                native.StyleAscent = ascent;
+            }
             var metrics = OverlayFonts.Measure(typeface, referenceText);
             em = metrics.Ascent > 0.05 ? ascent / metrics.Ascent : ascent / 0.7;
             em = Math.Clamp(em, 6, Math.Max(6, box.Height / scale * 1.6));

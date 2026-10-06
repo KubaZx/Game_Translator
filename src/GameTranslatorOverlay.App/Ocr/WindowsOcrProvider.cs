@@ -21,6 +21,8 @@ public sealed class WindowsOcrProvider : IOcrProvider
     // deklaruje bezpieczeństwa wątkowego, więc wywołania na tym samym silniku serializujemy.
     private readonly Dictionary<string, (OcrEngine Engine, SemaphoreSlim Gate)> _engines = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _enginesLock = new();
+    private const long BandRetryBackoffMs = 2000;
+    private long _bandRetryAfter;
 
     public string Name => "Windows OCR";
 
@@ -74,6 +76,34 @@ public sealed class WindowsOcrProvider : IOcrProvider
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        var lines = await RecognizeLinesAsync(engine, gate, bitmap, cancellationToken).ConfigureAwait(false);
+        if (OcrBands.ShouldRetry(bitmap.Width, bitmap.Height, lines.Count) && Environment.TickCount64 >= Interlocked.Read(ref _bandRetryAfter))
+        {
+            Interlocked.Exchange(ref _bandRetryAfter, Environment.TickCount64 + BandRetryBackoffMs);
+            foreach (var count in OcrBands.RetryCounts)
+            {
+                var parts = new List<(OcrBand, IReadOnlyList<OcrLine>)>();
+                foreach (var band in OcrBands.Plan(bitmap.Width, bitmap.Height, count))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    parts.Add((band, await RecognizeLinesAsync(engine, gate, OcrBands.Crop(bitmap, band.Rect), cancellationToken).ConfigureAwait(false)));
+                }
+                var merged = OcrBands.Merge(parts);
+                if (merged.Count > 0)
+                {
+                    lines = merged;
+                    Interlocked.Exchange(ref _bandRetryAfter, 0);
+                    break;
+                }
+            }
+        }
+
+        return new OcrResult(lines, language.LanguageTag);
+    }
+
+    private static async Task<IReadOnlyList<OcrLine>> RecognizeLinesAsync(
+        OcrEngine engine, SemaphoreSlim gate, OcrBitmap bitmap, CancellationToken cancellationToken)
+    {
         using var softwareBitmap = SoftwareBitmap.CreateCopyFromBuffer(
             bitmap.PixelsBgra32.AsBuffer(), BitmapPixelFormat.Bgra8, bitmap.Width, bitmap.Height);
 
@@ -102,8 +132,7 @@ public sealed class WindowsOcrProvider : IOcrProvider
             var box = words.Aggregate(default(RectPx), static (acc, w) => acc.Union(w.Box));
             lines.Add(new OcrLine(line.Text, box, words));
         }
-
-        return new OcrResult(lines, language.LanguageTag);
+        return lines;
     }
 
 }

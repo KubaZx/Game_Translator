@@ -215,12 +215,14 @@ public sealed class LiveTranslationSession(
     private readonly LiveSubtitleContent _subtitleContent = new();
     private bool _readingRetryRequested;
     private sealed record HeldPrefix(int Letters, TimeSpan LettersSince, TimeSpan FirstSeen);
+    private const double CatchUpReach = 2.5;
     private sealed record TrackState(GlyphCover Cover, float[] Signature, int Absences = 0, int VelocityX = 0, int VelocityY = 0);
     private readonly Dictionary<string, RectPx> _captureBoxes = new(StringComparer.Ordinal);
     private bool _lastCaptureFallback;
     private readonly Dictionary<string, TrackState> _tracks = new(StringComparer.Ordinal);
     private TimeSpan? _lastTrackedMotion;
     private readonly HashSet<string> _presentByTracking = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _confirmedAtCapture = new(StringComparer.Ordinal);
     private bool _frameCapturedInMotion;
 
     private bool _motionDuringProcessing;
@@ -809,6 +811,10 @@ public sealed class LiveTranslationSession(
             _motionDuringProcessing = false;
             _captureBoxes.Clear();
             foreach (var (capturedKey, capturedBlock) in _displayed) _captureBoxes[capturedKey] = capturedBlock.WindowRelativeBox;
+            _confirmedAtCapture.Clear();
+            _confirmedAtCapture.UnionWith(_presentByTracking);
+            _confirmedAtCapture.UnionWith(_pixelsUnchangedAtCapture);
+            _confirmedAtCapture.UnionWith(_presentAtCapture);
             // Ta klatka obejmuje wszystkie zmiany zauważone do teraz; liczą się już
             // tylko te, które przyjdą w trakcie jej OCR i tłumaczenia.
             _lastObservedChangeAt = null;
@@ -1083,6 +1089,11 @@ public sealed class LiveTranslationSession(
         TrackState? State, bool Fresh, double Radius, int VelocityX, int VelocityY);
 
     private readonly record struct TrackOutcome(GlyphMatch? Match, GlyphCover? Refilled, bool Unchanged);
+
+    private IReadOnlyList<TextBlock> KeepConfirmedSplit(IReadOnlyList<TextBlock> blocks) =>
+        TextBlockSplitter.SplitAlong(blocks, _captureBoxes
+            .Where(p => _confirmedAtCapture.Contains(p.Key) && _displayed.ContainsKey(p.Key))
+            .Select(static p => p.Value).ToList());
 
     private static bool Overlaps(RectPx a, RectPx b)
     {
@@ -1495,7 +1506,7 @@ public sealed class LiveTranslationSession(
         // do dostawcy. Sprawdzenie na blokach niżej zostaje jako druga ochrona.
         if (options.NoticeEcho is { } lineEcho) lines = lineEcho.RemoveEchoLines(lines);
 
-        var blocks = TextBlockGrouper.Group(lines)
+        var blocks = KeepConfirmedSplit(TextBlockGrouper.Group(lines))
             .Where(block => orchestrator.ShouldTranslateLive(block.Text))
             .ToList();
         var keyed = LiveBlockKeyer.AssignKeys(blocks, orchestrator.CorpusIdentity);
@@ -1811,10 +1822,10 @@ public sealed class LiveTranslationSession(
 
         System.Drawing.Bitmap? confirmFrame = null;
         var confirmTried = false;
-        bool ConfirmStaticInMotion(GlyphCover? candidate)
+        (bool Present, GlyphCover? Moved) ConfirmInMotion(GlyphCover? candidate)
         {
-            if (_lastCaptureFallback) return true;
-            if (candidate?.Track is not { } track) return false;
+            if (_lastCaptureFallback) return (true, null);
+            if (candidate?.Track is not { } track) return (false, null);
             if (!confirmTried)
             {
                 confirmTried = true;
@@ -1822,12 +1833,16 @@ public sealed class LiveTranslationSession(
                 if (freshFallback) fresh?.Dispose();
                 else confirmFrame = fresh;
             }
-            if (confirmFrame is null) return false;
+            if (confirmFrame is null) return (false, null);
             var confirmRect = new RectPx(0, 0, confirmFrame.Width, confirmFrame.Height);
-            var area = track.SearchArea(8).Intersect(confirmRect);
-            if (ScreenCapture.CopyRegion(confirmFrame, area) is not { } region) return false;
-            var found = GlyphTracker.Locate(track, region, area.X, area.Y, 8);
-            return found is { IsConfident: true } f && Math.Abs(f.WindowDx) <= 8 && Math.Abs(f.WindowDy) <= 8;
+            var reach = options.TrackMaxShiftPx * CatchUpReach;
+            var area = track.SearchArea(reach).Intersect(confirmRect);
+            if (ScreenCapture.CopyRegion(confirmFrame, area) is not { } region) return (false, null);
+            var found = GlyphTracker.Locate(track, region, area.X, area.Y, reach);
+            if (found is not { IsConfident: true } f) return (false, null);
+            if (f.IsStatic) return (true, null);
+            var moved = GlyphCoverBuilder.Refill(candidate, region, area.X, area.Y, f.WorkDx, f.WorkDy);
+            return moved is null ? (false, null) : (true, moved);
         }
 
         for (var i = 0; i < keyed.Count; i++)
@@ -1835,11 +1850,16 @@ public sealed class LiveTranslationSession(
             var outcome = outcomes[i];
             if (outcome.TranslatedText is not { } translated) continue;
 
-            if (covers is not null && (_frameCapturedInMotion || _motionDuringProcessing) && !_displayed.ContainsKey(keyed[i].Key)
-                && !ConfirmStaticInMotion(i < covers.Count ? covers[i] : null))
+            GlyphCover? caughtUp = null;
+            if (covers is not null && (_frameCapturedInMotion || _motionDuringProcessing) && !_displayed.ContainsKey(keyed[i].Key))
             {
-                _pendingDirtyRegion = _pendingDirtyRegion?.Union(keyed[i].Block.Box) ?? keyed[i].Block.Box;
-                continue;
+                var (present, moved) = ConfirmInMotion(i < covers.Count ? covers[i] : null);
+                if (!present)
+                {
+                    _pendingDirtyRegion = _pendingDirtyRegion?.Union(keyed[i].Block.Box) ?? keyed[i].Block.Box;
+                    continue;
+                }
+                caughtUp = moved;
             }
 
             // Kolor tekstu próbkujemy z oryginalnych pikseli (np. kolor rzadkości przedmiotu).
@@ -1848,6 +1868,16 @@ public sealed class LiveTranslationSession(
             var (colorRgb, backgroundRgb, outlineRgb) = sampled;
             var texture = sampled.Texture;
             var cover = covers is not null && i < covers.Count ? covers[i] : null;
+            if (caughtUp is not null && cover is not null)
+            {
+                box = box.Offset(caughtUp.Anchor.X - cover.Anchor.X, caughtUp.Anchor.Y - cover.Anchor.Y);
+                cover = caughtUp;
+                if (next.Values.Any(other => Overlaps(other.WindowRelativeBox, box)))
+                {
+                    _pendingDirtyRegion = _pendingDirtyRegion?.Union(box) ?? box;
+                    continue;
+                }
+            }
             var pendingBackgroundRgb = -1;
 
             var key = keyed[i].Key;
@@ -1933,7 +1963,7 @@ public sealed class LiveTranslationSession(
             // A rescaled OCR image cannot prove equality with future native pixels.
             // A small complete margin also notices adjacent glyphs added to a label.
             var sourceBox = keyed[i].Block.Box.Inflate(3);
-            var fingerprint = !usedScreenFallback && scaleBack == 1.0
+            var fingerprint = !usedScreenFallback && scaleBack == 1.0 && caughtUp is null
                 && TextPresenceProbe.CanCheckKnownText(sampled.TextRgb, sampled.BackgroundRgb)
                 ? TextRegionFingerprint.FromBitmap(frame, sourceBox.Offset(-ocrRegion.X, -ocrRegion.Y)) : null;
             if (fingerprint is not null)

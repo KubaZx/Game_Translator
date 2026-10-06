@@ -57,7 +57,7 @@ internal sealed record RecordedFrame(int I, double TMs, double CaptureMs, int W,
 
 internal sealed record CoverDto(
     int Id, bool New, double X, double Y, double W, double H, int PixelW, int PixelH,
-    bool Soft, Box Anchor, double BuildMs, double MaskFraction);
+    bool Soft, Box Anchor, double BuildMs, double MaskFraction, double? Density = null, double? Ascent = null);
 
 internal sealed record BlockDto(
     string Key, Box Box, string Text, bool Same, string? Src, int Misses, int LineHeight, CoverDto? Cover);
@@ -73,7 +73,7 @@ internal sealed record UpdateDto(
     int Seq, double EmitMs, double AppliedMs, string Status, bool Clear, bool Hide, bool Stopped,
     bool ClearSubtitle, string? Subtitle, string? Notice, Box Bounds, DiagDto? Diag, IReadOnlyList<BlockDto>? Blocks);
 
-internal sealed record ElementDto(string? Key, Box Box, double Opacity, int Element, bool Native);
+internal sealed record ElementDto(string? Key, Box Box, double Opacity, int Element, bool Native, int? Weight = null, double? Em = null);
 
 internal sealed record ShownDto(
     int I, double DueMs, double SetMs, double RenderMs, double DecodeWaitMs, double SnapMs,

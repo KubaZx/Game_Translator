@@ -32,6 +32,12 @@ public sealed class GameTextElement : FrameworkElement
 
     public string RawText { get; set; } = string.Empty;
 
+    public string? StyleReference { get; set; }
+
+    public int StyleTextRgb { get; set; } = -1;
+
+    public double StyleAscent { get; set; }
+
     public string Text
     {
         get => _text;

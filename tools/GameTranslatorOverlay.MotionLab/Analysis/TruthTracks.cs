@@ -34,6 +34,8 @@ internal static class TextTools
             if (Cache.TryGetValue(key, out var cached)) return cached;
         }
         var value = TextSimilarity.Ratio(Flat(a), Flat(b));
+        var (bareA, bareB) = (WithoutIcon(a), WithoutIcon(b));
+        if (bareA.Length != a.Length || bareB.Length != b.Length) value = Math.Max(value, TextSimilarity.Ratio(bareA, bareB));
         lock (Gate)
         {
             if (Cache.Count > 400_000) Cache.Clear();
@@ -42,13 +44,30 @@ internal static class TextTools
         return value;
     }
 
-    public static bool LengthCompatible(string a, string b)
+    public static bool LengthCompatible(string a, string b) => Compatible(a, b) || Compatible(WithoutIcon(a), WithoutIcon(b));
+
+    private static bool Compatible(string a, string b)
     {
         var longest = Math.Max(a.Length, b.Length);
         return Math.Abs(a.Length - b.Length) <= 0.4 * longest;
     }
 
     public static string Flat(string text) => text.Replace('\n', ' ');
+
+    private static readonly HashSet<string> KeyTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "tab", "esc", "lb", "rb", "lt", "rt", "l1", "r1", "l2", "r2", "f1", "f2", "f3", "f4",
+    };
+
+    public static string WithoutIcon(string text)
+    {
+        var flat = Flat(text).Trim();
+        var space = flat.IndexOf(' ');
+        if (space <= 0) return flat;
+        var first = flat[..space];
+        var icon = first.Length == 1 ? char.IsLetterOrDigit(first[0]) : KeyTokens.Contains(first);
+        return icon ? flat[(space + 1)..].TrimStart() : flat;
+    }
 
     public static string Short(string text, int max)
     {

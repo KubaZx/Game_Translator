@@ -510,7 +510,9 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
                     if (isNew) RegisterPatch(id, c, seq, emit, captureAt);
                     cover = new CoverDto(id, isNew, Json.R(c.PatchX), Json.R(c.PatchY), Json.R(c.PatchWidth), Json.R(c.PatchHeight),
                         c.PatchPixelWidth, c.PatchPixelHeight, c.Soft, Box.From(c.Anchor).Offset(-bounds.X, -bounds.Y),
-                        Json.R(c.BuildMs), Json.R3(c.MaskFraction));
+                        Json.R(c.BuildMs), Json.R3(c.MaskFraction),
+                        c.Lines.Count == 0 ? null : Json.R3(c.Lines.MaxBy(static l => l.Baseline - l.InkTop)!.Density),
+                        c.Lines.Count == 0 ? null : Json.R(c.Lines.Max(static l => l.Baseline - l.InkTop)));
                 }
                 blocks.Add(new BlockDto(block.Key, Box.From(block.ScreenBox).Offset(-bounds.X, -bounds.Y), block.TranslatedText,
                     block.SameAsSource, source?.SourceText, source?.Misses ?? -1, block.LineHeight, cover));
