@@ -1652,10 +1652,11 @@ rozrzutu, w pokoju nieaktualne tłumaczenie 9,1–9,7 s → 7,7–8,1 s.
   `BridgeRows` (kawałek do 1,2× wysokości linii, próbki boków 4–16 px o rozpiętości jasności ≤ 24,
   ten sam kolor z obu stron w ≥ 3 kolejnych wierszach, odchylenie wypełnienia > 6) — także
   w `Refill`; `ContainerExtent` i `WrappedLines` w układzie napisu.
-- Przyczyna ogonków „Employee”: ciemny pasek okna dialogu w dole łatki był wykrywany jako
-  podkreślenie (wycinał dół liter), a później jasny pasek ściany nad nim (cienki, długi, ale
-  w kolorze tła); cień ogonka nie trafiał do poświaty, bo tło szacowane obok było zaniżone przez
-  pasek; po samym wycięciu wypełnienie ciągnęło czerń paska w górę.
+- Kleksy pod „Employee” (prolog 447): w 0.6.0 cień ogonków nie trafiał do poświaty, bo tło
+  szacowane obok było zaniżone przez czarny pasek okna dialogu, a wypełnienie ciągnęło czerń paska
+  w górę. W trakcie rundy pierwsza wersja `DetectRules` brała ten pasek, a potem jasny pasek
+  ściany nad nim, za podkreślenie i wycinała dół liter (żółte ogonki — regresja wykryta
+  i naprawiona przed commitem, stąd warunki krawędzi i koloru tuszu).
 
 **Regresje.** 1741 testów (1295 Core + 280 Infrastructure + 166 CorpusTool), build bez ostrzeżeń.
 SceneReplay jak w rundzie (7) (stary usunięty po 33–35 ms, 0 strat menu i HUD, błąd położenia

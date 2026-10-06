@@ -22,13 +22,13 @@ tego samego kodu). **W grze na żywo nikt jeszcze tego nie oglądał.**
   kamery 75,2% (pokój) i 51,4% (prolog-intro); przed zmianą nie mierzony.
 - **Czystsza łatka z bliska** (tryb zakrywania, sprawdzone na 6 klatkach 4K narzędziem
   OverlayPreview):
-  - ogonki liter („p”, „y”) i ich cień nie wystają spod tłumaczenia. Wcześniej ciemny pasek okna
-    dialogu tuż pod napisem był brany za podkreślenie i wycinał dół liter z maski, a cień ogonka
-    nad paskiem zostawał; teraz podkreślenie musi być cienką kreską w kolorze liter, z tłem nad
-    i pod nią, a maska dorasta przez cień w kolorze obrysu;
-  - krótkie kawałki maski (ogonki, cienie) z jednolitym tłem po obu stronach są wypełniane z boków,
-    bez ciemnych plam ciągniętych z innego obszaru pod napisem;
-  - przekrzywione podkreślenie zostaje, a koniec litery nad jego niższym końcem znika;
+  - w miejscu ogonków liter („p”, „y”) i ich cienia nie zostają ciemne kleksy (w 0.6.0 widoczne
+    pod imieniem mówiącego tuż nad oknem dialogu; teraz najwyżej słaba szara smuga): krótkie
+    kawałki maski z jednolitym tłem po obu stronach są wypełniane z boków, zamiast ciągnąć czerń
+    paska spod napisu, a maska dorasta przez cień w kolorze obrysu;
+  - podkreślenie pod tytułem zostaje (cienka kreska w kolorze liter z tłem nad i pod nią; pasek
+    interfejsu przy krawędzi łatki nim nie jest), także przekrzywione, a koniec litery nad nim
+    znika;
   - ikony w środku zdania (klawisze, mysz) zostają widoczne (polski tekst może na nie nachodzić);
   - wyśrodkowany tytuł nie wychodzi poza kartkę albo ramkę, a akapit zmniejsza się (do 70%), żeby
     zmieścić się w liczbie wierszy oryginału.

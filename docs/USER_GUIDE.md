@@ -312,9 +312,9 @@ uruchom w oknie bez ramki. Tryb działa jak spolszczenie, ale nadal wyłącznie 
   za napisem (np. ✓) nie są zamazywane, a litera odczytana z ikony nie pojawia się w tłumaczeniu
   na ekranie. Ikony w środku zdania (klawisze, mysz) też zostają, ale polski tekst nie robi dla
   nich miejsca i może na nie nachodzić.
-- **Ogonki i podkreślenia:** ogonki liter („p”, „y”) i ich cień są zakrywane także tuż nad
-  paskiem okna dialogu, a podkreślenie pod tytułem zostaje. Wyśrodkowany tytuł nie wychodzi poza
-  kartkę albo ramkę, na której stoi.
+- **Ogonki i podkreślenia:** w miejscu ogonków liter („p”, „y”) i ich cienia nie zostają ciemne
+  plamy (najwyżej słaba smuga), także tuż nad paskiem okna dialogu, a podkreślenie pod tytułem
+  zostaje. Wyśrodkowany tytuł nie wychodzi poza kartkę albo ramkę, na której stoi.
 - **Tłumaczenie identyczne z oryginałem** (nazwy, „OK”, logo) nie jest rysowane — widać grę.
 - **Jedna grubość w jednym stylu:** napisy o tym samym rozmiarze, kolorze i obrysie (np. pozycje
   menu) dostają tę samą grubość kroju.

@@ -1057,8 +1057,8 @@ dymek znika i na jak długo, oraz czy gra działała płynnie.
    i kartka zrzeczenia („Escape Room Waiver” z ikonami WASD, myszy, Tab i Shift).
 2. Obejrzyj z bliska (np. lupą Windows) dół imienia i tytuł kartki.
 
-**Oczekiwany wynik:** pod polskim imieniem nie widać żółtych ogonków „p”, „y” ani ich czarnego
-cienia; ciemny pasek okna dialogu jest nietknięty. Tytuł kartki mieści się na kartce,
+**Oczekiwany wynik:** pod polskim imieniem nie widać żółtych ogonków „p”, „y” ani czarnych
+kleksów po ich cieniu (najwyżej słaba smuga); ciemny pasek okna dialogu jest nietknięty. Tytuł kartki mieści się na kartce,
 czerwone podkreślenie zostaje całe, bez czerwonej kropki nad nim. Akapity nie zajmują więcej
 wierszy niż oryginał. Ikony zostają widoczne; znane ograniczenie: polski tekst może na nie
 nachodzić (ROADMAP, kierunek 31). Zapisz zrzut z lupą, jeśli coś odstaje.
