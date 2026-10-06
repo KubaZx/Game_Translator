@@ -16,13 +16,13 @@ public sealed class MotionProcessDeadline
         _maximumPause = maximumPause;
     }
 
-    public bool Observe(bool isMoving, TimeSpan elapsed)
+    public bool Observe(bool isMoving, TimeSpan elapsed, TimeSpan? limit = null)
     {
         _isMoving = isMoving;
         // A calm sample is not a completed read. Resetting here lets alternating
         // motion/calm samples defer OCR indefinitely through ForceDirty.
         if (isMoving) _waitingSince ??= elapsed;
-        return _waitingSince is { } since && elapsed - since >= _maximumPause;
+        return _waitingSince is { } since && elapsed - since >= (limit ?? _maximumPause);
     }
 
     // Consume the wait only after frame preparation actually reaches processing.

@@ -39,6 +39,7 @@ public sealed record GlyphCover
     public double TailSkipPx { get; init; }
     public string TailToken { get; init; } = string.Empty;
     public RectPx Anchor { get; init; }
+    public GlyphTrack? Track { get; init; }
 
     public GlyphCover AnchorTo(RectPx box) =>
         Relocate(Anchor.X - box.X, Anchor.Y - box.Y) with { Anchor = box };
@@ -129,12 +130,13 @@ public static class GlyphCoverBuilder
 
     public static GlyphCover? Build(
         OcrBitmap frame, RectPx box, IReadOnlyList<RectPx>? lineBoxes = null, IReadOnlyList<string>? lineTexts = null,
-        double nativeScale = 1.0, bool soft = false, IReadOnlyList<OcrWord>? firstLineWords = null) =>
-        BuildCore(frame, box, lineBoxes, lineTexts, nativeScale, soft, firstLineWords, Stopwatch.StartNew(), allowScale: true);
+        double nativeScale = 1.0, bool soft = false, IReadOnlyList<OcrWord>? firstLineWords = null, GlyphTrackMap? map = null) =>
+        BuildCore(frame, box, lineBoxes, lineTexts, nativeScale, soft, firstLineWords, Stopwatch.StartNew(), allowScale: true,
+            map ?? new GlyphTrackMap(0, 0, nativeScale));
 
     private static GlyphCover? BuildScaled(
         OcrBitmap frame, RectPx box, IReadOnlyList<RectPx> lines, IReadOnlyList<string> lineTexts, double nativeScale, bool soft,
-        IReadOnlyList<OcrWord>? firstLineWords, double lineHeight, int workScale, Stopwatch watch)
+        IReadOnlyList<OcrWord>? firstLineWords, double lineHeight, int workScale, Stopwatch watch, GlyphTrackMap map)
     {
         var frameRect = new RectPx(0, 0, frame.Width, frame.Height);
         var reach = Math.Clamp(Math.Round(lineHeight * 0.16), 3, 24) + Math.Clamp(Math.Round(lineHeight * 0.08), 2, 10);
@@ -177,12 +179,13 @@ public static class GlyphCoverBuilder
             (rect.X - crop.X) / workScale, (rect.Y - crop.Y) / workScale,
             Math.Max(1, rect.Width / workScale), Math.Max(1, rect.Height / workScale));
         var words = firstLineWords?.Select(w => w with { Box = Map(w.Box) }).ToList();
-        return BuildCore(small, Map(box), lines.Select(Map).ToList(), lineTexts, nativeScale * workScale, soft, words, watch, allowScale: false);
+        var smallMap = new GlyphTrackMap(map.OriginX + crop.X * map.Scale, map.OriginY + crop.Y * map.Scale, map.Scale * workScale);
+        return BuildCore(small, Map(box), lines.Select(Map).ToList(), lineTexts, nativeScale * workScale, soft, words, watch, allowScale: false, smallMap);
     }
 
     private static GlyphCover? BuildCore(
         OcrBitmap frame, RectPx box, IReadOnlyList<RectPx>? lineBoxes, IReadOnlyList<string>? lineTexts,
-        double nativeScale, bool soft, IReadOnlyList<OcrWord>? firstLineWords, Stopwatch watch, bool allowScale)
+        double nativeScale, bool soft, IReadOnlyList<OcrWord>? firstLineWords, Stopwatch watch, bool allowScale, GlyphTrackMap map)
     {
         if (frame.PixelsBgra32 is null || frame.Width <= 0 || frame.Height <= 0) return null;
         var frameRect = new RectPx(0, 0, frame.Width, frame.Height);
@@ -201,7 +204,7 @@ public static class GlyphCoverBuilder
         double lineHeight = heights[heights.Count / 2];
         var workScale = lineHeight >= 150 ? 3 : lineHeight >= 90 ? 2 : 1;
         if (allowScale && workScale > 1)
-            return BuildScaled(frame, box, lines, lineTexts, nativeScale, soft, firstLineWords, lineHeight, workScale, watch);
+            return BuildScaled(frame, box, lines, lineTexts, nativeScale, soft, firstLineWords, lineHeight, workScale, watch, map);
 
         var margin = (int)Math.Clamp(Math.Round(lineHeight * 0.16), 3, 24);
         var ringWidth = (int)Math.Clamp(Math.Round(lineHeight * 0.08), 2, 10);
@@ -342,8 +345,11 @@ public static class GlyphCoverBuilder
         var filled = work.InpaintExcluding(mask);
         if (filled is null) return null;
 
-        var patch = BuildPatch(filled, mask, work.Width, regionLocal, soft, Math.Max(2, margin / 2),
-            iconSkip > 0 ? textLocal.X - regionLocal.X : 0, tailSkip > 0 ? regionLocal.Right - textLocal.Right : 0);
+        var feather = Math.Max(2, margin / 2);
+        var skipLeft = iconSkip > 0 ? textLocal.X - regionLocal.X : 0;
+        var skipRight = tailSkip > 0 ? regionLocal.Right - textLocal.Right : 0;
+        var patch = BuildPatch(filled, mask, work.Width, regionLocal, soft, feather, skipLeft, skipRight);
+        var track = BuildTrack(work, refined, outline, contrast, inRegion, mask, regionLocal, soft, feather, skipLeft, skipRight, outer, map);
 
         var coverLines = MeasureLines(refined, work.Width, work.Height, lines, outer, margin, lineTexts);
         var stroke = MeasureStroke(refined, work.Width, coverLines.Count > 0 ? coverLines[0] : null);
@@ -378,6 +384,123 @@ public static class GlyphCoverBuilder
             IconToken = iconToken,
             TailSkipPx = tailSkip * s,
             TailToken = tailToken,
+            Track = track,
+        };
+    }
+
+    private static GlyphTrack? BuildTrack(
+        Workspace work, bool[] glyph, bool[] outline, float[] contrast, bool[] inRegion, bool[] mask, RectPx regionLocal,
+        bool soft, int feather, int skipLeft, int skipRight, RectPx outer, GlyphTrackMap map)
+    {
+        var width = work.Width;
+        var height = work.Height;
+        var points = new List<int>();
+        var strong = new List<int>();
+        for (var y = 1; y < height - 1; y++)
+        {
+            for (var x = 1; x < width - 1; x++)
+            {
+                var i = y * width + x;
+                if (!inRegion[i]) continue;
+                var isGlyph = glyph[i];
+                var isOutline = outline[i];
+                if (!isGlyph && !isOutline) continue;
+                var interior = true;
+                foreach (var j in (ReadOnlySpan<int>)[i - 1, i + 1, i - width, i + width])
+                {
+                    if (isGlyph ? !glyph[j] : !(outline[j] || glyph[j]))
+                    {
+                        interior = false;
+                        break;
+                    }
+                }
+                if (interior) strong.Add(i);
+                points.Add(i);
+            }
+        }
+        var chosen = strong.Count >= 24 ? strong : points;
+        if (chosen.Count < 8) return null;
+        var values = new float[chosen.Count];
+        double contrastSum = 0;
+        var glyphCount = 0;
+        for (var k = 0; k < chosen.Count; k++)
+        {
+            values[k] = work.L[chosen[k]];
+            if (glyph[chosen[k]])
+            {
+                contrastSum += Math.Abs(contrast[chosen[k]]);
+                glyphCount++;
+            }
+        }
+        var level = glyphCount > 0 ? (float)(contrastSum / glyphCount) : 30f;
+        return new GlyphTrack(
+            map.OriginX + outer.X * map.Scale,
+            map.OriginY + outer.Y * map.Scale,
+            map.Scale,
+            width,
+            height,
+            mask,
+            regionLocal,
+            soft,
+            feather,
+            skipLeft,
+            skipRight,
+            chosen.ToArray(),
+            values,
+            level);
+    }
+
+    public static GlyphCover? Refill(GlyphCover cover, OcrBitmap region, int regionX, int regionY, int workDx = 0, int workDy = 0, bool? soft = null)
+    {
+        if (cover.Track is not { } track) return null;
+        var width = track.Width;
+        var height = track.Height;
+        var count = width * height;
+        var channels = new[] { new float[count], new float[count], new float[count] };
+        var known = new bool[count];
+        var any = false;
+        var span = Math.Max(1, (int)Math.Round(track.Step));
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var i = y * width + x;
+                if (track.Mask[i]) continue;
+                var wx = (int)Math.Floor(track.OriginX + (x + workDx) * track.Step) - regionX;
+                var wy = (int)Math.Floor(track.OriginY + (y + workDy) * track.Step) - regionY;
+                if (wx < 0 || wy < 0 || wx + span > region.Width || wy + span > region.Height) continue;
+                int r = 0, g = 0, b = 0;
+                for (var sy = 0; sy < span; sy++)
+                {
+                    var row = (wy + sy) * region.Stride + wx * 4;
+                    for (var sx = 0; sx < span; sx++)
+                    {
+                        var p = row + sx * 4;
+                        b += region.PixelsBgra32[p];
+                        g += region.PixelsBgra32[p + 1];
+                        r += region.PixelsBgra32[p + 2];
+                    }
+                }
+                var area = span * span;
+                channels[0][i] = (float)r / area;
+                channels[1][i] = (float)g / area;
+                channels[2][i] = (float)b / area;
+                known[i] = true;
+                any = true;
+            }
+        }
+        if (!any) return null;
+        PushPull.Fill(channels, known, width, height);
+        var useSoft = soft ?? track.Soft;
+        var patch = BuildPatch(channels, track.Mask, width, track.Region, useSoft, track.Feather, track.SkipLeft, track.SkipRight);
+        var dx = (int)Math.Round(workDx * track.Step);
+        var dy = (int)Math.Round(workDy * track.Step);
+        return cover with
+        {
+            PatchPbgra = patch,
+            Soft = useSoft,
+            Track = track.Shifted(workDx, workDy),
+            Anchor = dx == 0 && dy == 0 ? cover.Anchor : cover.Anchor.Offset(dx, dy),
         };
     }
 
@@ -422,7 +545,8 @@ public static class GlyphCoverBuilder
             ? block.Lines.OrderBy(static l => l.Box.Y).First().Words
                 .Select(w => w with { Box = ToSampleBox(w.Box, ocrRegion, scaleBack) }).ToList()
             : null;
-        return Build(frame, ToSampleBox(block.Box, ocrRegion, scaleBack), lines, texts, scaleBack, soft, words);
+        return Build(frame, ToSampleBox(block.Box, ocrRegion, scaleBack), lines, texts, scaleBack, soft, words,
+            new GlyphTrackMap(ocrRegion.X, ocrRegion.Y, scaleBack));
     }
 
     public static float[] Signature(OcrBitmap frame, RectPx region)

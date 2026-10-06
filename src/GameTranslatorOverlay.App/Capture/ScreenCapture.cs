@@ -211,6 +211,23 @@ public static class ScreenCapture
         finally { bitmap.UnlockBits(data); }
     }
 
+    public static OcrBitmap? CopyRegion(Bitmap bitmap, RectPx rect)
+    {
+        rect = rect.Intersect(new RectPx(0, 0, bitmap.Width, bitmap.Height));
+        if (rect.IsEmpty) return null;
+        var data = bitmap.LockBits(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height),
+            ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var stride = rect.Width * 4;
+            var pixels = new byte[stride * rect.Height];
+            for (var y = 0; y < rect.Height; y++)
+                System.Runtime.InteropServices.Marshal.Copy(data.Scan0 + y * data.Stride, pixels, y * stride, stride);
+            return new OcrBitmap(pixels, rect.Width, rect.Height, stride);
+        }
+        finally { bitmap.UnlockBits(data); }
+    }
+
     /// <summary>Hashes only a bounded complete ROI of an existing capture, without saving pixels.</summary>
     public static Core.Vision.TextRegionFingerprint? ComputeTextFingerprint(Bitmap bitmap, RectPx box, ref byte[]? rowBuffer)
     {

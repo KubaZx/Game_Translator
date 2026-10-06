@@ -89,10 +89,13 @@ public sealed class WindowsOcrProvider : IOcrProvider
         }
 
         var lines = new List<OcrLine>(recognized.Lines.Count);
+        var angle = recognized.TextAngle;
         foreach (var line in recognized.Lines)
         {
             var words = line.Words
-                .Select(static w => new OcrWord(w.Text, ToRect(w.BoundingRect)))
+                .Select(w => new OcrWord(w.Text, OcrGeometry.Unrotate(
+                    w.BoundingRect.X, w.BoundingRect.Y, w.BoundingRect.Width, w.BoundingRect.Height,
+                    angle, bitmap.Width, bitmap.Height)))
                 .ToList();
             if (words.Count == 0) continue;
 
@@ -103,9 +106,4 @@ public sealed class WindowsOcrProvider : IOcrProvider
         return new OcrResult(lines, language.LanguageTag);
     }
 
-    private static RectPx ToRect(Windows.Foundation.Rect rect) => new(
-        (int)Math.Floor(rect.X),
-        (int)Math.Floor(rect.Y),
-        (int)Math.Ceiling(rect.Width),
-        (int)Math.Ceiling(rect.Height));
 }
