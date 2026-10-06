@@ -631,8 +631,6 @@ public sealed class LiveTranslationSession(
             changedFraction = analysis.ChangedFraction;
             strongFraction = analysis.StrongChangedFraction;
             significantFraction = analysis.SignificantFraction;
-            TrackDisplayedBlocks(bitmap, frameRect, usedScreenFallback,
-                analysis.StrongChangedFraction >= options.MotionThreshold, sampledAt, cancellationToken);
 
             // Zmieniona klatka = zmiana ISTOTNA (stałe migotanie tła nie liczy się) —
             // dzięki temu region do OCR obejmuje tylko nowy tekst, a nie cały ekran.
@@ -859,6 +857,8 @@ public sealed class LiveTranslationSession(
         _peakChangedFraction = Math.Max(_peakChangedFraction, analysis.ChangedFraction);
 
         var sceneCut = _sceneValidity.Observe(analysis, hasPrevious);
+        TrackDisplayedBlocks(bitmap, frameRect, usedScreenFallback,
+            sceneCut || analysis.StrongChangedFraction >= options.MotionThreshold, sampledAt, cancellationToken);
         var significant = analysis.SignificantFraction > options.ChangeThreshold;
         if (sceneCut || significant)
         {
@@ -978,6 +978,12 @@ public sealed class LiveTranslationSession(
         if (lost.Count > 0)
         {
             foreach (var key in lost) _tracks.Remove(key);
+            if (_processingRegion is { } processing
+                && lost.Any(key => _displayed[key].WindowRelativeBox.IntersectsWith(processing)))
+            {
+                _pendingTextGone = true;
+                _refreshAfterBusyChanges = true;
+            }
             RemoveLocalBlocks(lost, cancellationToken, sampledAt);
             return;
         }
@@ -1007,11 +1013,11 @@ public sealed class LiveTranslationSession(
         if (current is not null && _displayed.Count > 0)
         {
             var frameRect = new RectPx(0, 0, current.Width, current.Height);
-            var removedKeys = _displayed.Keys.Where(key =>
+            var removedKeys = _displayed.Keys.Where(key => !_presentByTracking.Contains(key) && (
                 !_blockFingerprints.TryGetValue(key, out var reference)
                 || reference.FrameRect != frameRect
                 || !reference.Image.Matches(ScreenCapture.ComputeTextFingerprint(
-                    current, reference.SourceBox, ref _presenceRowBuffer))).ToArray();
+                    current, reference.SourceBox, ref _presenceRowBuffer)))).ToArray();
             if (removedKeys.Length < _displayed.Count)
             {
                 RemoveLocalBlocks(removedKeys, cancellationToken);
