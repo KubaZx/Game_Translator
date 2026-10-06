@@ -211,7 +211,7 @@ public sealed class LiveTranslationSession(
     private readonly LiveSubtitleContent _subtitleContent = new();
     private bool _readingRetryRequested;
     private sealed record HeldPrefix(int Letters, TimeSpan LettersSince, TimeSpan FirstSeen);
-    private sealed record TrackState(GlyphCover Cover, float[] Signature);
+    private sealed record TrackState(GlyphCover Cover, float[] Signature, int Absences = 0);
     private readonly Dictionary<string, TrackState> _tracks = new(StringComparer.Ordinal);
     private TimeSpan? _lastTrackedMotion;
     private readonly HashSet<string> _presentByTracking = new(StringComparer.Ordinal);
@@ -981,7 +981,10 @@ public sealed class LiveTranslationSession(
             var match = GlyphTracker.Locate(track, region, area.X, area.Y, options.TrackMaxShiftPx);
             if (match is not { IsConfident: true } m)
             {
-                if (isMoving) lost.Add(key);
+                var absent = match is not { } miss || miss.StaticCost > Math.Max(miss.AcceptLimit * 3, 80);
+                var absences = absent && _tracks.TryGetValue(key, out var previousState) ? previousState.Absences + 1 : absent ? 1 : 0;
+                if (_tracks.TryGetValue(key, out var current)) _tracks[key] = current with { Absences = absences };
+                if (isMoving || absences >= 2) lost.Add(key);
                 continue;
             }
             if (m.IsStatic) _presentByTracking.Add(key);
@@ -1010,7 +1013,7 @@ public sealed class LiveTranslationSession(
                 _pendingTextGone = true;
                 _refreshAfterBusyChanges = true;
             }
-            RemoveLocalBlocks(lost, cancellationToken, sampledAt, status: "Live: napis odjechał w ruchu — usuwam.");
+            RemoveLocalBlocks(lost, cancellationToken, sampledAt, status: "Live: napis zniknął albo odjechał — usuwam.");
             return;
         }
         if (!changed) return;
