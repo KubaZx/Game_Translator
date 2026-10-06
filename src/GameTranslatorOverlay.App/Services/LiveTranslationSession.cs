@@ -212,6 +212,7 @@ public sealed class LiveTranslationSession(
     private sealed record TrackState(GlyphCover Cover, float[] Signature);
     private readonly Dictionary<string, TrackState> _tracks = new(StringComparer.Ordinal);
     private TimeSpan _lastTrackedMotion = TimeSpan.MinValue;
+    private readonly HashSet<string> _presentByTracking = new(StringComparer.Ordinal);
     private readonly Dictionary<string, HeldPrefix> _heldPrefixes = new(StringComparer.Ordinal);
 
     private const double JitterSimilarityThreshold = 0.5;
@@ -923,6 +924,7 @@ public sealed class LiveTranslationSession(
         System.Drawing.Bitmap bitmap, RectPx frameRect, bool usedScreenFallback, bool isMoving, TimeSpan sampledAt,
         CancellationToken cancellationToken)
     {
+        _presentByTracking.Clear();
         if (!options.TrackCoveredBlocks || usedScreenFallback || _displayed.Count == 0)
         {
             if (_displayed.Count == 0) _tracks.Clear();
@@ -945,13 +947,18 @@ public sealed class LiveTranslationSession(
                 _tracks[key] = new TrackState(cover, signature);
                 continue;
             }
-            if (GlyphCover.SignatureDifference(state.Signature, signature) < GlyphCoverBuilder.StaticSignatureTolerance) continue;
+            if (GlyphCover.SignatureDifference(state.Signature, signature) < GlyphCoverBuilder.StaticSignatureTolerance)
+            {
+                _presentByTracking.Add(key);
+                continue;
+            }
             var match = GlyphTracker.Locate(track, region, area.X, area.Y, options.TrackMaxShiftPx);
             if (match is not { IsConfident: true } m)
             {
                 if (isMoving) lost.Add(key);
                 continue;
             }
+            if (m.IsStatic) _presentByTracking.Add(key);
             var refreshed = GlyphCoverBuilder.Refill(cover, region, area.X, area.Y, m.WorkDx, m.WorkDy);
             if (refreshed is null) continue;
             var dx = refreshed.Anchor.X - cover.Anchor.X;
@@ -1808,8 +1815,13 @@ public sealed class LiveTranslationSession(
             // grace without this proof or across an overlapping replacement box.
             foreach (var (key, old) in _displayed)
             {
-                if (next.ContainsKey(key) || claimedBoxes.Any(b => b.IntersectsWith(old.WindowRelativeBox))
-                    || !_blockFingerprints.TryGetValue(key, out var reference)
+                if (next.ContainsKey(key) || claimedBoxes.Any(b => b.IntersectsWith(old.WindowRelativeBox))) continue;
+                if (_presentByTracking.Contains(key))
+                {
+                    next[key] = old with { Misses = 0 };
+                    continue;
+                }
+                if (!_blockFingerprints.TryGetValue(key, out var reference)
                     || reference.FrameRect != capturedFrameRect) continue;
                 if (reference.Image.Matches(TextRegionFingerprint.FromBitmap(
                     frame, reference.SourceBox.Offset(-ocrRegion.X, -ocrRegion.Y))))
