@@ -4,6 +4,20 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
+### Tryb live — poprawki błędów
+
+- **Tłumaczenie znika razem z napisem w grze** (zgłoszenie: „Zbadaj” zostawało na ekranie po
+  zniknięciu „Inspect” w Escape Academy). Gdy w miejscu napisu nie zostaje nawet ćwierć jego
+  dawnego kontrastu, nakładka zdejmuje tłumaczenie przy najbliższej klatce — w testach po
+  ok. 0,05 s, także na teksturowanym tle (wcześniej 0,9 s, ok. 6 s albo wcale). Napis, który
+  po najechaniu kursorem zmienia kolor albo przygasa, ale nadal odcina się od tła, zachowuje
+  tłumaczenie.
+- Gdy tło nie pozwala tego stwierdzić (w miejscu napisu zostaje coś jasnego), tłumaczenie znika
+  po kilku odczytach OCR zamiast wisieć: śmieciowy odczyt w miejscu napisu już go nie
+  podtrzymuje ani nie przywraca, a pełny odczyt ekranu przychodzi co 4 s także wtedy, gdy
+  w innym miejscu ekranu coś ciągle się rusza (wcześniej w grze potrafił nie przyjść przez
+  blisko minutę).
+
 ### Wydajność
 
 Oszczędności rzędu mikrosekund na klatkę — mniej pracy procesora w trakcie gry, nie krótszy
@@ -23,6 +37,24 @@ czas tłumaczenia (ten wyznaczają OCR i dostawca). Liczby przed/po:
   przygotowanym zapytaniu zamiast osobnego zadania, połączenia i zapytania na każdy tekst.
 - **Siatka luminancji** (decyzja „czy klatka się zmieniła”) liczona wierszami pikseli zamiast
   komórka po komórce — wynik co do bitu ten sam.
+
+### Dla deweloperów
+
+- **SceneReplay: scenariusze starego napisu** (`stale-junk`, `stale-junk-ghost`, `stale-texture`,
+  `stale-newtext`, `stale-busy`) do zgłoszenia „tłumaczenie Inspect/Zbadaj zostaje po zniknięciu
+  etykiety”. Etykieta znika lokalnie (5% okna, bez cięcia sceny) w oknie 1500×900 fizycznych
+  pikseli; mierzą czas do pierwszego callbacku bez starego bloku, powroty, łączny czas
+  widoczności, czas nowego tekstu, pełne i częściowe OCR oraz zapytania Mock. Opcje `--assets`,
+  `--texture`, `--texture-origin` czytają prawdziwy wycinek etykiety i teksturę tylko lokalnie
+  (bez kopiowania, bez zapisu pikseli); bez nich scenariusz rysuje etykietę i teksturę sam.
+  `--bright-spot-px N` zostawia w polu etykiety jasną plamkę, która odbiera sesji dowód
+  w pikselach (test ścieżki zapasowej). Znacznik geometrii w wariantach junk ma teraz ciemny
+  kolor #900090 — jasny #FF00FF sam udawał resztkę tekstu. Wyniki przed/po:
+  [ROADMAP.md → Runda 2026-10-05](docs/ROADMAP.md).
+- **Core:** `KnownTextAbsenceProbe` (dowód zniknięcia znanego tekstu na teksturze),
+  `FullScanSchedule` (zegar pełnego skanu niezależny od wycinków),
+  `LiveReadingStabilizer.IsUnrelatedDirtierReading`, `LiveBlockSurvival.UnconfirmedRegion`;
+  36 nowych testów jednostkowych.
 
 ## [0.4.0] — 2026-10-01
 

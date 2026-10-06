@@ -161,6 +161,32 @@ public static class ScreenCapture
         finally { bitmap.UnlockBits(data); }
     }
 
+    public static bool IsKnownTextAbsent(Bitmap bitmap, RectPx box, int textRgb, int backgroundRgb, ref byte[]? rowBuffer)
+    {
+        if (!Core.Vision.KnownTextAbsenceProbe.CanCheck(textRgb, backgroundRgb)
+            || box.X < 0 || box.Y < 0 || box.Width <= 0 || box.Height <= 0
+            || (long)box.X + box.Width > bitmap.Width || (long)box.Y + box.Height > bitmap.Height
+            || (long)box.Width * box.Height < 4)
+            return false;
+        var rowBytes = checked(box.Width * 4);
+        if (rowBuffer is null || rowBuffer.Length < rowBytes) rowBuffer = new byte[rowBytes];
+        var probe = new Core.Vision.KnownTextAbsenceProbe(textRgb, backgroundRgb, (long)box.Width * box.Height);
+        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            for (var y = box.Y; y < box.Bottom; y++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(
+                    data.Scan0 + y * data.Stride + box.X * 4, rowBuffer, 0, rowBytes);
+                probe.ObserveBgra32(rowBuffer.AsSpan(0, rowBytes));
+                if (probe.HasTextPixels) return false;
+            }
+            return probe.IsTextAbsent;
+        }
+        finally { bitmap.UnlockBits(data); }
+    }
+
     /// <summary>Hashes only a bounded complete ROI of an existing capture, without saving pixels.</summary>
     public static Core.Vision.TextRegionFingerprint? ComputeTextFingerprint(Bitmap bitmap, RectPx box, ref byte[]? rowBuffer)
     {

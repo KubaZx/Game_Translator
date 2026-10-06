@@ -59,6 +59,17 @@ public sealed class LiveReadingStabilizer
         return LiveReadingDecision.Confirm;
     }
 
+    public static bool IsUnrelatedDirtierReading(string displayed, string candidate)
+    {
+        displayed = TextNormalizer.Normalize(displayed);
+        candidate = TextNormalizer.Normalize(candidate);
+        if (candidate.Length == 0 || displayed.Length == 0
+            || string.Equals(candidate, displayed, StringComparison.OrdinalIgnoreCase)) return false;
+        return TextSimilarity.Ratio(candidate, displayed) < SimilarityThreshold
+            && ReadingQuality.Score(candidate) < ReadingQuality.Score(displayed) - QualityTolerance
+            && !IsWholeWordFragment(candidate, displayed);
+    }
+
     public void Reset(string key) => _pending.Remove(key);
     public void Clear() => _pending.Clear();
     public void Prune(IReadOnlySet<string> liveKeys)

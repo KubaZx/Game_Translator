@@ -105,6 +105,26 @@ public class LiveBlockSurvivalTests
     }
 
     [Fact]
+    public void Region_niepotwierdzonych_obejmuje_tylko_bloki_z_brakami()
+    {
+        var blocks = new[]
+        {
+            Block(0, new RectPx(0, 0, 50, 10)),
+            Block(1, new RectPx(100, 100, 40, 20)),
+            Block(2, new RectPx(300, 40, 30, 30)),
+        };
+
+        Assert.Equal(new RectPx(100, 40, 230, 80), LiveBlockSurvival.UnconfirmedRegion(blocks));
+    }
+
+    [Fact]
+    public void Bez_blokow_z_brakami_region_niepotwierdzonych_jest_pusty()
+    {
+        Assert.Null(LiveBlockSurvival.UnconfirmedRegion([Block(0), Block(0, new RectPx(5, 5, 10, 10))]));
+        Assert.Null(LiveBlockSurvival.UnconfirmedRegion([]));
+    }
+
+    [Fact]
     public void Pusta_lista_wyswietlanych_nie_generuje_ocalalych()
     {
         var survivors = LiveBlockSurvival.Survivors(

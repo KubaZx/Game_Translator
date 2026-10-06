@@ -50,8 +50,9 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff] [--ocr scripted|windows]\n" +
+            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy] [--ocr scripted|windows]\n" +
                 "  [--provider-delay-ms 0..5000] [--phase-ms 0..200] [--ocr-delay-ms 100..600 only ocr-timing]\n" +
+                "  [--assets KATALOG_Z_inspect_crop.png] [--texture OBRAZ] [--texture-origin X,Y] [--bright-spot-px 4..14] only stale-*\n" +
                 "Wlasne widoczne okno; prawdziwy capture i LiveTranslationSession. Mock domyslnie 2000 ms, bez sieci.\n" +
                 "Faza domyslnie 0 ms; niezerowa tylko dla displayed/inflight. Scenariusze local-reading/reading-jitter/reading-whiff odrzucaja oba parametry.\n" +
                 "Domyslnie displayed oraz scripted OCR z koloru przechwyconej klatki. Bez sterowania gra.");
@@ -68,6 +69,10 @@ internal static class Program
             var phaseSpecified = false;
             var ocrDelayMs = 175;
             var ocrDelaySpecified = false;
+            string? assetsDirectory = null;
+            string? texturePath = null;
+            (int X, int Y)? textureOrigin = null;
+            var brightSpotPx = 0;
             for (var i = 0; i < args.Length; i++)
             {
                 var option = args[i];
@@ -90,10 +95,30 @@ internal static class Program
                         phaseMs = ParseMilliseconds(args[i], option, 200);
                         phaseSpecified = true;
                         break;
+                    case "--assets": assetsDirectory = args[i]; break;
+                    case "--texture": texturePath = args[i]; break;
+                    case "--texture-origin": textureOrigin = ParseOrigin(args[i]); break;
+                    case "--bright-spot-px":
+                        brightSpotPx = ParseMilliseconds(args[i], option, 14);
+                        if (brightSpotPx < 4) throw new ArgumentException("--bright-spot-px wymaga liczby calkowitej od 4 do 14.");
+                        break;
                     default: throw new ArgumentException("Nieznany argument.");
                 }
             }
             if (output is null) throw new ArgumentException("Wymagany nowy plik --output.");
+            var staleScenario = scenario is "stale-junk" or "stale-junk-ghost" or "stale-texture" or "stale-newtext" or "stale-busy";
+            if (!staleScenario && (assetsDirectory is not null || texturePath is not null || textureOrigin is not null || brightSpotPx > 0))
+                throw new ArgumentException("--assets, --texture, --texture-origin i --bright-spot-px sa dostepne tylko dla stale-*.");
+            if (staleScenario)
+            {
+                if (phaseSpecified || ocrDelaySpecified)
+                    throw new ArgumentException("stale-* nie obsluguje --phase-ms ani --ocr-delay-ms.");
+                var requiredOcr = scenario is "stale-junk" or "stale-junk-ghost" ? "scripted" : "windows";
+                if (args.Contains("--ocr") && ocrMode != requiredOcr)
+                    throw new ArgumentException($"{scenario} requires {requiredOcr} OCR.");
+                return StaleLabelReplay.Run(output, scenario, assetsDirectory, texturePath, textureOrigin,
+                    providerDelaySpecified ? providerDelayMs : 1000, brightSpotPx);
+            }
             if (scenario is "hud-motion" or "hud-motion-whiff" or "hud-motion-small-whiff")
             {
                 if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "windows"))
@@ -155,6 +180,16 @@ internal static class Program
             || parsed > maximum)
             throw new ArgumentException($"{option} wymaga liczby calkowitej od 0 do {maximum}.");
         return parsed;
+    }
+
+    private static (int X, int Y) ParseOrigin(string value)
+    {
+        var parts = value.Split(',');
+        if (parts.Length != 2
+            || !int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var x)
+            || !int.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var y))
+            throw new ArgumentException("--texture-origin wymaga X,Y w pikselach (liczby calkowite >= 0).");
+        return (x, y);
     }
 
     private static async Task<int> RunAsync(Report report, string scenario, string ocrMode, int providerDelayMs, int phaseMs)

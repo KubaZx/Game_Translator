@@ -178,6 +178,7 @@ public sealed class LiveTranslationSession(
     private RectPx? _pendingDirtyRegion;
     private double _peakChangedFraction;
     private TimeSpan _lastProcessedAt;
+    private readonly FullScanSchedule _fullScans = new(options.StaticRescanInterval);
     private int _whiffRetries;
     private bool _whiffRetryRequested;
 
@@ -187,7 +188,6 @@ public sealed class LiveTranslationSession(
 
     private const double JitterSimilarityThreshold = 0.5;
     private const double JitterOverlapFraction = 0.5;
-    private const double QualityTolerance = 0.1;
     private const double TextureChangeThreshold = 12.0;
 
     /// <summary>
@@ -212,6 +212,8 @@ public sealed class LiveTranslationSession(
     private readonly List<PendingTextArea> _pendingTextAreas = [];
     private bool _pendingTextGone;
     private byte[]? _presenceRowBuffer;
+    private readonly HashSet<string> _pixelsUnchangedAtCapture = new(StringComparer.Ordinal);
+    private RectPx? _processingRegion;
 
     // Chwila ostatniej zmiany obrazu zauważonej od startu bieżącego przetworzenia (także
     // przez kontrole sceny w trakcie OCR/tłumaczenia). Odświeżenie po zajętym przebiegu
@@ -532,8 +534,7 @@ public sealed class LiveTranslationSession(
             // Bezpiecznik scen statycznych: bez niego zmiana zbyt subtelna dla siatki
             // (albo czknięcie OCR bez kolejnych zmian obrazu) nigdy nie doczekałaby się
             // ponownego przebiegu — w grze bez szumu tła pętla potrafi milczeć minutami.
-            var heartbeatDue = options.StaticRescanInterval > TimeSpan.Zero
-                && clock.Elapsed - _lastProcessedAt >= options.StaticRescanInterval;
+            var heartbeatDue = _fullScans.IsDue(clock.Elapsed);
 
             var shouldProcess = stabilizer.Update(frameChanged, clock.Elapsed) || forceProcess || heartbeatDue;
             if (forceProcess)
@@ -546,13 +547,15 @@ public sealed class LiveTranslationSession(
                 var dirty = _pendingDirtyRegion;
                 _pendingDirtyRegion = null;
 
-                if (dirty is { } dirtyRegion)
+                if (dirty is { } dirtyRegion && !heartbeatDue)
                 {
                     // Region rozszerzamy o zapas i o wyświetlane bloki, które na niego
                     // nachodzą — do PUNKTU STAŁEGO: unia z blokiem może dosunąć region do
                     // kolejnego bloku (łańcuch), a blok objęty tylko częściowo zostałby
                     // ucięty w OCR i zdublowany na nakładce.
-                    var expanded = dirtyRegion.Inflate(24).Intersect(frameRect);
+                    var unconfirmed = LiveBlockSurvival.UnconfirmedRegion(_displayed.Values);
+                    var expanded = (unconfirmed is { } suspects ? dirtyRegion.Union(suspects) : dirtyRegion)
+                        .Inflate(24).Intersect(frameRect);
                     bool grew;
                     do
                     {
@@ -578,6 +581,18 @@ public sealed class LiveTranslationSession(
                     {
                         ocrRegion = expanded;
                         partialOcr = true;
+                    }
+                }
+
+                _pixelsUnchangedAtCapture.Clear();
+                if (!usedScreenFallback)
+                {
+                    foreach (var (key, reference) in _blockFingerprints)
+                    {
+                        if (reference.FrameRect == frameRect && reference.SourceBox.IntersectsWith(ocrRegion)
+                            && reference.Image.Matches(ScreenCapture.ComputeTextFingerprint(
+                                bitmap, reference.SourceBox, ref _presenceRowBuffer)))
+                            _pixelsUnchangedAtCapture.Add(key);
                     }
                 }
 
@@ -615,8 +630,10 @@ public sealed class LiveTranslationSession(
             var peakChanged = _peakChangedFraction;
             _peakChangedFraction = 0;
             _lastProcessedAt = clock.Elapsed;
+            _fullScans.OnScanStarted(_lastProcessedAt, !partialOcr);
             _motionDeadline.OnProcessingStarted(_lastProcessedAt);
             _cycleTime = clock.Elapsed;
+            _processingRegion = ocrRegion;
             // Ta klatka obejmuje wszystkie zmiany zauważone do teraz; liczą się już
             // tylko te, które przyjdą w trakcie jej OCR i tłumaczenia.
             _lastObservedChangeAt = null;
@@ -632,6 +649,7 @@ public sealed class LiveTranslationSession(
             }
             finally
             {
+                _processingRegion = null;
                 _pendingTextAreas.Clear();
                 _pendingTextGone = false;
                 var changeOrigin = _processingChangeOrigin;
@@ -716,7 +734,37 @@ public sealed class LiveTranslationSession(
         }
         if (significant && analysis.SignificantRegion is { } changed)
             _pendingDirtyRegion = _pendingDirtyRegion?.Union(changed) ?? changed;
+        if (!sceneCut && !usedScreenFallback && significant && analysis.SignificantRegion is { } changedArea)
+            RemoveVanishedBlocks(bitmap, frameRect, changedArea, sampledAt, cancellationToken);
         return analysis;
+    }
+
+    private void RemoveVanishedBlocks(
+        System.Drawing.Bitmap bitmap, RectPx frameRect, RectPx changedArea, TimeSpan sampledAt,
+        CancellationToken cancellationToken)
+    {
+        if (_displayed.Count == 0) return;
+        var vanished = new List<string>();
+        foreach (var (key, block) in _displayed)
+        {
+            var box = block.WindowRelativeBox;
+            if (!box.IntersectsWith(changedArea)) continue;
+            if (_blockFingerprints.TryGetValue(key, out var reference) && reference.FrameRect == frameRect
+                && reference.Image.Matches(ScreenCapture.ComputeTextFingerprint(
+                    bitmap, reference.SourceBox, ref _presenceRowBuffer)))
+                continue;
+            if (ScreenCapture.IsTextAreaClearlyEmpty(bitmap, box, block.ColorRgb, block.BackgroundRgb, ref _presenceRowBuffer)
+                || ScreenCapture.IsKnownTextAbsent(bitmap, box, block.ColorRgb, block.BackgroundRgb, ref _presenceRowBuffer))
+                vanished.Add(key);
+        }
+        if (vanished.Count == 0) return;
+        if (_processingRegion is { } processing
+            && vanished.Any(key => _displayed[key].WindowRelativeBox.IntersectsWith(processing)))
+        {
+            _pendingTextGone = true;
+            _refreshAfterBusyChanges = true;
+        }
+        RemoveLocalBlocks(vanished, cancellationToken, sampledAt);
     }
 
     private void InvalidateScene(CancellationToken cancellationToken, System.Drawing.Bitmap? current = null)
@@ -951,7 +999,9 @@ public sealed class LiveTranslationSession(
             if (_pendingTextAreas.Count > 0)
             {
                 var covered = _pendingTextAreas.Where(area => ScreenCapture.IsTextAreaClearlyEmpty(
-                    bitmap, area.Box, area.TextRgb, area.BackgroundRgb, ref _presenceRowBuffer)).ToList();
+                        bitmap, area.Box, area.TextRgb, area.BackgroundRgb, ref _presenceRowBuffer)
+                    || (!usedScreenFallback && ScreenCapture.IsKnownTextAbsent(
+                        bitmap, area.Box, area.TextRgb, area.BackgroundRgb, ref _presenceRowBuffer))).ToList();
                 if (covered.Count > 0)
                 {
                     _pendingTextGone = true;
@@ -968,19 +1018,23 @@ public sealed class LiveTranslationSession(
         }
     }
 
-    private void RemoveLocalBlocks(IEnumerable<string> keys, CancellationToken cancellationToken)
+    private void RemoveLocalBlocks(IEnumerable<string> keys, CancellationToken cancellationToken,
+        TimeSpan? ghostSince = null, IReadOnlySet<string>? ghostKeys = null)
     {
         var keyList = keys.ToArray();
         var updatedSubtitle = _subtitleContent.Remove(keyList);
         var removed = false;
         foreach (var key in keyList)
         {
+            _ghosts.Remove(key);
             if (_displayed.Remove(key, out var old))
             {
                 _invalidatedTranslations.Add(old.NormalizedTranslation);
                 removed = true;
+                if (ghostSince is { } since && old.SourceText.Length > 0
+                    && (ghostKeys is null || ghostKeys.Contains(key)))
+                    _ghosts[key] = (old with { Misses = 0 }, since);
             }
-            _ghosts.Remove(key);
             _blockFingerprints.Remove(key);
             _readings.Reset(key);
         }
@@ -1060,7 +1114,7 @@ public sealed class LiveTranslationSession(
         orchestrator.Latency.Record(LatencyStage.Ocr, ocrWatch.Elapsed.TotalMilliseconds);
         var ocrSceneChecks = _diagnosticSceneChecks - ocrChecksBefore;
         var ocrSceneCheckMs = _diagnosticSceneCheckMs - ocrCheckMsBefore;
-        if (!_sceneValidity.IsCurrent(generation))
+        if (!_sceneValidity.IsCurrent(generation) || _pendingTextGone)
         {
             _refreshAfterBusyChanges = true;
             _frameDiscarded = true;
@@ -1172,15 +1226,16 @@ public sealed class LiveTranslationSession(
                 var ghost = FindOverlapping(candidate, _ghosts.ToDictionary(g => g.Key, g => g.Value.Block), reused);
                 if (ghost is { } g)
                 {
-                    _ghosts.Remove(g.Key);
                     var ghostSimilarity = TextSimilarity.Ratio(candidate.NormalizedText, g.Block.SourceText);
-                    var quality = ReadingQuality.Score(candidate.NormalizedText);
-                    var ghostQuality = ReadingQuality.Score(g.Block.SourceText);
-                    if (ghostSimilarity >= JitterSimilarityThreshold || quality < ghostQuality - QualityTolerance)
+                    if (ghostSimilarity >= JitterSimilarityThreshold)
                     {
+                        _ghosts.Remove(g.Key);
                         reused[g.Key] = g.Block with { Misses = 0 };
                         continue;
                     }
+                    if (LiveReadingStabilizer.IsUnrelatedDirtierReading(g.Block.SourceText, candidate.NormalizedText))
+                        continue;
+                    _ghosts.Remove(g.Key);
                     inheritFrom[candidate.Key] = g.Block;
                 }
                 accepted.Add(candidate);
@@ -1188,8 +1243,12 @@ public sealed class LiveTranslationSession(
             }
 
             var (oldKey, old) = match.Value;
-            observedReadingKeys.Add(oldKey);
             var decision = _readings.Observe(oldKey, old.SourceText, candidate.NormalizedText);
+            if (decision == LiveReadingDecision.Keep
+                && LiveReadingStabilizer.IsUnrelatedDirtierReading(old.SourceText, candidate.NormalizedText)
+                && !_pixelsUnchangedAtCapture.Contains(oldKey))
+                continue;
+            observedReadingKeys.Add(oldKey);
             if (decision == LiveReadingDecision.Replace)
             {
                 replacedKeys.Add(oldKey);
@@ -1222,6 +1281,7 @@ public sealed class LiveTranslationSession(
         // for translation, without clearing unrelated menu entries. Texture or an
         // incomplete crop remains uncertain and keeps the normal OCR miss grace.
         var acceptedKeys = keyed.Select(static k => k.Key).ToHashSet(StringComparer.Ordinal);
+        var vanishedKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (key, old) in _displayed)
         {
             if (observedReadingKeys.Contains(key) || acceptedKeys.Contains(key) || reused.ContainsKey(key)) continue;
@@ -1229,10 +1289,14 @@ public sealed class LiveTranslationSession(
             var oldSample = ToSampleBox(old.WindowRelativeBox, ocrRegion, scaleBack);
             if (TextPresenceProbe.IsClearlyEmpty(frame, oldSample, old.ColorRgb, old.BackgroundRgb))
                 replacedKeys.Add(key);
+            else if (!usedScreenFallback
+                && KnownTextAbsenceProbe.IsKnownTextAbsent(frame, oldSample, old.ColorRgb, old.BackgroundRgb))
+                vanishedKeys.Add(key);
         }
         replacedKeys.ExceptWith(acceptedKeys);
         foreach (var key in replacedKeys) reused.Remove(key);
-        RemoveLocalBlocks(replacedKeys, cancellationToken);
+        replacedKeys.UnionWith(vanishedKeys);
+        RemoveLocalBlocks(replacedKeys, cancellationToken, _cycleTime, vanishedKeys);
 
         // These are the same samples used for rendering below. Preparing them now
         // also lets pending work verify that its source text has not been covered.

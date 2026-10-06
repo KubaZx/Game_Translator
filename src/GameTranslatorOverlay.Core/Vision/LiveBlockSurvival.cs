@@ -63,6 +63,17 @@ public static class LiveBlockSurvival
         return survivors;
     }
 
+    public static RectPx? UnconfirmedRegion(IEnumerable<LiveOverlayBlock> displayed)
+    {
+        RectPx? region = null;
+        foreach (var block in displayed)
+        {
+            if (block.Misses <= 0 || block.WindowRelativeBox.IsEmpty) continue;
+            region = region?.Union(block.WindowRelativeBox) ?? block.WindowRelativeBox;
+        }
+        return region;
+    }
+
     private static bool IsClaimed(RectPx box, IReadOnlyCollection<RectPx> claimedBoxes)
     {
         long area = (long)box.Width * box.Height;

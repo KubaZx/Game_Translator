@@ -464,3 +464,174 @@ OCR, SceneReplay, wywołań prawdziwych dostawców (kontener nie ma dostępu do 
 i innych) ani pomiaru ProviderEval na prawdziwych dostawcach. Zyski szybkości live wynikają
 z logiki harmonogramu i testów, nie z pomiaru w grze. Do wykonania na Windows: M23–M35
 z [MANUAL_TESTING.md](MANUAL_TESTING.md).
+
+### Runda 2026-10-05 — stary napis na ekranie
+
+Zgłoszenie z wersji 0.2.2: tłumaczenie etykiety „Inspect/Zbadaj” w Escape Academy zostaje
+po zniknięciu oryginału. Krok 1 rundy: powtarzalne scenariusze i pomiar stanu obecnego
+(HEAD 3fa49aa), bez zmian kodu produktu. Nowe scenariusze SceneReplay `stale-junk`,
+`stale-junk-ghost`, `stale-texture`, `stale-newtext`, `stale-busy` opisuje
+[README SceneReplay](../tools/GameTranslatorOverlay.SceneReplay/README.md). Okno 1500×900
+fizycznych pikseli, etykieta znika lokalnie (pole 5% okna, zmienione 2–3,6% komórek siatki,
+zero globalnych `SceneCut`), Mock 1000 ms, obserwacja 12 s. Wariant „real” używa lokalnie
+prawdziwego wycinka etykiety (glify 259×70 px) i tekstury z klatki 4K gry; zasoby nie trafiają
+do repozytorium. Pole po zniknięciu etykiety nie jest jednolite (wariant real: zakres
+kanałów 33–50), więc usunięcie z dowodem w pikselach nie ma zastosowania.
+
+**Pomiar** (callbacki sesji od WPF Rendering; 5 prób „real” + 1 syntetyczna; percentyle
+nearest-rank):
+
+| Scenariusz | OCR | Stary napis usunięty | Czas do usunięcia p50 / p90 / max | Powroty | Mock po zmianie |
+|---|---|---:|---:|---:|---:|
+| `stale-junk` | scripted | 0/5 (synt. 0/1) | > 12 s we wszystkich | 0 | 0 |
+| `stale-junk-ghost` | scripted | 5/5 (synt. 1/1) | 875 / 882 / 882 ms, potem powrót | 5 (po 1 na próbę) | 0 |
+| `stale-texture` | Windows | 5/5 (synt. 1/1) | 915 / 937 / 937 ms (synt. 896) | 0 | 0 |
+| `stale-newtext` | Windows | 5/5 (synt. 1/1) | 6329 / 6355 / 6355 ms (synt. 1902) | 0 | 2 (synt. 1) |
+| `stale-busy` | Windows | 0/5 (synt. 0/1, kontrolna 0/1) | > 12 s we wszystkich | 0 | 1 |
+
+- `stale-junk`: śmieciowy odczyt w każdym przebiegu nad starym polem (wycinek po ok. 300 ms,
+  potem pełny skan co ok. 4,1 s) daje `reusedBlocks=1` i stary blok z `Misses=0`.
+- `stale-junk-ghost`: trzy puste odczyty usuwają blok po ok. 0,87 s; pierwszy śmieciowy odczyt
+  przy pełnym skanie po ok. 4,95 s wskrzesza ducha, ponowne usunięcie ok. 9,57 s. Łączny czas
+  widoczności po zmianie p50 5502 ms, max 5521 ms.
+- `stale-texture`: Windows OCR zwrócił 0 linii we wszystkich przebiegach po zmianie (25/25).
+  Usunięcie po trzecim pustym odczycie: wycinek ok. 0,31 s, dwie powtórki whiff ok. 0,6
+  i 0,9 s.
+- `stale-newtext`: nowy tekst gotowy p50 1345 / p90 1353 / max 1353 ms. Pierwszy dowód
+  nieobecności starego bloku (`Misses=1`) trafia do callbacku dopiero razem z wynikiem Mock
+  (OCR po ok. 0,32 s, callback po ok. 1,34 s). W wariancie real Windows OCR czyta nowy tekst
+  raz poprawnie, raz z przekłamaną literą; potwierdzenie wariantu daje wycinki wokół nowego
+  tekstu, więc trzecie pudło starego bloku czeka na pełny skan po ok. 6,3 s. W 5/5 próbach real
+  nowy tekst znika na 1017–1032 ms (od ok. 2,2 s) przy podmianie wariantu odczytu.
+- `stale-busy`: jeden pełny OCR po zmianie (z nowym tekstem, publikacja z wynikiem Mock po
+  1,1–1,6 s), potem 15–17 wycinków samej animacji (kontrolna: 10). Najdłuższa przerwa bez
+  pełnego OCR 10,5–10,9 s, czyli do końca obserwacji. Nowy tekst gotowy p50 1502 / p90 1532 /
+  max 1532 ms.
+
+Logi LiveDiag z gry (2026-09-12/13, 20 plików, `staticRescanIntervalMs` 4000): 282 przerwy
+między pełnymi OCR, p50 4,13 s, p90 4,19 s, max 17,81 s; ponad 4,5 s: 21, ponad 8 s: 4,
+ponad 15 s: 2 (17,81 s z 13 wycinkami w środku, 15,36 s z 10). `menu-none` (v0.2.2): po
+jedynym pełnym OCR (0,78 s) 36 wycinków 256×256 bez linii i brak pełnego OCR przez kolejne
+59,43 s. W tych trzech najdłuższych odcinkach odstęp między kolejnymi przebiegami nie
+przekraczał 1,71–3,50 s, więc pełny skan co 4 s nie nadszedł; w dwóch krótszych (8,6 i 9,9 s)
+pełny skan przyszedł dopiero 4,2 s po ostatnim wycinku.
+
+**Hipotezy (do sprawdzenia w kolejnych krokach, nie wynik pomiaru):**
+
+1. Śmieciowy odczyt nad teksturą trzyma stary blok bez końca (`LiveReadingStabilizer` → `Keep`,
+   `Misses=0`, pominięty test pustego pola), a przerywany śmieć wskrzesza ducha. Logika jest
+   odtworzona; to, czy Windows OCR w grze rzeczywiście czyta takie śmieci, nie zostało pokazane
+   (na badanej teksturze zwracał 0 linii).
+2. Usunięcie bez dowodu w pikselach czeka na wynik dostawcy nowego tekstu w tej samej klatce
+   (ok. +1 s przy Mock 1000 ms).
+3. Pełny skan liczony od dowolnego przetworzenia nie nadchodzi przy ciągłych wycinkach
+   (animacja, potwierdzanie odczytów), a skan z oczekującym regionem jest wycinkiem; stary blok
+   poza wycinkami nie dostaje kolejnych pudeł. Zgodne z przerwami w logach z gry.
+
+Wyniki, skrypty i JSONL: `GTO Diagnostics\20261005-natywne-spolszczenie\krok1` (poza
+repozytorium). Weryfikacja: build całego rozwiązania bez ostrzeżeń, 911 testów Core
+i 242 Infrastructure zaliczone.
+
+#### Krok 2 — poprawka i pomiar po (2026-10-06)
+
+**Co trzymało napis (z pomiaru bazowego, nie hipoteza).** Wspólna przyczyna: na
+teksturowanym tle pole po etykiecie nie jest jednolite, więc sesja nie miała żadnego dowodu
+w pikselach i w najlepszym razie czekała na trzy przebiegi OCR bez etykiety (ok. 0,9 s).
+Na to nakładały się trzy błędy logiki:
+
+- (1) potwierdzone: brudniejszy, niepowiązany odczyt (`lRrgIé@ue` nad „Inspect”) dawał `Keep`
+  i `Misses=0`, więc blok nie znikał wcale (5/5), a ten sam odczyt nad duchem wskrzeszał
+  usunięty napis (5/5 powrotów po ok. 4,95 s);
+- (3) potwierdzone: wycinki OCR zerowały zegar pełnego skanu, a blok spoza wycinka nie dostawał
+  kolejnych pudeł — `stale-busy` bez usunięcia (5/5, przerwa bez pełnego OCR 10,5–10,9 s),
+  `stale-newtext` ok. 6,3 s; ten sam wzorzec jest w logach z gry (do 59 s bez pełnego OCR);
+- (2) częściowo: pierwsze pudło trafia do callbacku dopiero z wynikiem dostawcy, ale samo
+  usunięcie bez dowodu (trzecie pudło) w żadnej próbie nie wypadło w klatce z zapytaniem do
+  dostawcy, więc ta ścieżka nie trzymała napisu.
+
+**Zmiana w kodzie produktu.**
+
+1. `KnownTextAbsenceProbe` (Core): dowód zniknięcia znanego tekstu także na teksturze. W całym
+   polu bloku nie ma piksela, który zachował choćby ćwierć dawnego kontrastu luminancji między
+   tekstem a tłem (próg 25% od tła w stronę tekstu; kolory znane, kontrast luminancji ≥ 48;
+   tolerancja 0,1% pikseli; pole kompletne, bez przycinania). Zmiana barwy przy najechaniu
+   (biały → żółty) i przygaszenie do ok. 30% nie są zniknięciem. Próg 50% dałby dowód w 74–77%
+   pól 259×70 na trzech klatkach 4K z Escape Academy zamiast 31–46%, ale uznałby za zniknięty
+   napis przygaszony do ok. 30% (pulsujące „Press any key” migałoby). Wybrano ostrożniej.
+2. Sonda działa w trzech miejscach: (a) przy każdym przechwyceniu z istotną zmianą, która
+   obejmuje wyświetlany blok (bez cięcia sceny i bez zapasowego zrzutu ekranu; blok o niezmienionym
+   odcisku pola jest pomijany) — blok znika od razu i zostaje duchem, który wskrzesi tylko
+   podobny odczyt; (b) po OCR dla bloku, którego OCR nie zobaczył (obok testu jednolitości);
+   (c) w kontroli oczekujących pól podczas tłumaczenia. Gdy zniknięcie wykryje kontrola w trakcie
+   OCR lub tłumaczenia klatki obejmującej ten blok, klatka jest porzucana i ponawiana (jak przy
+   jednolitym przykryciu), żeby jej starszy odczyt nie przywrócił napisu.
+3. Ścieżka (1): `LiveReadingStabilizer.IsUnrelatedDirtierReading` — odczyt o podobieństwie
+   < 0,5, jakości gorszej o > 0,1 i niebędący fragmentem całych słów — nie zeruje braków bloku,
+   chyba że odcisk pola w natywnej klatce jest niezmieniony; nie wskrzesza ducha (jest
+   odrzucany: bez nowego bloku i bez zapytania). Podobny brudny odczyt („Lasi Played”) działa
+   jak dotąd.
+4. Ścieżka (3): `FullScanSchedule` liczy `StaticRescanInterval` od ostatniego **pełnego** OCR,
+   a należny skan jest pełną klatką także przy oczekującym regionie. Wycinek zawsze obejmuje
+   bloki z brakami (`LiveBlockSurvival.UnconfirmedRegion`), więc kolejne pudła nie czekają na
+   pełny skan.
+5. Ścieżka (2) — wcześniejsza publikacja usunięć bez dowodu — **nie zmieniona**. Pomiar
+   wariantu bez dowodu (niżej): trzecie pudło zawsze wypadało w klatce bez zapytania do
+   dostawcy, a czas wyznacza to, że pętla sesji nie robi kolejnego OCR, dopóki czeka na
+   dostawcę. Wcześniejsza publikacja nic by tu nie dała, a osobna ścieżka usuwania bez dowodu
+   zmieniałaby obsługę napisów dolnych (trybu subtitle).
+
+Narzędzie: opcja `--bright-spot-px N` (jasna plamka w polu etykiety odbiera dowód w pikselach),
+pole `afterKnownTextAbsent` w prawdzie referencyjnej, znacznik junk zmieniony z #FF00FF na
+#900090 (jasny znacznik sam udawał resztkę tekstu: z nim `stale-junk` PO dawał 848–885 ms
+zamiast ok. 35 ms). Baseline junk powtórzony na kodzie HEAD z nowym znacznikiem daje to samo
+co w kroku 1 (junk 0/5 usuniętych, ghost 5/5 powrotów).
+
+**Pomiar po** — ten sam wariant co baseline (prawdziwy wycinek etykiety, tekstura visual-01 od
+1750,560, Mock 1000 ms, 5 prób, nearest-rank; czas od WPF Rendering zniknięcia do pierwszego
+callbacku bez starego bloku):
+
+| Scenariusz | Przed: p50 / p90 / max | Po: p50 / p90 / max | Powroty przed → po | Mock po zmianie przed → po |
+|---|---:|---:|---:|---:|
+| `stale-junk` | nie usunięty w 12 s (5/5) | 35 / 48 / 48 ms | 0 → 0 | 0 → 0 |
+| `stale-junk-ghost` | 875 / 882 / 882 ms, potem powrót | 45 / 62 / 62 ms | 5 → 0 | 0 → 0 |
+| `stale-texture` | 915 / 937 / 937 ms | 47 / 62 / 62 ms | 0 → 0 | 0 → 0 |
+| `stale-newtext` | 6329 / 6355 / 6355 ms | 45 / 49 / 49 ms | 0 → 0 | 2 → 2 |
+| `stale-busy` | nie usunięty w 12 s (5/5) | 47 / 49 / 49 ms | 0 → 0 | 1 → 1 |
+
+Próby syntetyczne (1 na scenariusz): 47–60 ms. Nowy tekst bez zmian (`stale-newtext` p50/p90
+1345/1353 → 1357/1367 ms, `stale-busy` 1502/1532 → 1519/1525 ms). Najdłuższa przerwa bez
+pełnego OCR w `stale-busy` 10,5–10,9 s → 4,02–4,17 s.
+
+**Wariant bez dowodu w pikselach** (`--bright-spot-px 12`, to samo HEAD vs po poprawce, 5 prób):
+
+| Scenariusz | HEAD: p50 / p90 / max | Po: p50 / p90 / max | Powroty HEAD → po |
+|---|---:|---:|---:|
+| `stale-junk` | nie usunięty w 12 s (5/5) | 862 / 869 / 869 ms | 0 → 0 |
+| `stale-junk-ghost` | 860 / 876 / 876 ms, potem powrót | 855 / 888 / 888 ms | 5 → 0 |
+| `stale-texture` | 916 / 937 / 937 ms | 916 / 931 / 931 ms | 0 → 0 |
+| `stale-newtext` | 6074 / 6096 / 6096 ms | 1832 / 1868 / 1868 ms | 0 → 0 |
+| `stale-busy` | nie usunięty w 12 s (5/5) | 2956 / 3151 / 3151 ms | 0 → 0 |
+
+Tu cel ≤ 300 ms jest nieosiągalny bez zmiany okresu łaski: bez dowodu w pikselach blok znika
+po trzech przebiegach OCR, który go nie widzi (ochrona przed czknięciami Windows OCR), a
+w `stale-busy` przebiegi wyznacza wymuszony cykl 600 ms i oczekiwanie na dostawcę. Zapytania
+Mock bez zmian.
+
+**Regresje** — wszystkie istniejące scenariusze SceneReplay (displayed i inflight w obu
+trybach OCR, noisy, aba, churn, stop, local-reading, reading-jitter, reading-whiff, ocr-timing,
+local-occlusion ×3, moving-text, position-jitter, hud-motion ×3), po 3 próby na kodzie HEAD i po
+poprawce: wszystkie `expectedBehavior`, `desired*` i `fixtureValid` takie same albo lepsze
+(moving-text na HEAD miał 1 nieważną próbę z 3, po poprawce 3/3), liczby zapytań i znaków Mock
+identyczne. `local-occlusion` usuwa Inspect po 16 ms zamiast 295 ms. Drobne różnice:
+local-reading i local-occlusion-hover mają o jeden callback z tekstem więcej (częstszy pełny
+skan), czasy usunięcia w hud-motion mieszczą się w rozrzucie (65–172 ms, limit 700 ms).
+
+**Ograniczenia i ryzyka.** To callbacki sesji, nie fizyczna nakładka; gry nie uruchamiano.
+Dowód w pikselach działa tylko przy przechwytywaniu okna (nie przy zapasowym zrzucie ekranu)
+i tylko gdy pod napisem nie zostaje nic jasnego jak on (na klatkach z gry: 31–46% pozycji).
+Tekst, który pulsuje poniżej ćwierci kontrastu albo przy najechaniu zmienia kolor na równie
+ciemny jak tło, zniknie z nakładki i wróci przy następnym OCR (bez zapytania do dostawcy).
+Niezależnie od poprawki w `stale-newtext` (wariant real) nowy tekst nadal znika na ok. 1,02 s
+w 5/5 prób przed i po: Windows OCR czyta go raz z przekłamaną literą, potwierdzona podmiana
+wariantu zdejmuje blok przed tłumaczeniem i wysyła nowe zapytanie — osobny temat.
+Weryfikacja: build bez ostrzeżeń, Core 947/947 (36 nowych testów), Infrastructure 242/242.
