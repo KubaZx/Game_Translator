@@ -147,8 +147,10 @@ Celowo **nie ma** osobnego assembly `Providers.DeepL` — DeepL siedzi w Infrast
 ### GameTranslatorOverlay.App — WPF i wszystko, co wymaga pulpitu
 
 - UI (okno główne, panel wyniku, ustawienia), DI przez `Microsoft.Extensions.Hosting`.
-- **Capture**: GDI (`CopyFromScreen`/BitBlt dla regionu ekranu, `PrintWindow`
-  z `PW_RENDERFULLCONTENT` dla okna + fallback na crop ekranu).
+- **Capture**: tryb live w ruchu kamery czyta okno gry przez Windows Graphics Capture
+  (`Capture/GraphicsCaptureSource`, Direct3D 11 przez COM, bez żółtej ramki); na stojącym obrazie,
+  zapasowo i w trybie ręcznym GDI (`CopyFromScreen`/BitBlt dla regionu ekranu, `PrintWindow` z `PW_RENDERFULLCONTENT`
+  dla okna + fallback na crop ekranu).
 - **OCR**: `WindowsOcrProvider` — adapter `Windows.Media.Ocr.OcrEngine` za interfejsem
   `IOcrProvider` (WinRT wymaga TFM windowsowego, więc siedzi w App, nie w Infrastructure).
 - **Nakładka**: osobne okno WPF z `WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE |
@@ -180,7 +182,8 @@ wywołuje ją i rysuje wynik.
 
 ## 2. Przepływ danych
 
-1. **Capture:** wybrane okno lub region, PrintWindow/GDI, bitmapa lokalna.
+1. **Capture:** wybrane okno lub region; live w ruchu przez Windows Graphics Capture,
+   poza tym PrintWindow/GDI; bitmapa lokalna.
 2. **OCR:** Windows.Media.Ocr zwraca linie i prostokąty.
 3. **Tekst:** normalizacja, grupowanie i filtr śmieci; w live także stabilizacja
    odczytów i sprawdzenie aktualności sceny. Z korpusem aktywnego profilu bramka live
@@ -315,12 +318,17 @@ zadanie dostaje `CancellationToken.Cancel()` i jego wynik nigdzie nie trafia.
 | `KnownTextAbsenceProbe`, `KnownTextReference` | dowód zniknięcia znanego tekstu także na teksturze; wzorzec kolorów i liczba pikseli rdzenia liter z ostatniego potwierdzającego odczytu | Core |
 | `OverlayWindow` | prezentacja bloków/paska, click-through, DPI i ręczne ukrywanie | App |
 | `OverlayBlockRenderer` | wygląd i pozycja bloku (łatka, kontur, dopasowanie czcionki, wyrównanie, pominięcie tłumaczeń identycznych z oryginałem w trybie zakrywania) — wspólny dla `OverlayWindow` i OverlayPreview | App |
+| `GlyphTracker` / `GlyphTrack` | śledzenie napisu z łatką między odczytami OCR: wzorzec punktów liter i obrysu, koszt SAD z przewidywaniem ruchu, kontrola kontrastu liter wobec obrysu/tła, odrzucanie dopasowań wieloznacznych, dowód zniknięcia liter | Core (`Vision/`) |
+| `GraphicsCaptureSource` | sesja Windows Graphics Capture okna gry: ostatnia klatka na GPU, pełna klatka albo wycinek do pamięci, sygnał nowej klatki | App (`Capture/`) |
+| `OcrBands` | ponowny odczyt pustego wyniku Windows OCR dużego obrazu w 2, a potem 4 poziomych pasach z zakładką | Core (`Ocr/`) |
+| `TextBlockSplitter` | podział zlepionego bloku według napisów wyświetlanych i obecnych na swoich miejscach | Core (`Text/`) |
 | `GlyphCoverBuilder` / `GlyphCover` / `InkProfile` | łatka „natywna”: maska liter (odchylenie od tła z pierścienia + top-hat), wypełnienie pikseli liter z otoczenia (push-pull), kolor tekstu, kontur, cień, linia bazowa, wysokość, wyrównanie, ikony klawiszy; liczona w `LiveTranslationSession` równolegle z tłumaczeniem | Core (`Vision/`) |
 | `GameTextElement` / `OverlayFonts` | tekst z geometrii (kontur piórem, cień), łatka jako obraz; krój z ustawień albo profilu (dołączony Lexend Deca), rozmiar z wysokości liter nad linią bazową, grubość z gęstości tuszu oryginału — jedna dla bloków w tym samym stylu | App |
 
 Tryb ręczny, live w blokach i pasek napisów są zaimplementowane. Automatyczne
 wydzielanie tooltipów, History Mode i wyjaśnianie przez LLM pozostają poza obecną
-implementacją. Capture live nadal używa GDI/PrintWindow; WGC jest opcją do rozważenia.
+implementacją. Capture live używa Windows Graphics Capture w ruchu kamery i GDI/PrintWindow
+na stojącym obrazie (rozdz. 8, „Ruch kamery”).
 
 ## 6. DPI i multi-monitor
 
@@ -372,6 +380,10 @@ rdzeń aplikacji jest uniwersalny. Konwencja pól: camelCase.
   OFL), potem wśród czcionek systemowych; krój nieznaleziony (bez żadnej grubości 300–800) zastępuje
   Segoe UI. Grubość (dla Lexend Deca: Regular/Medium/SemiBold/Bold) dobiera nakładka. Nazwa kroju,
   nie ścieżka (do 64 znaków). Starsze wersje aplikacji pole pomijają.
+- `live.ignoreRegions` (opcjonalne): lista prostokątów `{ "x", "y", "width", "height" }` w ułamkach
+  okna gry (0–1); linie OCR ze środkiem w takim obszarze są pomijane w trybie live (np. zegar
+  poziomu Escape Academy, który co sekundę dawał nowy „tekst”). Walidator odrzuca obszar poza
+  oknem albo o niedodatnich wymiarach.
 - `online` (opcjonalne): `true` oznacza grę online — `CorpusTool` odmawia dla niej pracy (ADR-014).
 - `corpus` (opcjonalne): recepta korpusu dla narzędzia `CorpusTool` — rodzina formatów
   (`format`, np. `unity-textasset`), kontener i plik w folderze gry oraz źródła z wzorcami nazw,
@@ -408,7 +420,7 @@ przed krótszymi, priorytety rozstrzygają konflikty; konflikty (ten sam `source
 
 Jedna pętla sesji obsługuje capture, OCR i stan nakładki. Domyślnie próbkuje obraz
 przy 6 FPS, wymaga 250 ms stabilności, może wymusić przetwarzanie po 600 ms,
-a przy ruchu ma maksymalną pauzę OCR 2,5 s. Pełny OCR całej klatki jest należny
+a przy ruchu ma maksymalną pauzę OCR 2,5 s (0,9 s, gdy działa śledzenie napisów). Pełny OCR całej klatki jest należny
 4 s (`StaticRescanInterval`) po poprzednim **pełnym** OCR (`FullScanSchedule`): wycinki go nie
 odsuwają, a należny skan obejmuje całą klatkę także przy oczekującym regionie zmian. Powtórki
 mogą wynikać też z potwierdzania odczytu, podejrzenia whiffa, podejrzenia zniknięcia napisu
@@ -487,7 +499,8 @@ które jeszcze nie dostało wyniku. Lokalne usunięcie aktualizuje tylko powiąz
 źródła paska napisów i nie odnawia jego czasu wygasania.
 
 Położenie ma tolerancję 2 fizycznych pikseli na każdej osi, oddzielną od stabilizacji
-rozmiaru. To aktualizacja przy odczycie OCR, nie śledzenie między odczytami.
+rozmiaru. To aktualizacja przy odczycie OCR; między odczytami napisy z łatką śledzi
+`GlyphTracker` (niżej, „Ruch kamery”).
 `TextRegionFingerprint` porównuje wszystkie RGB źródła z marginesem 3 px, ignorując
 alpha i padding. W pamięci pozostają tylko skrót XxHash128 (niekryptograficzny), geometria
 pola i rozmiar całej klatki. Referencja powstaje z natywnej klatki OCR; każda kontrola
@@ -545,11 +558,52 @@ trybem paska napisów (`LiveSessionOptions.BuildGlyphCovers`, `HoldTypingPrefixe
   rośnie przez `TypingPrefixSettleTime` (0,9 s) albo po `TypingPrefixHoldLimit` (8 s). Blok już
   wyświetlany pod tym samym kluczem nie jest wstrzymywany. Decyzja: ADR-017.
 
+### Ruch kamery: śledzenie, szybkie odświeżanie i Windows Graphics Capture
+
+Działa przy łatkach (umiejscowienie „Na oryginale (zakrywa)” poza paskiem napisów) i bez
+zapasowego zrzutu ekranu.
+
+- **Przechwytywanie.** `GraphicsCaptureSource` trzyma sesję Windows Graphics Capture okna gry
+  (bez kursora; ramka wyłączana przez `IGraphicsCaptureSession3`, a gdy system na to nie
+  pozwala — WGC nie jest już próbowane w tej sesji live). Sesja WGC startuje, gdy analiza
+  klatki pokaże trwający ruch (co najmniej dwie próbki z mocną zmianą przy działającym
+  śledzeniu), i jest zamykana po 2 s bez ruchu; każda nowa klatka jest kopiowana na GPU do
+  własnej tekstury, a pełna klatka (cykl sesji) i wycinki (śledzenie) są czytane przez teksturę
+  staging. Pełna klatka z WGC jest brana tylko w trwającym ruchu i tylko nowa (inna niż przy
+  poprzednim przechwyceniu). Na stojącym obrazie nie ma sesji WGC: WGC oddaje zmianę dopiero po
+  złożeniu ekranu (w SceneReplay zmiana sceny była widziana o jeden cykl później), a sama otwarta
+  sesja opóźniała w SceneReplay zauważenie zmiany o 20–45 ms. Klatka o rozmiarze innym niż widoczna ramka
+  okna, czarna albo starsza niż 1,5 s oznacza `PrintWindow` dla tego przechwycenia.
+  `liveGraphicsCapture: false` wyłącza WGC.
+- **Śledzenie.** Łatka bloku niesie `GlyphTrack`: punkty wnętrza liter i obrysu (albo pierścienia
+  tła) w układzie roboczym łatki. Na każdej przechwyconej klatce (także kontrolnej w trakcie OCR)
+  `GlyphTracker.Locate` szuka przesunięcia: najpierw wokół przewidywanego z poprzedniego ruchu,
+  potem w promieniu do 72 px; dopasowanie musi mieć mały koszt, zachować kontrast liter wobec
+  obrysu/tła i nie mieć równie dobrego kandydata daleko. Udane dopasowanie przesuwa blok
+  i odświeża łatkę z bieżącej klatki (`GlyphCoverBuilder.Refill`); śledzony blok jest dowodem
+  obecności dla pozostałych reguł. Zgubiony w ruchu blok znika od razu, poza ruchem — po dwóch
+  klatkach bez liter.
+- **Ruch nie unieważnia sceny**, gdy działa śledzenie (`LiveSceneValidity.Observe` z
+  `tolerateMotion`): generacja zmienia się tylko przy cięciu widoku, a w ruchu OCR rusza najwyżej
+  co 0,9 s (`TrackedMotionPause`). Nowy blok odczytany z klatki w ruchu jest szukany na świeżej
+  klatce (zasięg 2,5× promienia śledzenia) i pokazywany w nowym miejscu; bez pewnego dopasowania
+  czeka na kolejny odczyt.
+- **Szybkie śledzenie.** Gdy ostatnia pełna klatka pokazała ruch, a WGC działa, sesja między
+  cyklami (i w trakcie OCR) czeka na nową klatkę WGC i śledzi bloki na samych wycinkach,
+  najwyżej `FastTrackFps` (30) razy na sekundę. Takie śledzenie tylko odświeża — o zdjęciu bloku
+  decyduje pełny cykl albo dwa dowody braku liter.
+- **Stabilność odczytów.** Ramki słów przy kącie tekstu są obracane wokół środka obrazu
+  (`OcrGeometry.Unrotate`). Pusty wynik dużego obrazu jest ponawiany w pasach (`OcrBands`).
+  Blok zlepiający napisy, które przy przechwyceniu były na swoich miejscach, dzieli
+  `TextBlockSplitter`. Krój i rozmiar tekstu są trzymane dla elementu nakładki
+  (`GameTextElement.StyleAscent`), a grubość — wspólna dla klasy stylu (`OverlayFonts.ClassWeight`).
+
 ### Diagnostyka i ograniczenia
 
 `LiveFrameDiagnostics` opisuje czas przygotowania aktualizacji, operację OCR,
 liczbę i koszt kontroli obrazu oraz czas budowy łatek i czekania na nie po tłumaczeniu
-(`GlyphCoverMs`, `GlyphCoverWaitMs`). Etapy czasowo nakładają się, a odrzucona klatka
+(`GlyphCoverMs`, `GlyphCoverWaitMs`), użycie WGC i liczbę oraz łączny czas szybkich śledzeń
+(`GraphicsCapture`, `FastTracks`, `FastTrackMs`). Etapy czasowo nakładają się, a odrzucona klatka
 nie ma diagnostyki ukończonego przebiegu. Te dane nie mierzą faktycznego rysowania.
 
 [LiveDiag](../tools/GameTranslatorOverlay.LiveDiag/README.md) i
@@ -560,7 +614,10 @@ i kwestii pisanej literami (`typing`, `typing-nohold`).
 nakładkę (`OverlayBlockRenderer`) na zapisanych klatkach gry przez Windows OCR i kopię roboczą
 bazy (HTTP zablokowane, brak w bazie = Mock), a
 [CorpusEval](../tools/GameTranslatorOverlay.CorpusEval/README.md) mierzy przyciąganie do korpusu
-(m.in. `replay` przez prawdziwy `TranslationPipeline` z Mockiem). Żadne z tych narzędzi nie
-pokazuje fizycznej nakładki nad działającą grą. Wyniki porównawcze oraz ich ograniczenia
+(m.in. `replay` przez prawdziwy `TranslationPipeline` z Mockiem).
+[MotionLab](../tools/GameTranslatorOverlay.MotionLab/README.md) nagrywa okno gry i odtwarza
+nagranie w czasie rzeczywistym przez prawdziwą sesję live i prawdziwe `OverlayWindow` (Mock,
+kopia bazy), porównując nakładkę z offline OCR każdej klatki (metryki ruchu). Żadne z tych
+narzędzi nie pokazuje fizycznej nakładki nad działającą grą. Wyniki porównawcze oraz ich ograniczenia
 opisuje [ROADMAP.md](ROADMAP.md); testy integracji z rzeczywistym pulpitem należy
 odróżniać od czystej logiki [TESTING.md](TESTING.md).

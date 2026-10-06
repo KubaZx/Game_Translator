@@ -67,7 +67,7 @@ internal sealed record DiagDto(
     int OcrWidth, int OcrHeight, int RawLines, int RecognizedBlocks, int ReusedBlocks, int RetainedBlocks,
     int DisplayedBlocks, bool PartialOcr, bool SceneCut, bool WhiffSuspected, bool UsedScreenFallback,
     int OcrSceneChecks, double OcrSceneCheckMs, int TranslationSceneChecks, double TranslationSceneCheckMs,
-    double GlyphCoverMs, double GlyphCoverWaitMs);
+    double GlyphCoverMs, double GlyphCoverWaitMs, bool GraphicsCapture = false, int FastTracks = 0, double FastTrackMs = 0);
 
 internal sealed record UpdateDto(
     int Seq, double EmitMs, double AppliedMs, string Status, bool Clear, bool Hide, bool Stopped,

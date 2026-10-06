@@ -105,6 +105,8 @@ public sealed class AppSettings
 
     public bool ParagraphCacheKeys { get; set; }
 
+    public bool LiveGraphicsCapture { get; set; } = true;
+
     /// <summary>
     /// Pola, które nie wpływają na pipeline tłumaczenia: wygląd nakładki i panelu, skróty
     /// (rejestrowane przy starcie), zapamiętana gra, komunikaty, zastrzeżenie. Nakładka czyta

@@ -4,7 +4,76 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
-Brak zmian po wydaniu 0.5.0.
+Runda „działanie w ruchu”: tłumaczenie trzyma się napisu, gdy kamera się rusza. Przeszło 1732 testy
+xUnit na Windows (1286 Core + 280 Infrastructure + 166 CorpusTool), build bez ostrzeżeń. Liczby
+poniżej pochodzą z nowego narzędzia MotionLab: trzy nagrania Escape Academy (4K, 10 kl./s,
+2026-10-06) odtwarzane przez prawdziwą sesję live i prawdziwą nakładkę, z Mockiem zamiast
+dostawcy, porównane z offline OCR każdej klatki. **W grze na żywo tej rundy nikt jeszcze nie
+oglądał.** Pomiary jednego nagrania różnią się między przebiegami o kilka punktów procentowych.
+
+**Najważniejsze dla gracza (0.5.0 → teraz, nagranie „pokój” z panoramami, krokami i obrotami):**
+
+- **Napisy nie znikają przy ruchu kamery.** Czas z tłumaczeniem przy ruchu kamery: 3,5% → ok. 75%
+  (stałe napisy HUD: 3,6% → ok. 80%); w nagraniu prologu z dialogiem 8% → ok. 46–51% (HUD 14% →
+  ok. 80–90%). Dziury w tłumaczeniu obecnego napisu: 61 s → ok. 3,5–7 s.
+- **Tłumaczenie jedzie razem z napisem.** Sesja śledzi każdy napis z łatką od odczytu do odczytu
+  (dopasowanie kształtu liter z obrysem, z przewidywaniem ruchu) i przesuwa tłumaczenie oraz
+  łatkę na bieżące miejsce. Największy błąd położenia: 236 px → ok. 38 px.
+- **Tło pod tłumaczeniem nadąża za kamerą.** Łatka zakrywająca oryginał jest odświeżana
+  z bieżącej klatki do ~30 razy na sekundę zamiast stać do następnego OCR. Błąd brzegu łatki
+  w ruchu (mediana): 20 → ok. 8–9,5 (prolog 28 → ok. 9–11).
+- **Szybciej i rzadziej „nic”.** Nowy napis pojawia się szybciej (mediana opóźnienia w pokoju
+  3,1 s → ok. 0,1–0,3 s), a napis odczytany w trakcie ruchu jest doganiany śledzeniem i pokazany
+  w nowym miejscu.
+- **Krój nie skacze.** Grubość i rozmiar polskiego tekstu są trzymane dla napisu i jednakowe dla
+  napisów w tym samym stylu (wcześniej co odczyt OCR zmieniały się o kilka procent albo o całą
+  grubość).
+
+### Śledzenie napisów i przechwytywanie
+
+- **Windows Graphics Capture w ruchu.** Gdy kamera się rusza (tryb zakrywania), tryb live czyta
+  okno gry przez Windows Graphics Capture (systemowe API, bez żółtej ramki): pełna klatka 4K
+  w ok. 22 ms zamiast ok. 51 ms przez PrintWindow, wycinek pod napisem poniżej 1 ms. Sesja WGC
+  startuje przy trwającym ruchu i kończy się po 2 s spokoju — na stojącym obrazie działa wyłącznie
+  PrintWindow jak dotąd (przy stale otwartej sesji WGC zmiana sceny w SceneReplay była widziana
+  o 20–45 ms później, a przy pełnych klatkach z WGC także na stojącym obrazie — o ok. 150 ms).
+  Gdy WGC nie działa (Windows 10 bez możliwości ukrycia ramki, czarny obraz, brak nowych klatek
+  przez 1,5 s), sesja zostaje przy PrintWindow. Wyłączenie: `liveGraphicsCapture: false`
+  w `settings.json`.
+- **Śledzenie między odczytami OCR** (`GlyphTracker`): wzorzec liter i obrysu z łatki, sprawdzenie
+  kontrastu liter wobec obrysu albo tła obok (ciemny napis nie „pasuje” do czarnego tła), odrzucenie
+  wieloznacznych dopasowań. Między pełnymi cyklami (10 na sekundę w ruchu) szybkie śledzenie
+  odświeża tylko wycinki z WGC, budzone nową klatką, najwyżej 30 razy na sekundę.
+- **Ruch nie kasuje sceny.** Trwający ruch kamery przy działającym śledzeniu nie unieważnia
+  wyświetlonych napisów; napis bez śledzenia znika w ruchu, a śledzony — dopiero gdy liter
+  zabraknie na dwóch klatkach z rzędu albo zgubi się w ruchu.
+- **OCR w ruchu co 0,9 s** (wcześniej do 2,5 s czekania); nowy napis jest szukany na świeżej
+  klatce i pokazywany tam, gdzie jest teraz (wcześniej tylko napis stojący w miejscu).
+- **Pusty odczyt Windows OCR.** Silnik potrafi zwrócić zero linii dla całej klatki 4K z wyraźnym
+  tekstem (w nagraniu pokoju ok. co 8.–9. klatka). Taki odczyt jest powtarzany w 2, a potem w 4 pasach
+  klatki (z przerwą 2 s po nieudanej próbie, żeby scena bez tekstu nie kosztowała).
+- **Pochylony tekst.** Przy kącie tekstu z OCR ramki słów są obracane wokół środka obrazu (błąd
+  silnika przesuwał je nawet o ponad 100 px) bez pompowania rozmiaru.
+
+### Stabilność odczytów
+
+- Odczyt sklejający dwa napisy, które stoją na swoich miejscach (np. „X Hint” i „Tab Items”), jest
+  dzielony z powrotem — HUD nie jest podmieniany jednym zlepionym blokiem.
+- Ikona klawisza nie zmienia tożsamości napisu („Tab Items” i „Items” to ten sam blok); wiersz
+  z ikoną jest jedną linią łatki.
+- Nowy tekst spoza korpusu wymaga dwóch zgodnych odczytów, zanim pójdzie do tłumaczenia
+  (śmieci z animowanych elementów nie trafiają do dostawcy).
+- Profil gry może wskazać obszary pomijane przez OCR: `live.ignoreRegions` (ułamki okna).
+  Escape Academy pomija zegar poziomu u góry ekranu.
+- Status sesji podaje przyczynę zdjęcia napisu (zniknął albo odjechał, przykryty, zmiana widoku).
+
+### Dla deweloperów
+
+- **MotionLab** (`tools/GameTranslatorOverlay.MotionLab`): nagrywanie okna gry, offline OCR każdej
+  klatki jako prawda, odtwarzanie nagrania w czasie rzeczywistym przez prawdziwą sesję live
+  i nakładkę, metryki (pokrycie, opóźnienie, nieaktualne, położenie, miganie, HUD, świeżość łatek,
+  koszt) i stykówki najgorszych momentów. Porównanie tekstów nie zależy od ikony klawisza.
+- `LiveFrameDiagnostics`: `GraphicsCapture`, `FastTracks`, `FastTrackMs`.
 
 ## [0.5.0] — 2026-10-06
 

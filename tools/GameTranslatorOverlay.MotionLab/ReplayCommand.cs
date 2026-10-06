@@ -487,7 +487,8 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
             ? new DiagDto(Json.R(d.CaptureToUpdateMs), d.CaptureMs, d.OcrMs, d.OcrOperationMs is { } op ? Json.R(op) : null, d.TranslateMs,
                 d.OcrWidth, d.OcrHeight, d.RawLines, d.RecognizedBlocks, d.ReusedBlocks, d.RetainedBlocks, d.DisplayedBlocks,
                 d.PartialOcr, d.SceneCut, d.WhiffSuspected, d.UsedScreenFallback, d.OcrSceneChecks, Json.R(d.OcrSceneCheckMs),
-                d.TranslationSceneChecks, Json.R(d.TranslationSceneCheckMs), Json.R(d.GlyphCoverMs), Json.R(d.GlyphCoverWaitMs))
+                d.TranslationSceneChecks, Json.R(d.TranslationSceneCheckMs), Json.R(d.GlyphCoverMs), Json.R(d.GlyphCoverWaitMs),
+                d.GraphicsCapture, d.FastTracks, Json.R(d.FastTrackMs))
             : null;
         double? captureAt = update.Diagnostics is { } diagnostics ? Json.R(emit - diagnostics.CaptureToUpdateMs) : null;
         List<BlockDto>? blocks = null;

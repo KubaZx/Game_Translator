@@ -206,11 +206,30 @@ public static class OverlayFonts
         return AvailableWeights(familyName).OrderBy(t => Math.Abs(t.Weight.ToOpenTypeWeight() - median)).First();
     }
 
+    private sealed record StyleClass(string Family, double Ascent, int TextRgb, bool Outlined, Typeface Typeface);
+    private static readonly List<StyleClass> Classes = [];
+
+    public static Typeface ClassWeight(string familyName, double ascent, int textRgb, bool outlined, Typeface proposed)
+    {
+        lock (Gate)
+        {
+            var match = Classes.FirstOrDefault(c => c.Family == familyName && c.Outlined == outlined && SameColor(c.TextRgb, textRgb)
+                && Math.Abs(c.Ascent - ascent) <= Math.Max(2, Math.Min(c.Ascent, ascent) * 0.2));
+            if (match is not null && Math.Abs(match.Typeface.Weight.ToOpenTypeWeight() - proposed.Weight.ToOpenTypeWeight()) <= 100)
+                return match.Typeface;
+            if (match is not null) Classes.Remove(match);
+            if (Classes.Count >= 64) Classes.RemoveAt(0);
+            Classes.Add(new StyleClass(familyName, ascent, textRgb, outlined, proposed));
+            return proposed;
+        }
+    }
+
     public static void ForgetWeightVotes()
     {
         lock (Gate)
         {
             Votes.Clear();
+            Classes.Clear();
         }
     }
 

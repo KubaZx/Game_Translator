@@ -324,6 +324,21 @@ aplikacja (0,80 / 0,08 / 16 w `CorpusSnapOptions`) — do pomiaru stanu aplikacj
 dotnet run --project tools/GameTranslatorOverlay.CorpusEval -c Release -- bench --corpus PRYWATNE\gra.corpus.jsonl --ocr "PRYWATNE\ocr-a.jsonl;PRYWATNE\ocr-b.jsonl" --cache KOPIA\cache.db --out LICZBY --fuzzy 0.80 --margin 0.08 --min-length 16
 ```
 
+### Działanie w ruchu (MotionLab)
+
+[MotionLab](../tools/GameTranslatorOverlay.MotionLab/README.md) (Windows) nagrywa okno gry
+(`record`), liczy „prawdę” offline OCR każdej klatki (`truth`) i odtwarza nagranie w czasie
+rzeczywistym przez prawdziwą `LiveTranslationSession` i prawdziwe `OverlayWindow` z Mockiem
+i kopią bazy (`replay`), a potem liczy metryki (`analyze`): pokrycie (w ruchu i w spoczynku,
+HUD i tekst ruchomy), opóźnienie, nieaktualne tłumaczenia, położenie, miganie, zniknięcia HUD,
+świeżość łatek i koszt, ze stykówkami najgorszych momentów. Nagrania, prawda i raporty zawierają
+obrazy i teksty gry — trzymaj je poza repozytorium. Wyniki jednego nagrania różnią się między
+przebiegami (czas OCR, tempo odtwarzania) o kilka punktów procentowych; porównuj kilka przebiegów.
+
+```powershell
+dotnet run --project tools/GameTranslatorOverlay.MotionLab -c Release -- replay pokoj-ruch2 --out C:\measurementsuch\pokoj-ruch2
+```
+
 ### Wygląd nakładki (OverlayPreview)
 
 [OverlayPreview](../tools/GameTranslatorOverlay.OverlayPreview/README.md) (Windows) składa

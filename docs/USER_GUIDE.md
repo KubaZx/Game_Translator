@@ -315,6 +315,10 @@ uruchom w oknie bez ramki. Tryb działa jak spolszczenie, ale nadal wyłącznie 
   menu) dostają tę samą grubość kroju.
 - **Ruchome tło:** gdy tło pod napisem się rusza, łatka obejmuje całe pole napisu z miękkim
   brzegiem, dopóki obraz nie stanie.
+- **Ruch kamery:** tłumaczenie jedzie razem z napisem (HUD stoi, napis na ścianie przesuwa się
+  z kamerą), a tło łatki jest odświeżane z bieżącego obrazu do ok. 30 razy na sekundę. Napis,
+  którego nie da się już znaleźć w ruchu (odjechał, zasłonięty, mocno zmienił rozmiar przy
+  podchodzeniu), znika i wraca po kolejnym odczycie OCR — w ruchu co ok. 0,9 s.
 - **Kwestia pisana literami** (gdy gra ma korpus) zostaje po angielsku, dopóki gra ją wypisuje —
   [opis w sekcji o korpusie](#spolszczenie-z-wyprzedzeniem-korpus-gry).
 
@@ -329,9 +333,11 @@ kroju zainstalowanego w Windows albo `Lexend Deca`).
 
 Znane ograniczenia (z przeglądu klatek gry i powtórek):
 
-- Łatka jest liczona z klatki odczytu OCR, więc na przesuwającym się tle wypełnione litery mogą
-  między odczytami odstawać od tła. Na gęstej teksturze w kolorze liter łatka może wygładzić
-  fragment tła albo nie powstać (wtedy dawna, rozmyta łatka).
+- Przy szybkim ruchu kamery tło łatki zostaje o ułamek sekundy za obrazem gry (w pomiarach na
+  nagraniach brzeg łatki w ruchu różni się od tła (mediana) o 8–11 poziomów jasności, w spoczynku
+  o 2–3). Napis na ścianie, który przy podchodzeniu rośnie albo obraca się w perspektywie,
+  bywa gubiony i pokazywany ponownie po odczycie. Na gęstej teksturze w kolorze liter łatka może
+  wygładzić fragment tła albo nie powstać (wtedy dawna, rozmyta łatka).
 - Kursywa, odstępy między literami i szerokość kroju gry nie są odwzorowane; Lexend Deca jest
   węższy niż krój Escape Academy, a polski wiersz dialogu bywa dłuższy od oryginału. Profil ma
   jeden krój — także napis szeryfowy dostaje Lexend Deca.
@@ -661,8 +667,11 @@ kwestii pisanej literami.
 
 ## Uwaga o prywatności w trybie live
 
-Dla większości gier tryb live czyta obraz **wyłącznie z okna gry** (PrintWindow).
-Jeżeli gra tego nie wspiera (część tytułów DirectX/Vulkan), aplikacja przechodzi na
+Tryb live czyta obraz **wyłącznie z okna gry** — przez PrintWindow, a w ruchu kamery przez
+Windows Graphics Capture (to samo systemowe API, którego używa np. Pasek gry Xbox; Windows 11 nie
+pokazuje przy tym żółtej ramki; na Windows 10 aplikacja z niego nie korzysta). Wyłączenie Windows Graphics Capture: `"liveGraphicsCapture":
+false` w `settings.json`. Jeżeli gra nie wspiera żadnego z nich (część tytułów DirectX/Vulkan),
+aplikacja przechodzi na
 zrzut ekranu w prostokącie okna gry i **wyraźnie o tym ostrzega** w statusie live —
 w takim wypadku fragmenty innych okien nachodzących na grę (np. powiadomienia)
 mogłyby zostać rozpoznane i przetłumaczone. Jeśli to dla Ciebie problem: zamknij

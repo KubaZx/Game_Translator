@@ -279,10 +279,8 @@ public static class OverlayBlockRenderer
             }
             else
             {
-                typeface = OverlayFonts.ChooseStyleWeight(family, referenceText, reference.Density, ascent, cover.TextRgb, cover.OutlinePx > 0);
-                if (native.StyleReference == style
-                    && Math.Abs(typeface.Weight.ToOpenTypeWeight() - native.Typeface.Weight.ToOpenTypeWeight()) <= 100)
-                    typeface = native.Typeface;
+                typeface = OverlayFonts.ClassWeight(family, ascent, cover.TextRgb, cover.OutlinePx > 0,
+                    OverlayFonts.ChooseStyleWeight(family, referenceText, reference.Density, ascent, cover.TextRgb, cover.OutlinePx > 0));
                 native.StyleReference = style;
                 native.StyleTextRgb = cover.TextRgb;
                 native.StyleAscent = ascent;

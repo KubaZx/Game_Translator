@@ -23,6 +23,7 @@ gry, bez żadnej zmiany w plikach gry.
 | Komunikaty w grze | brak klucza, limit, brak sieci, Cache-only, start/stop live, gra na pełnym ekranie — krótki pasek u góry okna gry |
 | Wygląd | bloki przy oryginale (pod tekstem albo zakrywające go) albo napisy na dole |
 | Wygląd jak w grze | **Na oryginale (zakrywa)** w trybie live: z obrazu znikają same litery oryginału (ich piksele są wypełniane tłem z otoczenia, reszta obrazu gry zostaje nietknięta), a polski tekst dostaje kolor, kontur, cień, wysokość liter i linię bazową napisu gry; ikony klawiszy zostają; krój **Jak w grze (krój z profilu)** — w profilu Escape Academy dołączony Lexend Deca |
+| Ruch kamery | w trybie zakrywania tłumaczenie jedzie razem z napisem (śledzenie kształtu liter między odczytami OCR), a tło pod nim jest odświeżane do ~30 razy na sekundę z Windows Graphics Capture; HUD nie znika przy obrotach i panoramach |
 | Aktualność napisów | tłumaczenie znika razem z napisem w grze, także na teksturowanym tle (porównanie pikseli pola z ostatnim odczytem); przygaszony napis, który OCR nadal czyta, zostaje |
 | Korpus gry | osobne narzędzie offline `CorpusTool` czyta teksty z plików gry (dziś Escape Academy; gra wyłączona, bez anti-cheatu i gier online) i może je przetłumaczyć z wyprzedzeniem do lokalnej bazy; sama aplikacja plików gry nie czyta |
 | Dopasowanie do korpusu | odczyt OCR z błędami („Ihspect”, „11m”), innym zawinięciem albo WIELKIMI LITERAMI trafia w znany tekst gry i jego tłumaczenie; początek kwestii dialogu dostaje tłumaczenie całej kwestii; śmieci OCR z ikon i tekstur nie idą do dostawcy |
@@ -43,6 +44,8 @@ cache jest szukany pod tekstem z korpusu, więc różne odczyty tego samego zdan
 | Sytuacja | Czas |
 |---|---:|
 | Przechwycenie klatki gry (PrintWindow, PoE2) | 25–48 ms |
+| Przechwycenie w ruchu kamery (Windows Graphics Capture, 4K) | ~22 ms pełna klatka, <1 ms wycinek pod napisem |
+| Odświeżenie położenia i tła napisu w ruchu (tryb zakrywania) | do ~30× na sekundę |
 | Sprawdzanie zmian na ekranie w live | 6× na sekundę (co ~167 ms) |
 | Znany tekst (cache / słownik): od pojawienia się do gotowego napisu | ~0,3–0,45 s |
 | Odczyt 20 napisów z cache | ~0,25 ms na klatkę (było 10–13 ms) |
@@ -54,7 +57,7 @@ cache jest szukany pod tekstem z korpusu, więc różne odczyty tego samego zdan
 | Zniknięcie tłumaczenia, gdy napis zniknął z teksturowanego tła | 0,29–0,55 s (było ~0,9 s, ~6 s albo wcale) |
 | To samo, gdy w miejscu napisu zostaje coś jasnego (brak dowodu w pikselach) | ~0,87–3,2 s |
 | Kwestia pisana literami (tryb zakrywania): pełne tłumaczenie po ostatniej literze | ok. 0,1–0,3 s |
-| Najdłuższa pauza OCR przy ciągłym ruchu kamery | 2,5 s |
+| Najdłuższa pauza OCR przy ciągłym ruchu kamery | 0,9 s przy śledzeniu napisów (tryb zakrywania), poza tym 2,5 s |
 | Pełne ponowne sprawdzenie ekranu | co 4 s, także gdy w innym miejscu ekranu coś się rusza (było: w takiej scenie ponad 10 s bez pełnego odczytu) |
 | Dopasowanie odczytu do korpusu Escape Academy | p95 ~1,1–1,2 ms na blok |
 | Łatka liter w trybie zakrywania (klatka 4K z samymi nowymi napisami) | 2–16 ms, liczona równolegle z tłumaczeniem; ponowne użycie 0,03–0,11 ms |
@@ -127,7 +130,9 @@ Więcej: [PRIVACY.md](docs/PRIVACY.md), [SECURITY.md](docs/SECURITY.md).
 ## Ograniczenia
 
 - Ozdobne lub małe czcionki, słaby kontrast i animowane tło pogarszają OCR.
-- Przy silnym ruchu kamery nakładka może znikać i wracać.
+- Przy ruchu kamery napis, którego nie da się śledzić (bez trybu zakrywania, przy podchodzeniu do
+  napisu na ścianie, zasłonięty), znika i wraca po kolejnym odczycie OCR. Działanie w ruchu
+  zmierzono na nagraniach Escape Academy (MotionLab), nie w grze na żywo.
 - Napis przygaszony poniżej ćwierci dawnej jasności może raz zniknąć z nakładki na ok. 0,6 s,
   jeśli pierwszy odczyt OCR po przygaszeniu go nie zobaczy.
 - Czas tłumaczenia zależy od sieci i dostawcy.
@@ -141,8 +146,9 @@ Więcej: [PRIVACY.md](docs/PRIVACY.md), [SECURITY.md](docs/SECURITY.md).
   wybierz je raz na liście i kliknij **▶ Start live**.
 - Ostrzeżenie kontroli jakości nie jest jeszcze pokazywane w oknie ani nakładce.
 - Wygląd **Na oryginale (zakrywa)** sprawdzono na zapisanych klatkach Escape Academy
-  (OverlayPreview) i w SceneReplay, nie w grze na żywo. Na ruchomym tle łatka jest nieruchoma do
-  następnego odczytu OCR; kursywa i szerokość kroju gry nie są odwzorowane.
+  (OverlayPreview), w SceneReplay i na nagraniach (MotionLab), nie w grze na żywo. Przy szybkim
+  ruchu tło łatki zostaje o ułamek sekundy za obrazem; kursywa i szerokość kroju gry nie są
+  odwzorowane.
 - Korpus: jedna rodzina formatów (Unity TextAsset) i jeden profil z receptą (Escape Academy). Po
   nowym `extract`/`translate` uruchom aplikację ponownie. W trybie prywatnym tłumaczenia
   z wyprzedzeniem nie są czytane z dysku.

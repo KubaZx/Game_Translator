@@ -1151,6 +1151,7 @@ public partial class MainWindow : Window
             HoldTypingPrefixes = () => _settings.OverlayPlacement == "cover" && _settings.LiveDisplayMode != "subtitle",
             IdentityEchoSafe = () => (Ui.OverlayBlockRenderer.HidesIdenticalText(_settings) && _settings.LiveDisplayMode != "subtitle") || _overlay.IsCaptureExclusionActive,
             IgnoreRegions = profile?.Live?.IgnoreRegions ?? [],
+            UseGraphicsCapture = _settings.LiveGraphicsCapture,
         };
 
         // Wczesne utworzenie HWND nakładki, żeby wiedzieć, czy wykluczenie z capture działa.

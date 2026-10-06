@@ -41,6 +41,9 @@ public sealed record LiveFrameDiagnostics(
     public double OcrSceneCheckMs { get; init; }
     public int TranslationSceneChecks { get; init; }
     public double TranslationSceneCheckMs { get; init; }
+    public bool GraphicsCapture { get; init; }
+    public int FastTracks { get; init; }
+    public double FastTrackMs { get; init; }
 }
 
 public sealed record LiveUpdate(
@@ -166,6 +169,10 @@ public sealed class LiveSessionOptions
 
     public double MotionFps { get; init; } = 10;
 
+    public bool UseGraphicsCapture { get; init; } = true;
+
+    public double FastTrackFps { get; init; } = 30;
+
     public TimeSpan TrackedMotionPause { get; init; } = TimeSpan.FromMilliseconds(900);
 
     public bool ConfirmUnknownReadings { get; init; } = true;
@@ -219,6 +226,14 @@ public sealed class LiveTranslationSession(
     private sealed record TrackState(GlyphCover Cover, float[] Signature, int Absences = 0, int VelocityX = 0, int VelocityY = 0);
     private readonly Dictionary<string, RectPx> _captureBoxes = new(StringComparer.Ordinal);
     private bool _lastCaptureFallback;
+    private GraphicsCaptureSource? _graphicsCapture;
+    private bool _graphicsCaptureUnavailable;
+    private bool _graphicsCaptureAnnounced;
+    private long _continuingMotionTimestamp;
+    private long _fastTrackFrame;
+    private long _capturedGraphicsFrame = -1;
+    private TimeSpan _lastFastTrackAt;
+    private bool _lastFrameMoving;
     private readonly Dictionary<string, TrackState> _tracks = new(StringComparer.Ordinal);
     private TimeSpan? _lastTrackedMotion;
     private readonly HashSet<string> _presentByTracking = new(StringComparer.Ordinal);
@@ -255,6 +270,8 @@ public sealed class LiveTranslationSession(
     private readonly MotionProcessDeadline _motionDeadline = new(options.MaxMotionPause);
     private Task? _loop;
     private int _diagnosticSceneChecks;
+    private int _diagnosticFastTracks;
+    private double _diagnosticFastTrackMs;
     private double _diagnosticSceneCheckMs;
     private sealed record PendingTextArea(string Key, RectPx Box, int TextRgb, int BackgroundRgb);
     private readonly List<PendingTextArea> _pendingTextAreas = [];
@@ -595,7 +612,7 @@ public sealed class LiveTranslationSession(
                 var remaining = stabilizer.GetPollingDelay(now, pace - (now - cycleStart), pace);
                 if (remaining > TimeSpan.Zero)
                 {
-                    await Task.Delay(remaining, cancellationToken).ConfigureAwait(false);
+                    await DelayWithFastTrackAsync(remaining, null, clock, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -615,7 +632,157 @@ public sealed class LiveTranslationSession(
             _cts.Cancel();
             await _translationWork.DrainAsync().ConfigureAwait(false);
             await DrainAbandonedLocalLookupsAsync().ConfigureAwait(false);
+            _graphicsCapture?.Dispose();
+            _graphicsCapture = null;
         }
+    }
+
+    private static readonly TimeSpan GraphicsCaptureStaleAfter = TimeSpan.FromSeconds(1.5);
+
+    private static readonly TimeSpan GraphicsCaptureIdle = TimeSpan.FromSeconds(2);
+
+    private GraphicsCaptureSource? GraphicsCapture()
+    {
+        if (!options.UseGraphicsCapture || _graphicsCaptureUnavailable) return null;
+        if (_graphicsCapture is { } existing)
+        {
+            if (!existing.IsClosed) return existing;
+            existing.Dispose();
+            _graphicsCapture = null;
+            _graphicsCaptureUnavailable = true;
+            return null;
+        }
+        var started = GraphicsCaptureSource.TryStart(gameWindowHandle, out var failure);
+        if (started is { BorderDisabled: false })
+        {
+            started.Dispose();
+            started = null;
+            failure = "system nie pozwala ukryć ramki przechwytywania";
+        }
+        if (started is null)
+        {
+            _graphicsCaptureUnavailable = true;
+            logger.LogInformation("Windows Graphics Capture niedostępne ({Reason}) — zostaje PrintWindow", failure);
+            return null;
+        }
+        if (!_graphicsCaptureAnnounced)
+        {
+            _graphicsCaptureAnnounced = true;
+            logger.LogInformation("Live: w ruchu kamery przechwytywanie okna przez Windows Graphics Capture");
+        }
+        _graphicsCapture = started;
+        return started;
+    }
+
+    private void ReleaseIdleGraphicsCapture()
+    {
+        if (_graphicsCapture is not { } source || _lastFrameMoving
+            || Stopwatch.GetElapsedTime(_continuingMotionTimestamp) < GraphicsCaptureIdle) return;
+        source.Dispose();
+        _graphicsCapture = null;
+        _capturedGraphicsFrame = -1;
+        _fastTrackFrame = 0;
+    }
+
+    private (System.Drawing.Bitmap? Bitmap, bool UsedScreenFallback) CaptureGameFrame()
+    {
+        ReleaseIdleGraphicsCapture();
+        if (_lastFrameMoving && GraphicsCapture() is { } source && source.SinceLastFrame < GraphicsCaptureStaleAfter
+            && source.FrameCount != _capturedGraphicsFrame
+            && NativeMethods.IsWindow(gameWindowHandle) && !NativeMethods.IsIconic(gameWindowHandle))
+        {
+            var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
+            var frames = source.FrameCount;
+            System.Drawing.Bitmap? frame = null;
+            try
+            {
+                frame = source.CaptureFull(bounds.Width, bounds.Height);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Windows Graphics Capture: błąd odczytu klatki — wracam do PrintWindow");
+                source.Dispose();
+                _graphicsCapture = null;
+            }
+            if (frame is not null)
+            {
+                if (!ScreenCapture.LooksBlank(frame))
+                {
+                    _fastTrackFrame = frames;
+                    _capturedGraphicsFrame = frames;
+                    return (frame, false);
+                }
+                frame.Dispose();
+            }
+        }
+        return ScreenCapture.CaptureWindowEx(gameWindowHandle);
+    }
+
+    private bool FastTrackReady =>
+        _lastFrameMoving && _graphicsCapture is { IsClosed: false } && TracksBlocks
+        && _displayed.Values.Any(static b => b.Cover?.Track is not null);
+
+    private bool FastTrack(Stopwatch clock, CancellationToken cancellationToken)
+    {
+        if (!FastTrackReady || _graphicsCapture is not { } source) return false;
+        var frames = source.FrameCount;
+        if (frames == _fastTrackFrame) return false;
+        var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
+        if (bounds.IsEmpty || source.ContentSize != (bounds.Width, bounds.Height)) return false;
+        _fastTrackFrame = frames;
+        var frameRect = new RectPx(0, 0, bounds.Width, bounds.Height);
+        try
+        {
+            var started = Stopwatch.GetTimestamp();
+            TrackDisplayedBlocks(area => source.CopyRegion(area, bounds.Width, bounds.Height), null, frameRect,
+                usedScreenFallback: false, isMoving: true, clock.Elapsed, cancellationToken, refreshOnly: true);
+            if (options.EnableDiagnostics) _diagnosticFastTrackMs += Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            if (options.EnableDiagnostics) _diagnosticFastTracks++;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogDebug(ex, "Szybkie śledzenie napisów pominięte");
+        }
+        return true;
+    }
+
+    private TimeSpan FastTrackStep => TimeSpan.FromSeconds(1.0 / Math.Clamp(options.FastTrackFps, 5.0, 60.0));
+
+    private async Task DelayWithFastTrackAsync(TimeSpan delay, Task? stopWhen, Stopwatch clock, CancellationToken cancellationToken)
+    {
+        var until = clock.Elapsed + delay;
+        while (true)
+        {
+            var left = until - clock.Elapsed;
+            if (left <= TimeSpan.Zero || stopWhen?.IsCompleted == true) return;
+            if (!FastTrackReady || _graphicsCapture is not { } source)
+            {
+                await WaitAnyAsync(stopWhen, null, left, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            var ready = _lastFastTrackAt + FastTrackStep - clock.Elapsed;
+            if (ready > TimeSpan.Zero)
+                await WaitAnyAsync(stopWhen, null, ready < left ? ready : left, cancellationToken).ConfigureAwait(false);
+            else if (source.FrameCount == _fastTrackFrame)
+                await WaitAnyAsync(stopWhen, source.NextFrame, left, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (stopWhen?.IsCompleted == true) return;
+            if (clock.Elapsed - _lastFastTrackAt < FastTrackStep || source.FrameCount == _fastTrackFrame) continue;
+            FastTrack(clock, cancellationToken);
+            _lastFastTrackAt = clock.Elapsed;
+        }
+    }
+
+    private static Task WaitAnyAsync(Task? first, Task? second, TimeSpan delay, CancellationToken cancellationToken)
+    {
+        var timer = Task.Delay(delay, cancellationToken);
+        return (first, second) switch
+        {
+            (null, null) => timer,
+            ({ } a, null) => Task.WhenAny(a, timer),
+            (null, { } b) => Task.WhenAny(b, timer),
+            ({ } a, { } b) => Task.WhenAny(a, b, timer),
+        };
     }
 
     /// <summary>Jeden cykl: capture → detekcja zmian → (opcjonalnie) OCR + tłumaczenie.</summary>
@@ -638,7 +805,7 @@ public sealed class LiveTranslationSession(
         var captureStartedTimestamp = Stopwatch.GetTimestamp();
         var sampledAt = clock.Elapsed;
         var captureWatch = Stopwatch.StartNew();
-        var (bitmap, usedScreenFallback) = ScreenCapture.CaptureWindowEx(gameWindowHandle);
+        var (bitmap, usedScreenFallback) = CaptureGameFrame();
         using (bitmap)
         {
             captureMs = captureWatch.ElapsedMilliseconds;
@@ -815,6 +982,8 @@ public sealed class LiveTranslationSession(
             _confirmedAtCapture.UnionWith(_presentByTracking);
             _confirmedAtCapture.UnionWith(_pixelsUnchangedAtCapture);
             _confirmedAtCapture.UnionWith(_presentAtCapture);
+            foreach (var (trackedKey, state) in _tracks)
+                if (state.Absences == 0 && state.Signature.Length > 0) _confirmedAtCapture.Add(trackedKey);
             // Ta klatka obejmuje wszystkie zmiany zauważone do teraz; liczą się już
             // tylko te, które przyjdą w trakcie jej OCR i tłumaczenia.
             _lastObservedChangeAt = null;
@@ -900,10 +1069,12 @@ public sealed class LiveTranslationSession(
         var tolerateMotion = TracksBlocks && !usedScreenFallback;
         var sceneCut = _sceneValidity.Observe(analysis, hasPrevious, tolerateMotion);
         var continuingMotion = tolerateMotion && _sceneValidity.MotionSamples >= 2;
+        _lastFrameMoving = continuingMotion;
+        if (continuingMotion) _continuingMotionTimestamp = Stopwatch.GetTimestamp();
         if (!continuingMotion) _peakChangedFraction = Math.Max(_peakChangedFraction, analysis.ChangedFraction);
         if (tolerateMotion && analysis.StrongChangedFraction >= options.MotionThreshold && _processingRegion is not null)
             _motionDuringProcessing = true;
-        TrackDisplayedBlocks(bitmap, frameRect, usedScreenFallback,
+        TrackDisplayedBlocks(area => ScreenCapture.CopyRegion(bitmap, area), bitmap, frameRect, usedScreenFallback,
             sceneCut || analysis.StrongChangedFraction >= options.MotionThreshold, sampledAt, cancellationToken);
         var significant = analysis.SignificantFraction > options.ChangeThreshold;
         if (sceneCut || significant)
@@ -967,8 +1138,8 @@ public sealed class LiveTranslationSession(
     }
 
     private void TrackDisplayedBlocks(
-        System.Drawing.Bitmap bitmap, RectPx frameRect, bool usedScreenFallback, bool isMoving, TimeSpan sampledAt,
-        CancellationToken cancellationToken)
+        Func<RectPx, OcrBitmap?> regionOf, System.Drawing.Bitmap? bitmap, RectPx frameRect, bool usedScreenFallback, bool isMoving,
+        TimeSpan sampledAt, CancellationToken cancellationToken, bool refreshOnly = false)
     {
         _presentByTracking.Clear();
         if (!TracksBlocks || usedScreenFallback || _displayed.Count == 0)
@@ -984,7 +1155,7 @@ public sealed class LiveTranslationSession(
             if (IsIdentity(block)) continue;
             if (block.Cover is not { Track: { } track } cover)
             {
-                if (isMoving && !(_blockFingerprints.TryGetValue(key, out var reference) && reference.FrameRect == frameRect
+                if (isMoving && bitmap is not null && !(_blockFingerprints.TryGetValue(key, out var reference) && reference.FrameRect == frameRect
                         && reference.Image.Matches(ScreenCapture.ComputeTextFingerprint(bitmap, reference.SourceBox, ref _presenceRowBuffer))))
                     lost.Add(key);
                 continue;
@@ -996,7 +1167,7 @@ public sealed class LiveTranslationSession(
             var radius = isMoving ? options.TrackMaxShiftPx : Math.Max(4, 2 * track.Step);
             var reach = radius + Math.Max(Math.Abs(velocityX), Math.Abs(velocityY)) * track.Step;
             var area = track.SearchArea(reach).Intersect(frameRect);
-            if (area.IsEmpty || ScreenCapture.CopyRegion(bitmap, area) is not { } region) continue;
+            if (area.IsEmpty || regionOf(area) is not { } region) continue;
             var signatureArea = SignatureArea(block.WindowRelativeBox, block.LineHeight, frameRect);
             var signature = GlyphCoverBuilder.Signature(region, signatureArea.Offset(-area.X, -area.Y).Intersect(new RectPx(0, 0, region.Width, region.Height)));
             jobs.Add(new TrackJob(key, block, cover, track, area, region, signature, state, fresh, radius, velocityX, velocityY));
@@ -1041,7 +1212,7 @@ public sealed class LiveTranslationSession(
                 _tracks[job.Key] = job.Fresh
                     ? new TrackState(job.Cover, [], absences)
                     : job.State! with { Absences = absences, VelocityX = 0, VelocityY = 0 };
-                if (isMoving || absences >= 2) lost.Add(job.Key);
+                if ((isMoving && !refreshOnly) || absences >= 2) lost.Add(job.Key);
                 continue;
             }
             var dx = refreshed.Anchor.X - job.Cover.Anchor.X;
@@ -1049,7 +1220,7 @@ public sealed class LiveTranslationSession(
             var box = dx == 0 && dy == 0 ? job.Block.WindowRelativeBox : job.Block.WindowRelativeBox.Offset(dx, dy);
             if ((dx != 0 || dy != 0) && _displayed.Any(other => other.Key != job.Key && Overlaps(other.Value.WindowRelativeBox, box)))
             {
-                if (isMoving) lost.Add(job.Key);
+                if (isMoving && !refreshOnly) lost.Add(job.Key);
                 continue;
             }
             var movedSignature = dx == 0 && dy == 0
@@ -1186,10 +1357,9 @@ public sealed class LiveTranslationSession(
         {
             while (!operation.IsCompleted)
             {
-                var delay = Task.Delay(nextCheckDelay, polling.Token);
+                var wait = nextCheckDelay;
                 nextCheckDelay = interval;
-                if (await Task.WhenAny(operation, delay).ConfigureAwait(false) == operation) break;
-                await delay.ConfigureAwait(false);
+                await DelayWithFastTrackAsync(wait, operation, clock, polling.Token).ConfigureAwait(false);
                 if (operation.IsCompleted) break;
                 try { CheckSceneWhileBusy(clock, cancellationToken); }
                 catch (Exception) when (!cancellationToken.IsCancellationRequested)
@@ -1317,7 +1487,7 @@ public sealed class LiveTranslationSession(
             return;
         }
         var sampledAt = clock.Elapsed;
-        var (bitmap, usedScreenFallback) = ScreenCapture.CaptureWindowEx(gameWindowHandle);
+        var (bitmap, usedScreenFallback) = CaptureGameFrame();
         using (bitmap)
         {
             if (bitmap is null)
@@ -1829,7 +1999,7 @@ public sealed class LiveTranslationSession(
             if (!confirmTried)
             {
                 confirmTried = true;
-                var (fresh, freshFallback) = ScreenCapture.CaptureWindowEx(gameWindowHandle);
+                var (fresh, freshFallback) = CaptureGameFrame();
                 if (freshFallback) fresh?.Dispose();
                 else confirmFrame = fresh;
             }
@@ -2127,6 +2297,9 @@ public sealed class LiveTranslationSession(
                 OcrSceneCheckMs = ocrSceneCheckMs,
                 TranslationSceneChecks = _diagnosticSceneChecks - translationChecksBefore,
                 TranslationSceneCheckMs = _diagnosticSceneCheckMs - translationCheckMsBefore,
+                GraphicsCapture = _graphicsCapture is not null,
+                FastTracks = _diagnosticFastTracks,
+                FastTrackMs = _diagnosticFastTrackMs,
             }
             : null;
         // Zmiana → napis: tylko gdy pokazujemy przetłumaczone bloki. Odczyt czekający

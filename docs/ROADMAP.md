@@ -19,7 +19,12 @@ z korpusu pisana literami czeka w nim na koniec pisania. Dla deweloperów: Overl
 i `typing`, projekt testów CorpusTool. Linia 0.4 dała szybszy tryb live, komunikaty w nakładce,
 pamięć dialogu i glosariusze DeepL.
 
-Przeszło **1697 testów** (1251 Core + 280 Infrastructure + 166 CorpusTool) na Windows; build
+Po wydaniu 0.5.0 (niewydane, gałąź `claude/ruch`): runda „działanie w ruchu” — śledzenie napisów
+między odczytami OCR, odświeżanie łatek w ruchu z Windows Graphics Capture, ponowny OCR pustego
+odczytu w pasach, stabilny krój; zmierzona na nagraniach Escape Academy w nowym narzędziu
+MotionLab (runda 2026-10-06 (7)), w grze na żywo jeszcze nie oglądana.
+
+Przeszło **1732 testy** (1286 Core + 280 Infrastructure + 166 CorpusTool) na Windows; build
 całego rozwiązania bez ostrzeżeń. Zachowanie sesji live zmierzono w SceneReplay (callbacki sesji,
 nie fizyczna nakładka), wygląd — na klatkach 4K z Escape Academy przez OverlayPreview, dopasowanie
 do korpusu — powtórkami bloków z kopii cache przez pipeline z Mockiem (CorpusEval).
@@ -42,7 +47,8 @@ wizualnych na kolejnych grach.
 ## Kierunki dalszych prac
 
 1. Rozszerzenie zachowywania stałych napisów: obecny dowód wymaga identycznych RGB; skalowanie, fallback i animowane tło pozostają otwarte.
-2. Śledzenie położenia napisu między kolejnymi odczytami OCR.
+2. ✅ Śledzenie położenia napisu między kolejnymi odczytami OCR — runda 2026-10-06 (7) (tylko
+   napisy z łatką, tryb zakrywania; w innych trybach nadal aktualizacja przy odczycie).
 3. Lepsza czytelność i zakrywanie na wzorzystym oraz animowanym tle.
 4. Dostosowywanie tempa pracy do menu, dialogu i ruchu.
 5. Pokazanie ostrzeżenia kontroli jakości (`TranslationOutcome.QualityWarning`,
@@ -69,8 +75,9 @@ wizualnych na kolejnych grach.
     obok oryginału (w trybie zakrywania kwestia czeka na koniec pisania) — rundy 2026-10-06 (4), (6).
 17. Etykieta korpusu z liczbą albo datą obok („…: <data>”) jako tekst korpusu + okruch dosłowny,
     bez zapytania do dostawcy — runda 2026-10-06 (4).
-18. Łatka „Na oryginale” na ruchomym tle: dopasowanie wypełnienia liter do bieżącego tła między
-    przebiegami OCR (dziś miękka i nieruchoma do następnego odczytu) — runda 2026-10-06 (5).
+18. ✅ Łatka „Na oryginale” na ruchomym tle odświeżana z bieżącej klatki między odczytami OCR
+    (w ruchu kamery do ~30×/s) — runda 2026-10-06 (7); na ruchomym tle bez ruchu kamery (animacja
+    pod napisem) łatka nadal jest miękka do następnego odczytu.
 19. Wierniejszy krój: kursywa, szerokość (np. Lexend zamiast Lexend Deca), osobny krój dla
     rodzajów tekstu w profilu (etykiety szeryfowe), kerning — runda 2026-10-06 (5).
 20. Rama przycisku jako granica dopasowania jednoliniowego napisu (dziś wolne miejsce liczone
@@ -85,6 +92,15 @@ wizualnych na kolejnych grach.
     tekstu (4 rendery) poza wątkiem UI — runda 2026-10-06 (5).
 24. Odróżnienie wyłącznego pełnego ekranu od okna bez ramki w komunikacie o pełnym ekranie
     (dziś liczy się tylko zajęcie całego monitora przy braku PrintWindow) — runda 2026-10-06 (5).
+25. Napis na ścianie przy podchodzeniu (rośnie, obraca się w perspektywie): śledzenie ze skalą
+    albo szybki lokalny OCR zgubionego bloku zamiast zdjęcia; tekst ruchomy przy ruchu kamery ma
+    dziś ok. 16% pokrycia (pokój) — runda 2026-10-06 (7).
+26. Windows Graphics Capture w grach na żywo: wpływ otwartej sesji na opóźnienie obrazu gry
+    (składanie przez DWM), HDR, wyłączny pełny ekran, Windows 10 bez ukrywania ramki — runda (7).
+27. Koszt WPF przy odświeżaniu łatek do 30×/s przy wielu blokach (dziś zmierzony tylko czas
+    śledzenia: ok. 2,5 ms na odświeżenie) — runda 2026-10-06 (7).
+28. MotionLab: fałszywe „miganie”/„zgubione”, gdy offline OCR (prawda) skleja dwa wiersze HUD
+    w jeden blok albo czyta ikonę klawisza raz z napisem, raz osobno — runda 2026-10-06 (7).
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -1485,3 +1501,79 @@ tłumaczenie w tej pauzie, a dopisywane potem litery wyjdą spod łatki do nast�
 (2) Tekst spoza korpusu, który jest początkiem kwestii korpusu, czeka 0,9 s. (3) Wstrzymanie
 działa tylko w trybie zakrywania; w trybach z tekstem obok oryginału pełne tłumaczenie nadal
 pojawia się od początku kwestii. (4) Nie sprawdzone w oknie gry na żywo.
+
+### Runda 2026-10-06 (7) — działanie w ruchu
+
+**Cel.** Na statycznym ekranie tryb zakrywania działał dobrze, ale przy ruchu kamery tłumaczenia
+znikały, wisiały w starym miejscu albo migały. Runda: tłumaczenie ma trzymać się napisu w ruchu.
+
+**Metoda.** Nowe narzędzie [MotionLab](../tools/GameTranslatorOverlay.MotionLab/README.md):
+trzy nagrania Escape Academy (4K, 10 kl./s, 2026-10-06) — `pokoj-ruch2` (75 s: panoramy, szybki
+obrót, chodzenie, drgania, wolna panorama), `prolog-intro` (90 s: dialog, HUD, krótki ruch),
+`prolog-ruch` (100 s, mało ruchu kamery). Prawda: offline Windows OCR każdej klatki z poprawką
+kąta. Odtwarzanie w czasie rzeczywistym przez prawdziwą `LiveTranslationSession`
+i `OverlayWindow`, Mock 500 ms, kopia bazy, tryb zakrywania przy oryginale. „Przed” = kod wydania
+0.5.0; „po” = zakres z trzech przebiegów końcowego kodu (pomiary jednego nagrania różnią się
+między przebiegami). Metryki ponownie przeliczone po poprawce analizatora (porównanie tekstów
+bez ikony klawisza — wcześniej poprawnie pokazany „Tab Items” liczył się jako zgubiony).
+
+| Nagranie / metryka | 0.5.0 | po |
+|---|---:|---:|
+| pokój: pokrycie przy ruchu kamery | 3,5% | 73,5–77,6% |
+| pokój: pokrycie HUD przy ruchu kamery | 3,6% | 77,5–81,8% |
+| pokój: tekst ruchomy (na ścianie) przy ruchu kamery | 1,7% | 15,6% |
+| pokój: dziury w tłumaczeniu obecnego napisu | 61 s | 3,5–6,8 s |
+| pokój: nieaktualne tłumaczenie | 19,7 s | 7,8–9,7 s |
+| pokój: mediana opóźnienia pojawienia | 3,1 s | 0,1–0,3 s |
+| pokój: największy błąd położenia | 236 px | 37,7 px |
+| pokój: błąd brzegu łatki w ruchu (mediana / p90) | 20,1 / 43,6 | 8,0–9,5 / 36–41 |
+| prolog-intro: pokrycie przy ruchu kamery | 8,2% | 45,9–51,4% |
+| prolog-intro: pokrycie HUD przy ruchu kamery | 14,4% | 80,6–90,2% |
+| prolog-intro: błąd brzegu łatki w ruchu (mediana / p90) | 27,8 / 92,5 | 9,4–10,9 / 40–63 |
+| prolog-ruch: pokrycie | 51,5% | 90,3–90,4% |
+| prolog-ruch: nieaktualne tłumaczenie | 104,5 s | 19,6 s |
+| prolog-ruch: p90 błędu położenia | 131,9 px | 3,2–3,5 px |
+
+**Zmiany.**
+
+- `GlyphTrack`/`GlyphTracker`: wzorzec punktów liter i obrysu z łatki (krok zgrubny zależny od
+  grubości kreski, `Stroke = 2·pole/obwód`), koszt SAD z przewidywaniem ruchu i trzema
+  kandydatami, odrzucenie dopasowań wieloznacznych, kontrola kontrastu liter wobec obrysu albo
+  pierścienia tła, dowód zniknięcia liter (`LettersGone`). `GlyphCoverBuilder.Refill` odświeża
+  łatkę w nowym miejscu.
+- Sesja: śledzenie na każdej klatce (także kontrolnej w trakcie OCR, równolegle na blokach);
+  trwający ruch przy śledzeniu nie unieważnia sceny; OCR w ruchu co 0,9 s; nowy blok z klatki
+  w ruchu szukany na świeżej klatce i pokazywany w nowym miejscu; migawka ramek z chwili
+  przechwycenia (blok przesunięty w trakcie OCR nie wraca na stare miejsce).
+- `GraphicsCaptureSource`: Windows Graphics Capture tylko w trwającym ruchu (sesja zamykana po
+  2 s spokoju), pełna klatka i wycinki przez teksturę staging; szybkie śledzenie na wycinkach
+  budzone nową klatką WGC, do 30×/s, tylko odświeżające. Koszt: pełna klatka 4K ok. 22 ms (PrintWindow
+  ok. 51 ms), szybkie śledzenie ok. 2,5 ms.
+- `OcrGeometry.Unrotate`: ramki słów przy `TextAngle` obracane wokół środka obrazu (bez tego
+  przesunięte nawet o ponad 100 px). `OcrBands`: pusty wynik Windows OCR dużego obrazu (w próbce
+  178 klatek co 8.–9. klatka pokoju) ponawiany w 2, potem 4 pasach; w próbce odzyskał tekst we
+  wszystkich pustych klatkach pokoju.
+- `TextBlockSplitter`: blok zlepiający napisy obecne na swoich miejscach dzielony z powrotem.
+  `CorpusIdentity` bez ikony klawisza. Nowy tekst spoza korpusu po dwóch zgodnych odczytach.
+  `live.ignoreRegions` w profilu (Escape Academy: zegar poziomu).
+- Krój: rozmiar i grubość trzymane per element (`GameTextElement.StyleAscent`, zmiana dopiero
+  przy wysokości liter ±8%, innym kolorze albo obrysie), grubość wspólna dla klasy stylu
+  (`OverlayFonts.ClassWeight`); w pokoju zmian kroju/rozmiaru elementów ok. 45 → 4.
+
+**Regresje.** 1732 testy (1286 Core + 280 Infrastructure + 166 CorpusTool), build bez ostrzeżeń.
+SceneReplay na końcowym kodzie: displayed/inflight/noisy/aba/churn/stop — stary usunięty po
+34 ms; local-occlusion* — 0 strat menu; moving-text/position-jitter — błąd 0 px; hud-motion* — 0
+strat HUD; ocr-timing — mediana 246 ms; typing/typing-nohold — 2 zapytania; stale-* (syntetyczne
+i z grafiką gry) — usunięcie po 204–280 ms (stale-fade 554–558 ms), stale-dim i stale-present-junk
+bez zniknięcia, jak oczekiwano. A/B: z WGC otwartym przez całą sesję zmiana statycznej sceny
+była widziana o 20–45 ms później (stop 33/52/80 ms vs 35/35/35 ms bez WGC), a z pełnymi
+klatkami WGC także na stojącym obrazie o ok. 150 ms później — stąd WGC tylko w trwającym ruchu;
+po tej zmianie A/B bez różnicy (stop 76/34/34 vs 67/34/34 ms — szum testu).
+Raporty: `GTO Diagnostics\20261006-ruch` (`baza`, `po1`–`po25`, `regresje-*`).
+
+**Otwarte / ryzyka.** (1) Nikt jeszcze nie oglądał tej rundy w grze na żywo; nagrania mają
+10 kl./s, więc korzyść z odświeżania do 30×/s w prawdziwej grze nie jest zmierzona. (2) WGC
+w grach: wpływ otwartej sesji na opóźnienie obrazu gry, HDR, wyłączny pełny ekran, Windows 10 —
+kierunek 26. (3) Tekst ruchomy na ścianie przy podchodzeniu (skala, perspektywa) nadal ginie —
+kierunek 25. (4) Śledzenie działa tylko dla bloków z łatką (tryb zakrywania). (5) Fałszywe
+„miganie” w analizatorze przy prawdzie sklejającej wiersze HUD — kierunek 28.
