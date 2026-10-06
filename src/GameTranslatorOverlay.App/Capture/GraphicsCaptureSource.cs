@@ -52,7 +52,7 @@ public sealed class GraphicsCaptureSource : IDisposable
         try { _session.IsCursorCaptureEnabled = false; } catch (Exception) { }
         _item.Closed += OnClosed;
         _pool.FrameArrived += OnFrameArrived;
-        _session.StartCapture();
+        if (BorderDisabled) _session.StartCapture();
     }
 
     public bool BorderDisabled { get; }

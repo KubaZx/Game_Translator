@@ -20,45 +20,52 @@ oglądał.** Pomiary jednego nagrania różnią się między przebiegami o kilka
 - **Gra na pełnym ekranie bez zrzutu ekranu.** Gdy okno gry nie wspiera PrintWindow (w porannej
   sesji Escape Academy na pełnym ekranie aplikacja przechodziła na zrzut ekranu, a wtedy całe
   śledzenie w ruchu było wyłączone), tryb live czyta teraz samo okno gry przez Windows Graphics
-  Capture — bez obcych okien w kadrze, z działającym śledzeniem. Ostrzeżenie o zrzucie ekranu
-  pojawia się tylko, gdy i to zawiedzie. Na nagraniu odtwarzanym w ten sposób (`--capture wgc`)
-  przechwycenie 4K trwało ok. 18 ms, a wyniki w ruchu były takie jak wyżej.
+  Capture — bez obcych okien w kadrze, z działającym śledzeniem (pierwsze klatki sesji, zanim WGC
+  ruszy, i klatki po 1,5 s bez nowego obrazu z WGC nadal idą przez zrzut ekranu). Ostrzeżenie
+  o zrzucie ekranu pojawia się dopiero po 6 takich klatkach z rzędu albo gdy WGC jest niedostępne.
+  Na nagraniu odtwarzanym w ten sposób (`--capture wgc`) przechwycenie 4K trwało ok. 18 ms,
+  a wyniki w ruchu były takie jak w punktach niżej (pokrycie w ruchu kamery ok. 78%, HUD ok. 83%).
 
-- **Napisy nie znikają przy ruchu kamery.** Czas z tłumaczeniem przy ruchu kamery: 3,5% → ok. 75%
-  (stałe napisy HUD: 3,6% → ok. 80%); w nagraniu prologu z dialogiem 8% → ok. 46–51% (HUD 14% →
-  ok. 80–90%). Dziury w tłumaczeniu obecnego napisu: 61 s → ok. 3,5–7 s.
+- **Napisy znacznie rzadziej znikają przy ruchu kamery.** Czas z tłumaczeniem przy ruchu kamery: 3,5% → ok. 75%
+  (stałe napisy HUD: 3,6% → ok. 80%); w nagraniu prologu z dialogiem 8% → ok. 46–47% (HUD 14% →
+  ok. 81–83%). Dziury w tłumaczeniu obecnego napisu: 61 s → ok. 3,5–7 s.
 - **Tłumaczenie jedzie razem z napisem.** Sesja śledzi każdy napis z łatką od odczytu do odczytu
   (dopasowanie kształtu liter z obrysem, z przewidywaniem ruchu) i przesuwa tłumaczenie oraz
   łatkę na bieżące miejsce. Największy błąd położenia: 236 px → ok. 38 px.
 - **Tło pod tłumaczeniem nadąża za kamerą.** Łatka zakrywająca oryginał jest odświeżana
-  z bieżącej klatki do ~30 razy na sekundę zamiast stać do następnego OCR. Błąd brzegu łatki
-  w ruchu (mediana): 20 → ok. 8–9,5 (prolog 28 → ok. 9–11).
+  z bieżącej klatki — z Windows Graphics Capture do ~30 razy na sekundę (limit w kodzie; nagrania
+  mają 10 kl./s, więc w pomiarach najwyżej ok. 10 razy), bez WGC przy każdym pełnym cyklu
+  (10 na sekundę) — zamiast stać do następnego OCR. Błąd brzegu łatki w ruchu (mediana):
+  20 → ok. 8 (prolog 28 → ok. 10–11).
 - **Szybciej i rzadziej „nic”.** Nowy napis pojawia się szybciej (mediana opóźnienia w pokoju
-  3,1 s → ok. 0,1–0,3 s), a napis odczytany w trakcie ruchu jest doganiany śledzeniem i pokazany
+  3,1 s → ok. 0,26–0,31 s), a napis odczytany w trakcie ruchu jest doganiany śledzeniem i pokazany
   w nowym miejscu.
-- **Krój nie skacze.** Grubość i rozmiar polskiego tekstu są trzymane dla napisu i jednakowe dla
-  napisów w tym samym stylu (wcześniej co odczyt OCR zmieniały się o kilka procent albo o całą
-  grubość).
+- **Krój nie skacze.** Grubość i rozmiar polskiego tekstu są trzymane dla napisu, a grubość jest
+  wspólna dla napisów w tym samym stylu (wcześniej co odczyt OCR zmieniały się o kilka procent albo
+  o całą grubość).
 
 ### Śledzenie napisów i przechwytywanie
 
 - **Windows Graphics Capture w ruchu.** Gdy kamera się rusza (tryb zakrywania), tryb live czyta
   okno gry przez Windows Graphics Capture (systemowe API, bez żółtej ramki): pełna klatka 4K
-  w ok. 22 ms zamiast ok. 51 ms przez PrintWindow, wycinek pod napisem poniżej 1 ms. Sesja WGC
-  startuje przy trwającym ruchu i kończy się po 2 s spokoju — na stojącym obrazie działa wyłącznie
-  PrintWindow jak dotąd (przy stale otwartej sesji WGC zmiana sceny w SceneReplay była widziana
-  o 20–45 ms później, a przy pełnych klatkach z WGC także na stojącym obrazie — o ok. 150 ms).
-  Gdy WGC nie działa (Windows 10 bez możliwości ukrycia ramki, czarny obraz, brak nowych klatek
-  przez 1,5 s), sesja zostaje przy PrintWindow. Wyłączenie: `liveGraphicsCapture: false`
-  w `settings.json`.
+  w ok. 18 ms zamiast ok. 51 ms przez PrintWindow, wycinek pod napisem poniżej 1 ms. Sesja WGC
+  startuje przy trwającym ruchu i kończy się po 2 s spokoju — na stojącym obrazie działa
+  PrintWindow jak dotąd, chyba że okno gry go nie wspiera (pełny ekran): wtedy WGC jest jedynym
+  źródłem przez całą sesję live. Przy pełnych klatkach z WGC także na stojącym obrazie zmiana sceny
+  w SceneReplay była widziana o ok. 170–200 ms później, a przy stale otwartej sesji WGC w części
+  przebiegów o ok. 17–45 ms (podobne pojedyncze odchylenia zdarzają się też bez WGC). Gdy WGC nie
+  działa (Windows 10 bez możliwości ukrycia ramki — wtedy sesja WGC w ogóle nie startuje — jednolity
+  albo pusty obraz, brak nowych klatek przez 1,5 s), sesja zostaje przy PrintWindow. Wyłączenie:
+  `liveGraphicsCapture: false` w `settings.json`.
 - **Śledzenie między odczytami OCR** (`GlyphTracker`): wzorzec liter i obrysu z łatki, sprawdzenie
   kontrastu liter wobec obrysu albo tła obok (ciemny napis nie „pasuje” do czarnego tła), odrzucenie
   wieloznacznych dopasowań. Między pełnymi cyklami (10 na sekundę w ruchu) szybkie śledzenie
   odświeża tylko wycinki z WGC, budzone nową klatką, najwyżej 30 razy na sekundę.
 - **Ruch nie kasuje sceny.** Trwający ruch kamery przy działającym śledzeniu nie unieważnia
-  wyświetlonych napisów; napis bez śledzenia znika w ruchu, a śledzony — dopiero gdy liter
-  zabraknie na dwóch klatkach z rzędu albo zgubi się w ruchu.
-- **OCR w ruchu co 0,9 s** (wcześniej do 2,5 s czekania); nowy napis jest szukany na świeżej
+  wyświetlonych napisów; napis bez śledzenia znika w ruchu, gdy jego piksele się zmienią, a śledzony
+  — dopiero gdy liter zabraknie na dwóch klatkach z rzędu albo zgubi się w ruchu.
+- **OCR w ruchu co 0,9 s** w trybie zakrywania przy śledzeniu napisów (wcześniej do 2,5 s czekania;
+  w pozostałych trybach bez zmian, 2,5 s); nowy napis jest szukany na świeżej
   klatce i pokazywany tam, gdzie jest teraz (wcześniej tylko napis stojący w miejscu).
 - **Pusty odczyt Windows OCR.** Silnik potrafi zwrócić zero linii dla całej klatki 4K z wyraźnym
   tekstem (w nagraniu pokoju ok. co 8.–9. klatka). Taki odczyt jest powtarzany w 2, a potem w 4 pasach

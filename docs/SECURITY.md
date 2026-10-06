@@ -10,8 +10,9 @@ GameTranslatorOverlay pracuje **wyłącznie na obrazie, który i tak jest widocz
 na ekranie**. Program:
 
 1. przechwytuje obraz wybranego okna lub regionu ekranu oficjalnymi mechanizmami Windows
-   (tryb live: `PrintWindow` z `PW_RENDERFULLCONTENT`, w ruchu kamery Windows Graphics Capture
-   okna gry; GDI `CopyFromScreen`/BitBlt dla regionu),
+   (okno: `PrintWindow` z `PW_RENDERFULLCONTENT`, a gdy okno go nie wspiera — zrzut ekranu
+   `CopyFromScreen` w prostokącie okna; w trybie live także Windows Graphics Capture samego okna
+   gry, w ruchu kamery albo na stałe przy oknie bez PrintWindow; region: GDI `CopyFromScreen`/BitBlt),
 2. rozpoznaje tekst lokalnie systemowym OCR (`Windows.Media.Ocr`),
 3. tłumaczy rozpoznany tekst (przy lokalnym korpusie gry z ADR-014 — dopasowany do niego tekst
    z korpusu),

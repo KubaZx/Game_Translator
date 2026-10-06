@@ -75,8 +75,8 @@ gotowym katalogu (np. po zmianie metryk) bez ponownego odtwarzania.
 - Przechwytywanie (`--capture`): `auto` jak aplikacja (PrintWindow, Windows Graphics Capture
   w trwającym ruchu), `wgc` — WGC jako główne źródło jak przy grze bez PrintWindow
   (`LiveSessionOptions.PreferGraphicsCapture`), `gdi` — bez WGC. Migawki nakładki zapisują też
-  grubość i rozmiar kroju elementu (`shown.jsonl`: `weight`, `em`), a łatki — gęstość i wysokość
-  liter linii wzorcowej (`density`, `ascent`).
+  grubość i rozmiar kroju elementu (`shown.jsonl`: `weight`, `em`), a obiekt łatki bloku
+  w `updates.jsonl` (`cover`) — gęstość i wysokość liter linii wzorcowej (`density`, `ascent`).
 
 ## Prawda (`truth`)
 

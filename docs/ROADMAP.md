@@ -76,9 +76,10 @@ wizualnych na kolejnych grach.
     obok oryginału (w trybie zakrywania kwestia czeka na koniec pisania) — rundy 2026-10-06 (4), (6).
 17. Etykieta korpusu z liczbą albo datą obok („…: <data>”) jako tekst korpusu + okruch dosłowny,
     bez zapytania do dostawcy — runda 2026-10-06 (4).
-18. ✅ Łatka „Na oryginale” na ruchomym tle odświeżana z bieżącej klatki między odczytami OCR
-    (w ruchu kamery do ~30×/s) — runda 2026-10-06 (7); na ruchomym tle bez ruchu kamery (animacja
-    pod napisem) łatka nadal jest miękka do następnego odczytu.
+18. ✅ Łatka „Na oryginale” na ruchomym tle odświeżana z bieżącej klatki między odczytami OCR —
+    w ruchu kamery z WGC do ~30×/s, bez ruchu kamery z klatki PrintWindow przy każdym przechwyceniu
+    (ok. 6×/s), gdy zmieni się podpis pola; łatka zbudowana jako miękka zostaje miękka do
+    następnego odczytu — runda 2026-10-06 (7).
 19. Wierniejszy krój: kursywa, szerokość (np. Lexend zamiast Lexend Deca), osobny krój dla
     rodzajów tekstu w profilu (etykiety szeryfowe), kerning — runda 2026-10-06 (5).
 20. Rama przycisku jako granica dopasowania jednoliniowego napisu (dziś wolne miejsce liczone
@@ -105,7 +106,8 @@ wizualnych na kolejnych grach.
 29. Śledzenie napisów także poza trybem zakrywania (pod oryginałem, obok): wzorzec liter bez
     łatki, żeby tłumaczenie jechało za napisem w ruchu we wszystkich układach — runda (7).
 30. Łatka na animowanym tle bez ruchu kamery (woda, ogień, migające światło pod napisem):
-    odświeżanie łatki z wycinków WGC, gdy zmienia się tylko tło wokół liter — runda (7).
+    odświeżanie częstsze niż przechwytywanie PrintWindow (dziś ok. 6×/s), np. z wycinków WGC,
+    i ostra łatka zamiast miękkiej — runda (7).
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -1518,26 +1520,26 @@ obrót, chodzenie, drgania, wolna panorama), `prolog-intro` (90 s: dialog, HUD, 
 `prolog-ruch` (100 s, mało ruchu kamery). Prawda: offline Windows OCR każdej klatki z poprawką
 kąta. Odtwarzanie w czasie rzeczywistym przez prawdziwą `LiveTranslationSession`
 i `OverlayWindow`, Mock 500 ms, kopia bazy, tryb zakrywania przy oryginale. „Przed” = kod wydania
-0.5.0; „po” = zakres z trzech przebiegów końcowego kodu (pomiary jednego nagrania różnią się
-między przebiegami). Metryki ponownie przeliczone po poprawce analizatora (porównanie tekstów
+0.5.0; „po” = zakres z dwóch przebiegów końcowego kodu (`po24`, `po25`; `prolog-ruch` tylko
+`po25`; pomiary jednego nagrania różnią się między przebiegami). Metryki ponownie przeliczone po poprawce analizatora (porównanie tekstów
 bez ikony klawisza — wcześniej poprawnie pokazany „Tab Items” liczył się jako zgubiony).
 
 | Nagranie / metryka | 0.5.0 | po |
 |---|---:|---:|
-| pokój: pokrycie przy ruchu kamery | 3,5% | 73,5–77,6% |
-| pokój: pokrycie HUD przy ruchu kamery | 3,6% | 77,5–81,8% |
+| pokój: pokrycie przy ruchu kamery | 3,5% | 76,4–77,6% |
+| pokój: pokrycie HUD przy ruchu kamery | 3,6% | 80,5–81,8% |
 | pokój: tekst ruchomy (na ścianie) przy ruchu kamery | 1,7% | 15,6% |
 | pokój: dziury w tłumaczeniu obecnego napisu | 61 s | 3,5–6,8 s |
-| pokój: nieaktualne tłumaczenie | 19,7 s | 7,8–9,7 s |
-| pokój: mediana opóźnienia pojawienia | 3,1 s | 0,1–0,3 s |
+| pokój: nieaktualne tłumaczenie | 19,7 s | 9,1–9,7 s |
+| pokój: mediana opóźnienia pojawienia | 3,1 s | 0,26–0,31 s |
 | pokój: największy błąd położenia | 236 px | 37,7 px |
-| pokój: błąd brzegu łatki w ruchu (mediana / p90) | 20,1 / 43,6 | 8,0–9,5 / 36–41 |
-| prolog-intro: pokrycie przy ruchu kamery | 8,2% | 45,9–51,4% |
-| prolog-intro: pokrycie HUD przy ruchu kamery | 14,4% | 80,6–90,2% |
-| prolog-intro: błąd brzegu łatki w ruchu (mediana / p90) | 27,8 / 92,5 | 9,4–10,9 / 40–63 |
-| prolog-ruch: pokrycie | 51,5% | 90,3–90,4% |
+| pokój: błąd brzegu łatki w ruchu (mediana / p90) | 20,1 / 43,6 | 8,0–8,2 / 39–41 |
+| prolog-intro: pokrycie przy ruchu kamery | 8,2% | 45,9–47,1% |
+| prolog-intro: pokrycie HUD przy ruchu kamery | 14,4% | 80,6–82,6% |
+| prolog-intro: błąd brzegu łatki w ruchu (mediana / p90) | 27,8 / 92,5 | 10,0–10,9 / 40–44 |
+| prolog-ruch: pokrycie | 51,5% | 90,3% |
 | prolog-ruch: nieaktualne tłumaczenie | 104,5 s | 19,6 s |
-| prolog-ruch: p90 błędu położenia | 131,9 px | 3,2–3,5 px |
+| prolog-ruch: p90 błędu położenia | 131,9 px | 3,5 px |
 
 **Zmiany.**
 
@@ -1554,11 +1556,12 @@ bez ikony klawisza — wcześniej poprawnie pokazany „Tab Items” liczył si�
   2 s spokoju) albo na stałe, gdy okno gry nie wspiera PrintWindow (zamiast zrzutu ekranu, przy
   którym śledzenie było wyłączone — tak było w porannej sesji gry 2026-10-06 na pełnym ekranie;
   MotionLab `--capture wgc`: przechwycenie 4K ok. 18 ms, metryki ruchu jak przy PrintWindow), pełna klatka i wycinki przez teksturę staging; szybkie śledzenie na wycinkach
-  budzone nową klatką WGC, do 30×/s, tylko odświeżające. Koszt: pełna klatka 4K ok. 22 ms (PrintWindow
+  budzone nową klatką WGC, do 30×/s, tylko odświeżające. Koszt: pełna klatka 4K ok. 18–22 ms (PrintWindow
   ok. 51 ms), szybkie śledzenie ok. 2,5 ms.
 - `OcrGeometry.Unrotate`: ramki słów przy `TextAngle` obracane wokół środka obrazu (bez tego
-  przesunięte nawet o ponad 100 px). `OcrBands`: pusty wynik Windows OCR dużego obrazu (w próbce
-  178 klatek co 8.–9. klatka pokoju) ponawiany w 2, potem 4 pasach; w próbce odzyskał tekst we
+  przesunięte nawet o ponad 100 px). `OcrBands`: pusty wynik Windows OCR obrazu od ok. 1,4 Mpx
+  (w próbce 178 klatek co 8.–9. klatka pokoju) ponawiany w 2, potem 4 pasach (po nieudanym
+  ponowieniu następne najwcześniej po 2 s); w próbce odzyskał tekst we
   wszystkich pustych klatkach pokoju.
 - `TextBlockSplitter`: blok zlepiający napisy obecne na swoich miejscach dzielony z powrotem.
   `CorpusIdentity` bez ikony klawisza. Nowy tekst spoza korpusu po dwóch zgodnych odczytach.
@@ -1573,8 +1576,9 @@ SceneReplay na końcowym kodzie: displayed/inflight/noisy/aba/churn/stop — sta
 strat HUD; ocr-timing — mediana 246 ms; typing/typing-nohold — 2 zapytania; stale-* (syntetyczne
 i z grafiką gry) — usunięcie po 204–280 ms (stale-fade 554–558 ms), stale-dim i stale-present-junk
 bez zniknięcia, jak oczekiwano. A/B: z WGC otwartym przez całą sesję zmiana statycznej sceny
-była widziana o 20–45 ms później (stop 33/52/80 ms vs 35/35/35 ms bez WGC), a z pełnymi
-klatkami WGC także na stojącym obrazie o ok. 150 ms później — stąd WGC tylko w trwającym ruchu;
+była w 2 z 3 przebiegów widziana o 17–45 ms później (stop 33/52/80 ms vs 35/35/35 ms bez WGC;
+churn 34/75/68 vs 33/34/34 ms), a z pełnymi klatkami WGC także na stojącym obrazie o ok.
+170–200 ms później — stąd WGC tylko w trwającym ruchu;
 po tej zmianie A/B bez różnicy (stop 76/34/34 vs 67/34/34 ms — szum testu).
 Raporty: `GTO Diagnostics\20261006-ruch` (`baza`, `po1`–`po25`, `regresje-*`).
 

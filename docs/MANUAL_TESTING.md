@@ -1003,10 +1003,14 @@ gdy WGC też zawiedzie (po 6 kolejnych zrzutach ekranu albo przy braku WGC).
 4. Podejdź do napisu na ścianie, aż wyraźnie urośnie.
 5. Przełącz **Położenie dymków** na „Pod oryginałem” i powtórz krok 2.
 
-**Oczekiwany wynik:** w krokach 2–3 tłumaczenia HUD zostają na miejscu przez cały ruch (bez
-znikania i powrotu), a tło pod nimi nadąża za obrazem z co najwyżej lekkim, krótkim smużeniem
-przy szybkim obrocie. Napis na ścianie w trakcie panoramy jedzie razem z nim albo znika i wraca
-w ciągu ok. 1 s; nie zostaje w starym miejscu. Po zatrzymaniu napisy są na właściwych miejscach.
+**Oczekiwany wynik:** w krokach 2–3 tłumaczenia HUD przez większość ruchu zostają na miejscu;
+pojedyncze krótkie zniknięcia i powroty są znanym ograniczeniem (w pomiarach MotionLab HUD miał
+tłumaczenie przez ok. 80% czasu ruchu kamery, najdłuższe dziury 2–5 s przy panoramie) — zapisz,
+jak często i na jak długo znika. Tło pod nimi nadąża za obrazem z co najwyżej lekkim, krótkim
+smużeniem przy szybkim obrocie. Napis na ścianie w trakcie panoramy nie zostaje w starym miejscu:
+jedzie razem z nim albo znika; często wraca dopiero po zatrzymaniu kamery (w pomiarach tekst
+ruchomy w ruchu kamery miał tłumaczenie przez 0–16% czasu, opóźnienie ok. 2 s) — to znane
+ograniczenie (ROADMAP, kierunek 25). Po zatrzymaniu napisy są na właściwych miejscach.
 Znane ograniczenia: w kroku 4 napis rosnący przy podchodzeniu może znikać i wracać po kolejnym
 odczycie OCR; w kroku 5 (bez trybu zakrywania) śledzenia nie ma — w ruchu napisy znikają
 i wracają jak w 0.5.0. Zapisz też, czy gra działała płynnie (bez nowych przycięć) i czy log
@@ -1024,6 +1028,9 @@ i wracają jak w 0.5.0. Zapisz też, czy gra działała płynnie (bez nowych prz
 **Oczekiwany wynik:** log ma „Okno gry nie wspiera PrintWindow — tryb live przechodzi na Windows
 Graphics Capture”, bez ostrzeżenia o zrzucie ekranu w statusie i bez komunikatu o pełnym ekranie
 (o ile WGC działa); w ruchu napisy zachowują się jak w M41. Okno otwarte nad grą w kroku 3 nie
-jest tłumaczone (WGC czyta tylko okno gry). Na Windows 10 (ramki WGC nie da się ukryć) zostaje
-zrzut ekranu z dotychczasowym ostrzeżeniem i komunikatem jak w M40. Jeśli nakładki nad grą nie
+jest tłumaczone, dopóki gra rysuje klatki (WGC czyta tylko okno gry). Jeśli gra po utracie
+fokusu przestaje rysować, po ok. 1,5 s aplikacja wraca do zrzutu ekranu — wtedy po 6 takich
+klatkach pojawia się ostrzeżenie o zrzucie ekranu (i komunikat jak w M40); zapisz, który wariant
+wystąpił. Na Windows 10 (ramki WGC nie da się ukryć, więc sesja WGC nie startuje) zostaje zrzut
+ekranu z dotychczasowym ostrzeżeniem i komunikatem jak w M40; zapisz, czy mignęła żółta ramka. Jeśli nakładki nad grą nie
 widać w ogóle, zapisz to razem z trybem pełnego ekranu gry.

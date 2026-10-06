@@ -315,10 +315,12 @@ uruchom w oknie bez ramki. Tryb działa jak spolszczenie, ale nadal wyłącznie 
   menu) dostają tę samą grubość kroju.
 - **Ruchome tło:** gdy tło pod napisem się rusza, łatka obejmuje całe pole napisu z miękkim
   brzegiem, dopóki obraz nie stanie.
-- **Ruch kamery:** tłumaczenie jedzie razem z napisem (HUD stoi, napis na ścianie przesuwa się
-  z kamerą), a tło łatki jest odświeżane z bieżącego obrazu do ok. 30 razy na sekundę. Napis,
-  którego nie da się już znaleźć w ruchu (odjechał, zasłonięty, mocno zmienił rozmiar przy
-  podchodzeniu), znika i wraca po kolejnym odczycie OCR — w ruchu co ok. 0,9 s.
+- **Ruch kamery:** tłumaczenie HUD zostaje na miejscu, a tłumaczenie napisu w świecie stara się
+  jechać za nim (śledzenie kształtu liter). Tło łatki jest odświeżane z bieżącego obrazu — na
+  Windows 11 przez Windows Graphics Capture do ok. 30 razy na sekundę, bez niego ok. 10 razy na
+  sekundę. Napis, którego nie da się znaleźć (odjechał, zasłonięty, mocno zmienił rozmiar), znika;
+  OCR w ruchu działa co ok. 0,9 s, ale napis na ścianie często wraca dopiero po zatrzymaniu
+  kamery (na nagraniach tekst w świecie miał w ruchu kamery tłumaczenie tylko przez 0–16% czasu).
 - **Kwestia pisana literami** (gdy gra ma korpus) zostaje po angielsku, dopóki gra ją wypisuje —
   [opis w sekcji o korpusie](#spolszczenie-z-wyprzedzeniem-korpus-gry).
 
@@ -334,8 +336,8 @@ kroju zainstalowanego w Windows albo `Lexend Deca`).
 Znane ograniczenia (z przeglądu klatek gry i powtórek):
 
 - Przy szybkim ruchu kamery tło łatki zostaje o ułamek sekundy za obrazem gry (w pomiarach na
-  nagraniach brzeg łatki w ruchu różni się od tła (mediana) o 8–11 poziomów jasności, w spoczynku
-  o 2–3). Napis na ścianie, który przy podchodzeniu rośnie albo obraca się w perspektywie,
+  nagraniach brzeg łatki w ruchu różni się od tła (mediana) o 8–11 poziomów na 255, w spoczynku
+  o 2–4). Napis na ścianie, który przy podchodzeniu rośnie albo obraca się w perspektywie,
   bywa gubiony i pokazywany ponownie po odczycie. Na gęstej teksturze w kolorze liter łatka może
   wygładzić fragment tła albo nie powstać (wtedy dawna, rozmyta łatka).
 - Kursywa, odstępy między literami i szerokość kroju gry nie są odwzorowane; Lexend Deca jest
@@ -667,11 +669,13 @@ kwestii pisanej literami.
 
 ## Uwaga o prywatności w trybie live
 
-Tryb live czyta obraz **wyłącznie z okna gry** — przez PrintWindow, a w ruchu kamery przez
-Windows Graphics Capture (to samo systemowe API, którego używa np. Pasek gry Xbox; Windows 11 nie
-pokazuje przy tym żółtej ramki; na Windows 10 aplikacja z niego nie korzysta). Gdy gra na
-pełnym ekranie nie daje się przechwycić przez PrintWindow, Windows Graphics Capture przejmuje
-całe przechwytywanie (nadal tylko okno gry). Wyłączenie Windows Graphics Capture: `"liveGraphicsCapture":
+Tryb live czyta obraz z okna gry — przez PrintWindow, a w trybie „Na oryginale (zakrywa)”
+w trwającym ruchu kamery przez Windows Graphics Capture (to samo publiczne API systemu, którego
+używa np. OBS Studio w trybie przechwytywania „Windows 10 (1903 i nowsze)”; Windows 11 nie pokazuje
+przy tym żółtej ramki; na Windows 10 aplikacja z niego nie korzysta). Gdy okna gry nie da się
+przechwycić przez PrintWindow (np. gra na pełnym ekranie), przechwytywanie przejmuje Windows
+Graphics Capture (tylko okno gry); pojedyncze klatki — na starcie live, zanim WGC ruszy, i gdy gra
+przez 1,5 s nie rysuje nowych klatek — nadal idą przez zrzut ekranu. Wyłączenie Windows Graphics Capture: `"liveGraphicsCapture":
 false` w `settings.json`. Jeżeli gra nie wspiera żadnego z nich (część tytułów DirectX/Vulkan),
 aplikacja przechodzi na
 zrzut ekranu w prostokącie okna gry i **wyraźnie o tym ostrzega** w statusie live —

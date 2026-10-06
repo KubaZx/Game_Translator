@@ -8,9 +8,13 @@ lokalnie, i mówimy wprost, co opuszcza komputer**.
 
 - Program przechwytuje obraz **wyłącznie wybranego przez użytkownika okna lub zaznaczonego
   regionu ekranu** — nigdy całego pulpitu „w tle" ani innych okien.
-- Przechwytywanie odbywa się oficjalnymi mechanizmami Windows (tryb live: GDI `PrintWindow`
-  samego okna gry, w ruchu kamery Windows Graphics Capture tego okna; tryb ręczny: `CopyFromScreen`) i dzieje
-  się tylko wtedy, gdy użytkownik tego zażąda
+- Przechwytywanie odbywa się oficjalnymi mechanizmami Windows: `PrintWindow` wybranego okna
+  (tryb ręczny i live), `CopyFromScreen` zaznaczonego regionu oraz w trybie live Windows Graphics
+  Capture samego okna gry (w ruchu kamery w trybie zakrywania, a na stałe, gdy okno nie wspiera
+  PrintWindow). Gdy okno nie wspiera PrintWindow, a WGC jeszcze nie działa albo jest niedostępne,
+  program robi zrzut ekranu (`CopyFromScreen`) w prostokącie okna gry — wtedy w kadrze mogą
+  znaleźć się inne okna nad grą (ostrzeżenie pojawia się po 6 takich klatkach z rzędu albo od razu,
+  gdy WGC jest niedostępne). Przechwytywanie dzieje się tylko wtedy, gdy użytkownik tego zażąda
   (skrót/tryb tłumaczenia). Program niczego nie nagrywa.
 
 ## OCR działa lokalnie

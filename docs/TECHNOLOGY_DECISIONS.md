@@ -85,16 +85,19 @@ MVP tłumaczy na żądanie, nie strumieniuje. WGC ma sens dopiero przy pętli li
 strumień klatek, poprawne przechwytywanie okien akcelerowanych sprzętowo) — i na to jest
 zaplanowane. Rozdzielenie decyzji zmniejsza ryzyko MVP.
 
-**Aktualizacja 2026-10-06.** Tryb live używa WGC (`GraphicsCaptureSource`) tylko w trwającym
-ruchu kamery (sesja WGC zamykana po 2 s spokoju; otwarta sesja sama opóźniała w SceneReplay
-zauważenie zmiany statycznej sceny o 20–45 ms):
+**Aktualizacja 2026-10-06.** Tryb live używa WGC (`GraphicsCaptureSource`) w trwającym ruchu
+kamery przy śledzeniu łatek (tryb zakrywania; sesja WGC zamykana po 2 s spokoju; otwarta sesja
+w części przebiegów A/B SceneReplay opóźniała zauważenie zmiany statycznej sceny o ok. 17–45 ms)
+oraz na stałe, w każdym trybie, gdy okno gry nie wspiera PrintWindow — zamiast zrzutu ekranu, także
+na stojącym obrazie:
 pełna klatka 4K w ok. 22 ms zamiast ok. 51 ms przez `PrintWindow`, wycinek pod napisem poniżej
 1 ms, sygnał nowej klatki do śledzenia napisów. Ramka jest wyłączana przez
 `IGraphicsCaptureSession3` (Windows 11); gdy się nie da, WGC nie jest używane. Na stojącym
 obrazie zostaje `PrintWindow`: WGC oddaje klatkę po złożeniu ekranu (10–30 ms po zmianie),
 a `PrintWindow` okna WPF widzi zmianę od razu — w SceneReplay z WGC zawsze zmiana sceny była
-zauważana ok. 150 ms później. GDI zostaje też dla trybu ręcznego i jako powrót (czarna albo
-nieaktualna klatka, inny rozmiar, `liveGraphicsCapture: false`). Direct3D 11 przez wskaźniki
+zauważana ok. 150 ms później. GDI zostaje też dla trybu ręcznego i jako powrót (jednolita/pusta
+albo nieaktualna klatka, inny rozmiar, `liveGraphicsCapture: false`; przy oknie bez PrintWindow
+powrotem jest zrzut ekranu). Direct3D 11 przez wskaźniki
 funkcji COM, bez dodatkowych pakietów.
 
 **Odrzucone alternatywy.**

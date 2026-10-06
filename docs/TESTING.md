@@ -336,8 +336,11 @@ obrazy i teksty gry — trzymaj je poza repozytorium. Wyniki jednego nagrania r�
 przebiegami (czas OCR, tempo odtwarzania) o kilka punktów procentowych; porównuj kilka przebiegów.
 
 ```powershell
-dotnet run --project tools/GameTranslatorOverlay.MotionLab -c Release -- replay pokoj-ruch2 --out C:\measurementsuch\pokoj-ruch2
+dotnet run --project tools/GameTranslatorOverlay.MotionLab -c Release -- replay pokoj-ruch2 --out C:\pomiary\ruch\pokoj-ruch2
 ```
+
+Domyślne `--cache`, `--corpus` i katalog nagrań wskazują pliki na maszynie autora (`LabDefaults`);
+gdzie indziej podaj je jawnie (`--cache none` = pusta baza).
 
 ### Wygląd nakładki (OverlayPreview)
 

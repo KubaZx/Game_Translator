@@ -147,9 +147,10 @@ Celowo **nie ma** osobnego assembly `Providers.DeepL` — DeepL siedzi w Infrast
 ### GameTranslatorOverlay.App — WPF i wszystko, co wymaga pulpitu
 
 - UI (okno główne, panel wyniku, ustawienia), DI przez `Microsoft.Extensions.Hosting`.
-- **Capture**: tryb live w ruchu kamery czyta okno gry przez Windows Graphics Capture
-  (`Capture/GraphicsCaptureSource`, Direct3D 11 przez COM, bez żółtej ramki); na stojącym obrazie,
-  zapasowo i w trybie ręcznym GDI (`CopyFromScreen`/BitBlt dla regionu ekranu, `PrintWindow` z `PW_RENDERFULLCONTENT`
+- **Capture**: tryb live czyta okno gry przez Windows Graphics Capture
+  (`Capture/GraphicsCaptureSource`, Direct3D 11 przez COM, bez żółtej ramki) w trwającym ruchu
+  kamery przy śledzeniu łatek oraz na stałe, gdy okno nie wspiera PrintWindow; poza tym, zapasowo
+  i w trybie ręcznym GDI (`CopyFromScreen`/BitBlt dla regionu ekranu, `PrintWindow` z `PW_RENDERFULLCONTENT`
   dla okna + fallback na crop ekranu).
 - **OCR**: `WindowsOcrProvider` — adapter `Windows.Media.Ocr.OcrEngine` za interfejsem
   `IOcrProvider` (WinRT wymaga TFM windowsowego, więc siedzi w App, nie w Infrastructure).
@@ -182,8 +183,9 @@ wywołuje ją i rysuje wynik.
 
 ## 2. Przepływ danych
 
-1. **Capture:** wybrane okno lub region; live w ruchu przez Windows Graphics Capture,
-   poza tym PrintWindow/GDI; bitmapa lokalna.
+1. **Capture:** wybrane okno lub region; live przez Windows Graphics Capture w ruchu kamery
+   (tryb zakrywania) albo na stałe przy oknie bez PrintWindow, poza tym PrintWindow/GDI; bitmapa
+   lokalna.
 2. **OCR:** Windows.Media.Ocr zwraca linie i prostokąty.
 3. **Tekst:** normalizacja, grupowanie i filtr śmieci; w live także stabilizacja
    odczytów i sprawdzenie aktualności sceny. Z korpusem aktywnego profilu bramka live
@@ -419,7 +421,8 @@ przed krótszymi, priorytety rozstrzygają konflikty; konflikty (ten sam `source
 ## 8. Aktualność i praca trybu live
 
 Jedna pętla sesji obsługuje capture, OCR i stan nakładki. Domyślnie próbkuje obraz
-przy 6 FPS, wymaga 250 ms stabilności, może wymusić przetwarzanie po 600 ms,
+przy 6 FPS (przez 1 s po ruchu ze śledzonymi napisami do `MotionFps`, domyślnie 10 FPS, najwyżej
+2× Fps), wymaga 250 ms stabilności, może wymusić przetwarzanie po 600 ms,
 a przy ruchu ma maksymalną pauzę OCR 2,5 s (0,9 s, gdy działa śledzenie napisów). Pełny OCR całej klatki jest należny
 4 s (`StaticRescanInterval`) po poprzednim **pełnym** OCR (`FullScanSchedule`): wycinki go nie
 odsuwają, a należny skan obejmuje całą klatkę także przy oczekującym regionie zmian. Powtórki
@@ -560,20 +563,22 @@ trybem paska napisów (`LiveSessionOptions.BuildGlyphCovers`, `HoldTypingPrefixe
 
 ### Ruch kamery: śledzenie, szybkie odświeżanie i Windows Graphics Capture
 
-Działa przy łatkach (umiejscowienie „Na oryginale (zakrywa)” poza paskiem napisów) i bez
-zapasowego zrzutu ekranu.
+Śledzenie, szybkie odświeżanie i WGC w ruchu działają przy łatkach (umiejscowienie „Na oryginale
+(zakrywa)” poza paskiem napisów) i bez zapasowego zrzutu ekranu; zastąpienie zrzutu ekranu przez
+WGC przy oknie bez PrintWindow (niżej) działa w każdym trybie live.
 
 - **Przechwytywanie.** `GraphicsCaptureSource` trzyma sesję Windows Graphics Capture okna gry
   (bez kursora; ramka wyłączana przez `IGraphicsCaptureSession3`, a gdy system na to nie
-  pozwala — WGC nie jest już próbowane w tej sesji live). Sesja WGC startuje, gdy analiza
+  pozwala — sesja WGC nie jest uruchamiana i WGC nie jest już próbowane w tej sesji live). Sesja WGC startuje, gdy analiza
   klatki pokaże trwający ruch (co najmniej dwie próbki z mocną zmianą przy działającym
   śledzeniu), i jest zamykana po 2 s bez ruchu; każda nowa klatka jest kopiowana na GPU do
   własnej tekstury, a pełna klatka (cykl sesji) i wycinki (śledzenie) są czytane przez teksturę
   staging. Pełna klatka z WGC jest brana tylko w trwającym ruchu i tylko nowa (inna niż przy
   poprzednim przechwyceniu). Na stojącym obrazie nie ma sesji WGC: WGC oddaje zmianę dopiero po
   złożeniu ekranu (w SceneReplay zmiana sceny była widziana o jeden cykl później), a sama otwarta
-  sesja opóźniała w SceneReplay zauważenie zmiany o 20–45 ms. Klatka o rozmiarze innym niż widoczna ramka
-  okna, czarna albo starsza niż 1,5 s oznacza `PrintWindow` dla tego przechwycenia.
+  sesja w części przebiegów SceneReplay opóźniała zauważenie zmiany o ok. 17–45 ms. Klatka
+  o rozmiarze innym niż widoczna ramka okna, jednolita (pusta, np. czarna) albo starsza niż 1,5 s
+  oznacza `PrintWindow` dla tego przechwycenia (przy oknie bez PrintWindow — zrzut ekranu).
   `liveGraphicsCapture: false` wyłącza WGC.
 - **Okno bez PrintWindow.** Gdy `PrintWindow` da pusty obraz i sesja musiałaby użyć zrzutu ekranu
   (gra na pełnym ekranie), WGC staje się głównym źródłem na stałe dla tej sesji live, także na
@@ -600,7 +605,8 @@ zapasowego zrzutu ekranu.
   najwyżej `FastTrackFps` (30) razy na sekundę. Takie śledzenie tylko odświeża — o zdjęciu bloku
   decyduje pełny cykl albo dwa dowody braku liter.
 - **Stabilność odczytów.** Ramki słów przy kącie tekstu są obracane wokół środka obrazu
-  (`OcrGeometry.Unrotate`). Pusty wynik dużego obrazu jest ponawiany w pasach (`OcrBands`).
+  (`OcrGeometry.Unrotate`). Pusty wynik obrazu od 1,4 Mpx jest ponawiany w 2, a potem 4 pasach
+  (`OcrBands`); po nieudanej próbie w pasach kolejna jest możliwa dopiero po 2 s.
   Blok zlepiający napisy, które przy przechwyceniu były na swoich miejscach, dzieli
   `TextBlockSplitter`. Krój i rozmiar tekstu są trzymane dla elementu nakładki
   (`GameTextElement.StyleAscent`), a grubość — wspólna dla klasy stylu (`OverlayFonts.ClassWeight`).
