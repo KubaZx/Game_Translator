@@ -21,7 +21,8 @@ internal static class ProviderFactory
     public const string LlmKey = "GTO_LLM_KEY";
 
     public static (ITranslationProvider? Provider, string? SkipReason) Create(
-        string id, HttpClient httpClient, Func<HttpClient> claudeHttpClient, bool deepLGlossary)
+        string id, HttpClient httpClient, Func<HttpClient> claudeHttpClient, bool deepLGlossary,
+        LlmServerOptions? llmServerOptions = null, bool llmPreset = true)
     {
         switch (id)
         {
@@ -60,8 +61,12 @@ internal static class ProviderFactory
                 // Klucz jest opcjonalny (lokalna Ollama/LM Studio) i należy do podanego serwera.
                 var llmKey = Env(LlmKey);
                 var keyHost = baseUri!.Authority;
+                var serverOptions = llmServerOptions is { HasRequestFields: true }
+                    ? llmServerOptions.Sanitized().ForHost(keyHost)
+                    : llmPreset ? TranslationProviderCatalog.FindLlmPreset(baseUri)?.ServerOptionsForHost() : null;
                 return (new OpenAiCompatibleTranslationProvider(
-                    httpClient, () => llmKey, () => keyHost, () => endpoint, () => llmModel), null);
+                    httpClient, () => llmKey, () => keyHost, () => endpoint, () => llmModel,
+                    serverOptionsAccessor: () => serverOptions), null);
 
             default:
                 return (null, "nieznany dostawca.");

@@ -41,6 +41,17 @@ W PowerShellu: `$env:GTO_DEEPL_KEY = "..."`.
 | `--glossary PLIK` | Dodatkowy słownik JSON w formacie `glossaries/*.json`, obok pól `terms` z korpusu. |
 | `--game NAZWA` | Nazwa gry przekazywana modelom językowym, jak nazwa z profilu w aplikacji. |
 | `--no-deepl-glossary` | DeepL bez glosariusza — nic nie powstaje na koncie DeepL. |
+| `--llm-thinking TYP` | Pole `thinking: {"type": TYP}` dla serwera LLM (np. `disabled`, `enabled`). |
+| `--llm-effort POZIOM` | Pole `reasoning_effort` (np. `none`, `low`, `medium`, `high`). |
+| `--llm-max-tokens N` | Pole `max_tokens`. |
+| `--llm-json` | Pole `response_format: {"type": "json_object"}`. |
+| `--llm-no-preset` | Bez domyślnych opcji gotowego serwera (DeepSeek: `thinking: disabled`, Ollama: `reasoning_effort: none`). |
+
+Opcje `--llm-*` trafiają wyłącznie do serwera z `GTO_LLM_ENDPOINT` (jak `llmServerOptions`
+w aplikacji, ADR-013). Bez nich adres gotowego serwera dostaje opcje presetu, a inny serwer —
+zapytanie z samymi polami `model`, `messages` i `stream`. Po przebiegu LLM narzędzie wypisuje
+aktywne opcje i sumę tokenów z pola `usage` odpowiedzi (wejście, w tym z cache, wyjście,
+w tym rozumowanie).
 
 Dostawca bez klucza jest **pomijany** z komunikatem, która zmienna jest pusta. Klucze nigdy
 nie są wypisywane ani zapisywane w raporcie. Kod wyjścia: 0 — sukces, 1 — błąd korpusu,

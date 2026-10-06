@@ -39,6 +39,10 @@ produktu; status implementacji nie zastępuje testów wizualnych na kolejnych gr
     samej klatce.
 11. HTTP/2 i metryki połączeń (czas zestawienia, ponowne użycie) dla dostawców.
 12. Strumieniowanie odpowiedzi modeli językowych, żeby pierwsze linie pojawiały się wcześniej.
+13. Pilotaż `paragraphCacheKeys` u prawdziwego dostawcy (najpierw PoE2: 21% znaków
+    powtórzonych w innych blokach) i decyzja o włączeniu domyślnie — runda 2026-10-06 (3).
+14. Tryb prywatny: czytanie (bez zapisu) tłumaczeń korpusu z wyprzedzeniem z bazy na dysku.
+15. Odświeżenie korpusu po nowym `extract`/`translate` bez restartu aplikacji.
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -788,3 +792,232 @@ którego już nie ma. Nowy napis z brudniejszym odczytem w miejscu zniknięcia b
 nadal czeka do 10 s. Weryfikacja: build bez ostrzeżeń, Core 982/982 (+35 testów), Infrastructure
 242/242. Analiza pozycji pola: `krok1\skrypty\pozycje_pola_4k.py`, wynik
 `krok1\pozycje-pola-4k-wynik.json`; JSONL i agregaty: `krok1\after2`.
+
+### Runda 2026-10-06 — korpus gry
+
+Krok 2 decyzji ADR-014: narzędzie offline czytające teksty z plików gry, przyciąganie odczytów
+OCR do korpusu i eksperyment precyzji. Integracja z pipeline'em tłumaczeń (klucz cache po
+kanonicznym tekście, wpisy z wyprzedzeniem, tryb prywatny) **nie jest częścią tej rundy**.
+
+**Co powstało.** `tools/GameTranslatorOverlay.CorpusTool` (`extract`; czytnik UnityFS z własnym
+dekoderem LZ4 → plik serializowany Unity → TextAsset, parsery CSV i SRT, zabezpieczenia
+ADR-014 jako kod z testami — [README](../tools/GameTranslatorOverlay.CorpusTool/README.md)),
+`GameTranslatorOverlay.Core.Corpus` (`CorpusEntry`, `CorpusIndex` — trigramy po tekście bez
+wielkości liter, `CorpusSnapper`), opcjonalne sekcje `corpus` i `online` w `GameProfile`,
+profil `profiles/escape-academy` z receptą oraz narzędzie dev `tools/GameTranslatorOverlay.CorpusEval`
+(prawda syntetyczna przez Windows OCR, przegląd progów, czasy).
+
+**Korpus Escape Academy (pomiar).** `data.unity3d` (UnityFS v8, Unity 2020.3.40f1) →
+`resources.assets` (plik serializowany v22, 12 422 obiekty, 5 456 TextAssetów). Wpisy: 8 341
+(UI 6 358 z 4 tabel GameplayStrings, dialogi Yarn en-US 482 z 55 tabel, napisy 1 501 z 1 316
+plików SRT); unikalne teksty bez wielkości liter: 7 601 (UI 5 975, dialogi 467, napisy 1 168),
+248 791 znaków klucza dopasowania; mówcy: 19 w dialogach, 42 w napisach. Pominięte: 11 wierszy UI
+bez liter i cyfr, 8 napisów z samymi nutami. Jedna tabela nie jest czystym UTF-8 (2 bajty
+odczytane jak Windows-1252). Czas (3 przebiegi): odczyt 62–92 ms, parsowanie 45–47 ms, razem
+z zabezpieczeniami 178–219 ms (prototyp w Pythonie: 1,4 s). Korpus leży poza repozytorium.
+
+**Wybrane progi (domyślne w `CorpusSnapOptions`).** Przybliżone i fragmenty: podobieństwo
+Levenshteina ≥ 0,80, odstęp do drugiego kandydata ≥ 0,08, co najmniej 16 znaków i 2 słowa
+(fragment 3 słowa i wpis ≥ 1,3× dłuższy); liczby samodzielne (niesklejone z literą) 1:1;
+krótsze teksty tylko dokładnie, bez wielkości liter i znaków na brzegach, od 2 liter lub cyfr;
+krótka etykieta nie jest przyciągana w środku zawiniętego zdania; okruchy przy etykiecie tylko
+jednoznakowe lub nazwy klawiszy na początku i bez liter na końcu. Wariant ścisły: to samo
+i dokładne dopiero od 8 znaków (`MinExactLength = 8`). Progi wybrano z 448 konfiguracji
+(T 0,75–0,95 × margines 0,03–0,12 × min. długość 8–16 × min. długość dokładnego 0–12).
+
+**Prawda syntetyczna.** 880 próbek: 2 × 440 (cała klatka 4K jak pełny skan live i wycinek
+co najmniej 800×400 jak OCR regionu), warstwy: krótkie etykiety UI 158, dłuższe UI 246,
+dialogi 238, napisy 238; biały tekst z czarnym obrysem 32–72 px, 9 czcionek systemowych, trzy
+klatki z gry z ominięciem miejsc z tekstem gry; prawdziwy Windows OCR i `TextBlockGrouper` jak
+w live.
+
+| | Wybrane progi | Wariant ścisły |
+|---|---:|---:|
+| Surowy OCR identyczny z prawdą (z wielkością liter) | 417 (47,4%) | 417 |
+| Poprawnie przyciągnięte | 697 (79,2%) | 623 (70,8%) |
+| Błędnie przyciągnięte (z przyciągniętych) | 1 (0,14%) | 0 (0%) |
+| Tylko fragment poprawnego wpisu | 10 | 10 |
+| Bez dopasowania | 172 | 247 |
+
+Jedyny błąd to odczyt samego „Only” z etykiety z ceną (OCR zgubił liczbę) — przyciągnięcie
+nie zmieniło tekstu. Z 172 próbek bez dopasowania w 109 OCR nie zwrócił żadnego tekstu (cała
+klatka 91/440, wycinek 18/440).
+
+**Prawdziwy cache** (kopia bazy z `-wal`, 518 wpisów DeepL; dni EA 2026-09-04/12/13/15: 242 bloki,
+3 437 liter i cyfr; znaki liczone bez spacji i interpunkcji):
+
+| | Dziś (klucz z wielkością liter) | Wybrane progi | Wariant ścisły |
+|---|---:|---:|---:|
+| Znaki obsłużone lokalnie | 583 (17,0%) | 2 043 (59,4%) | 1 644 (47,8%) |
+| — dokładne / przybliżone | | 1 364 / 679 | 925 / 719 |
+| — w tym części wierszy (etykieta obok glifu, opis + etykieta) | | 171 | 0 |
+| + fragmenty (bez złożenia nieobsługiwane) | | 67,7% | 56,1% |
+| Bloki w pełni obsłużone lokalnie | 48 (19,8%) | 118 (48,8%) | 62 (25,6%) |
+| Bez dnia 09-04 (217 bloków): znaki / bloki | | 63,2% / 51,2% | 51,1% / 27,2% |
+
+Dzień 09-04 osobno (25 bloków): 18,0% znaków. Ręczny przegląd przyciągnięć przybliżonych:
+w całym cache jest ich tylko 39 różnych nawet przy najluźniejszych progach, więc przejrzano
+wszystkie (zamiast 50) — przy wybranych progach 0 błędnych z 24 (5 uzupełnia ucięty odczyt,
+2 odczyty z etykietą mówcy, 4 wpisy ze znacznikiem przycisku `[x]`), przy luźnych (T 0,70,
+min. 8 znaków) 2 błędne z 15 dodatkowych (dwie krótkie etykiety w jednym wierszu).
+
+**Kontrola negatywna.** Dzień 2026-08-06 nie jest czystym PoE2: po 12:24 UTC w cache jest 12
+bloków samouczka Escape Academy (wcześniejsze 7,7% fałszywych trafień liczono razem z nimi).
+Kontrola = sesja PoE2 09:06–09:58 UTC, 247 bloków, 7 139 liter i cyfr. Wybrane progi: 8 bloków
+z trafieniem (3,24%) — wszystkie dokładne, identyczne ogólne etykiety menu — i 0 przyciągnięć
+zmieniających odczytany tekst. Wariant ścisły: 2 bloki (0,81%), 0 zmian.
+
+**Czas dopasowania** (`SnapBlock`, 32 wątki CPU, .NET 10.0.12): korpus EA (7 601 tekstów,
+indeks 33 ms) na 1 278 zapytaniach (bloki cache EA i PoE2 + odczyty syntetyczne) — p50 0,004 ms,
+p95 0,90 ms, p99 1,95 ms, max 5,1 ms. Korpus syntetyczny 150 tys. tekstów (141 005 unikalnych,
+indeks 430 ms, ok. 75 MB) — p50 1,01 ms, p95 4,77 ms, p99 6,74 ms na 2 000 zapytaniach;
+zapytania EA na tym korpusie p95 4,89 ms.
+
+**Kryteria rundy.** ≥40% znaków lokalnie — spełnione (59,4%; ścisły 47,8%). ≤1% błędnych
+przyciągnięć syntetycznych — spełnione (0,14%; ścisły 0%). ≤1% fałszywych trafień PoE2 —
+wariant ścisły spełnia (0,81%); wybrane progi tylko przy liczeniu przyciągnięć zmieniających
+tekst (0%), a przy liczeniu każdego trafienia nie (3,24%, identyczne etykiety). Wariant ścisły
+spełnia więc wszystkie trzy, ale obsługuje o połowę mniej bloków w całości. Po zawężeniu korpusu
+do aktywnego profilu gry trafienia w identyczne etykiety innej gry nie mogą wystąpić.
+
+**Ograniczenia i hipotezy.** Czcionki systemowe zamiast czcionki gry, bez animacji pisania
+i bez ruchu; progi wybrane na tych samych danych, na których je mierzono (ryzyko dopasowania do
+próby); cache zawiera tylko bloki wysłane do dostawcy, nie wszystkie odczyty; jedna gra
+w kontroli negatywnej. Tekst z tekstur i lokalizowanych obrazków nie trafi do korpusu.
+Wpisy ze znacznikiem przycisku (`[x]`) wymagają obsługi przy wyświetlaniu.
+
+Liczby: `GTO Diagnostics\20261005-natywne-spolszczenie\krok2\eksperyment` (`sweep.json`,
+`wybrane-progi.json`, `wyniki-progi.md`, `czasy-dopasowania.json`, `extract-stats.json`,
+`przeglad-reczny.json`); teksty gry tylko w `krok2\private` (lokalnie). Weryfikacja: build
+całego rozwiązania bez ostrzeżeń, Core 1052/1052 (+70 testów), Infrastructure 242/242,
+CorpusTool 85/85 (nowy projekt testów).
+
+### Runda 2026-10-06 (2) — opcje serwera LLM i tłumaczenie korpusu z wyprzedzeniem
+
+**Opcje serwera LLM** (ADR-013, dopisek). `OpenAiCompatibleTranslationProvider` wysyła
+opcjonalne `thinking`, `reasoning_effort`, `max_tokens` i `response_format` z ustawienia
+`llmServerOptions` przypisanego do hosta; bez niego zapytanie jest bajt w bajt takie jak dotąd
+(test kontraktu). Gotowe serwery: DeepSeek (`deepseek-flash`, `thinking: disabled`) i Ollama
+(`reasoning_effort: none`). Odpowiedź: `usage` do logu i do sum tokenów. ProviderEval:
+`--llm-thinking`, `--llm-effort`, `--llm-max-tokens`, `--llm-json`, `--llm-no-preset`.
+
+**`CorpusTool translate`.** Partie: dialogi węzłami w kolejności linii (dłuższy węzeł dostaje
+poprzednie linie z tłumaczeniami), napisy po pliku, UI w obrębie tabeli; opis sceny i notatka do
+każdego tekstu (mówca, plik napisu, klucz, kolumna kontekstu bez flag lokalizacji zaczynających się od `%`). Kontrola jakości
+jak w pipeline plus zachowanie znaczników `{0}`, `[X]`, `%s`; partia z nieczytelną odpowiedzią,
+odmową filtra albo zbyt długim tekstem jest dzielona na połowy (do 3 poziomów). Zapis: profil gry, prawdziwa nazwa
+dostawcy, `context` = `reflow-1[;qa…][;pg…];src=corpus`. Pomijane: słownik, korekty, wpisy
+zatwierdzone, aktualne wpisy profilu. Tryb prywatny i nieczytelne ustawienia = odmowa; baza
+poza repozytorium; Mock tylko do jawnie wskazanej bazy; klucze tylko ze zmiennych środowiskowych.
+
+**Pomiar na Mocku** (2026-10-06, korpus Escape Academy, kopia `cache.db` użytkownika w
+`krok2\private\cache-mock` z dodanymi: korektą globalną, korektą profilu, wpisem zatwierdzonym
+i terminem prywatnego słownika). Korpus: 8 341 wpisów → 7 639 unikalnych kluczy (z wielkością
+liter; 702 powtórzenia). Pominięte: słownik 8, korekty 2, zatwierdzony 1; do tłumaczenia 7 628
+tekstów, 248 781 znaków, 199 partii (dialogi 466, napisy 1 165, UI 5 997); 51 przesłania wpis
+globalny DeepL, 18 ma znaczniki, 763 zwraca się do gracza. Przebieg: 7 628 zapisanych, 0 błędów,
+322 ms (proces 0,64 s). Pipeline z aktywnym profilem `escape-academy` i Mockiem: lokalnie
+7 639/7 639 (słownik 8, cache 7 631: 7 628 wpisów korpusu + 3 wpisy chronione); korekty,
+wpis zatwierdzony i termin słownika wygrywają; bez profilu wynik jak przed przebiegiem (60
+z 7 639); z prawdziwym dostawcą atrapy Mocka nie są pokazywane. Drugi przebieg: „już w profilu
+7 628”, nic do tłumaczenia. Nowa pusta baza (3 przebiegi): 7 632 zapisane, 324–325 ms
+(proces 0,56 s), plik 3,9 MB. Przebieg próbny na kopii nie zmienił plików bazy (SHA-256
+`cache.db`, `-wal`, `-shm` przed i po).
+
+**Szacunek przed prawdziwym przebiegiem** (pełny korpus, kopia bez dodatków): DeepSeek
+`deepseek-flash` bez myślenia — 343 zapytania, ok. 333 tys. tokenów wejścia i 114 tys. wyjścia,
+0,12–0,24 USD (poza szczytem – w szczycie, bez trafień cache; hipoteza ±30%); DeepL — 200 zapytań,
+248 979 znaków = 49,8% miesięcznego limitu API Free. Prawdziwego przebiegu w tej rundzie nie
+było (zero zapytań do płatnych API).
+
+Liczby: `krok2\tlumaczenie\*.json` (same liczby); teksty i bazy tylko w `krok2\private`.
+Weryfikacja: build całego rozwiązania i App bez ostrzeżeń, Core 1067/1067, Infrastructure
+270/270, CorpusTool 147/147; pokrycie linii (scalone): Core 97,3%, Infrastructure 93,4%,
+CorpusTool 94,0%.
+
+### Runda 2026-10-06 (3) — dopasowanie do korpusu w trybie live
+
+**Co działa.** Aplikacja wczytuje korpus aktywnego profilu jako dane
+(`<folder danych>\corpus\<id>.corpus.jsonl`, `CorpusCatalog`; nigdy pliki gry) i przekazuje
+`CorpusSnapper` (progi z rundy 2026-10-06: T 0,80, margines 0,08, min. 16 znaków) do pipeline'u.
+`TranslationUnitPlanner` dzieli znormalizowany blok OCR na jednostki: tekst kanoniczny korpusu
+(cały blok, akapit, wiersz albo część wiersza; klucz cache = `CorpusTranslationKey`, ten sam co
+w `CorpusTool translate`), akapity nieznanej reszty (klucz = wiersze akapitu z OCR) i tekst
+dosłowny (prefiks mówcy z korpusu, okruchy typu klawisz, śmieciowy akapit obok czegoś do
+tłumaczenia). Słownik, cache, deduplikacja in-flight, kontrola jakości, pamięć dialogu i dostawca
+pracują na jednostkach; wynik bloku jest składany z powrotem: tekst kanoniczny rozkładany na
+wiersze odczytu (`TextReflow.ToParagraphs` + `Rewrap`/`WrapBalanced`), wielkie litery odczytu
+przechodzą na tłumaczenie. Kolejność: ręczna korekta całego odczytu > słownik na całym odczycie >
+jednostki (każda: korekta > słownik > cache) > dawny automatyczny wpis całego odczytu (zapas, gdy
+jednostki nie są lokalne) > dostawca dla brakujących jednostek. Próba lokalna (`TranslateLocalAsync`)
+oddaje wyniki jednostek do `TranslateAsync`, więc znana jednostka nie jest czytana z bazy drugi raz.
+Przyciąganie nie używa tekstów z podstawieniem (`{…}`, `%s/%d/%i/%f`) ani ze znacznikiem przycisku
+`[X]`, którego nie ma w odczycie. Krótki tekst, który odrzuca `JunkFilter`, przechodzi tylko przy
+dokładnym dopasowaniu do korpusu (min. 2 litery). Ręczna korekta bloku będącego jednym tekstem
+korpusu zapisuje się pod kluczem kanonicznym (`TranslationOutcome.CacheKey`). Tryb prywatny
+i Cache-only: przyciąganie w pamięci, reszta jak dotąd (w trybie prywatnym baza z dysku nie jest
+czytana, więc wpisy z wyprzedzeniem nie działają). Bez korpusu i bez `paragraphCacheKeys` plan
+jest pusty i pipeline idzie dokładnie dawną ścieżką kodu.
+
+**Klucz po akapitach (pytanie z badania: 82 linie płacone wielokrotnie).** Pomiar na kopii cache:
+w dniach EA 22 linie występowały w więcej niż jednym bloku (34 dodatkowe wystąpienia, 560 znaków),
+w sesji PoE2 61 linii (145 wystąpień, 2 231 znaków). Naprawa jest tania i jest zrobiona: przy
+aktywnym korpusie nieznana reszta bloku idzie akapitami (klucz = wiersze akapitu, więc akapit
+samodzielny i ten sam akapit w większym bloku mają jeden wpis), a dawny wpis całego bloku jest
+zapasem — istniejące tłumaczenia nie są płacone drugi raz. Bez korpusu to samo włącza
+`"paragraphCacheKeys": true` w `settings.json`; **domyślnie wyłączone**, bo (1) wymaganie tej
+rundy: brak korpusu = zachowanie jak dziś, (2) zmienia to, co widzi dostawca (akapity jednego
+bloku jako osobne teksty tej samej partii — jakości u DeepL i modeli nie mierzono, Mock niczego tu
+nie mówi), (3) liczniki trafień cache liczą części, nie bloki. Klucza po pojedynczych wierszach
+akapitu nie wprowadzono: wiersz zawiniętego zdania to fragment zdania, a jego tłumaczenie osobno
+psuje gramatykę (powód istnienia `TextReflow`). Rekomendacja: włączyć domyślnie po pilotażu
+u prawdziwego dostawcy na PoE2 (zysk tam największy).
+
+**Pomiar — powtórka bloków z kopii cache** (2026-10-06, `CorpusEval replay`, prawdziwy
+`TranslationPipeline` + `SqliteTranslationCache` na świeżych bazach, Mock z licznikiem, słownik
+globalny; każdy blok raz w kolejności `created_at`, ścieżką live: `TranslateLocalAsync`, potem
+`TranslateAsync` z wynikiem próby). Korpus 8 341 wpisów / 7 599 tekstów. Baza B wypełniona przez
+`CorpusTool translate --provider mock` (7 632 wpisy w profilu `escape-academy`).
+
+| Bloki | Wariant | Bloki lokalnie | Znaki lokalnie | Zapytania | Teksty / znaki do dostawcy |
+|---|---|---|---|---|---|
+| EA 242 (09-04/12/13/15) | A — jak dotąd, bez korpusu, pusty cache | 1 (0,4%) | 10 / 3 437 (0,3%) | 241 | 241 / 4 214 |
+| EA 242 | A2 — bez korpusu, klucze po akapitach | 7 (2,9%) | 157 (4,6%) | 235 | 245 / 4 019 |
+| EA 242 | B0 — korpus, pusty cache | 43 (17,8%) | 755 (22,0%) | 199 | 206 / 3 313 |
+| EA 242 | **B — korpus, cache z `translate`** | **120 (49,6%)** | **2 075 (60,4%)** | **122** | **128 / 1 678** |
+| EA 217 (09-12/13/15) | A | 1 (0,5%) | 10 / 3 154 (0,3%) | 216 | 216 / 3 873 |
+| EA 217 | **B** | **113 (52,1%)** | **2 024 (64,2%)** | **104** | **110 / 1 393** |
+| PoE2 247 (08-06 do 12:00) | A | 0 | 0 / 7 139 | 247 | 247 / 8 843 |
+| PoE2 247 | A2 — klucze po akapitach | 29 (11,7%) | 1 521 (21,3%) | 218 | 273 / 6 892 |
+| PoE2 247 | C — jak B (korpus EA przy innej grze) | 36 (14,6%) | 1 569 (22,0%) | 211 | 265 / 6 843 |
+
+Wystąpienia ważone `use_count` (ile razy blok faktycznie pojawił się w sesji): EA 242 — 80,3% (A)
+→ 90,0% (B) obsłużonych lokalnie; EA 217 — 70,8% → 85,9%. Wyświetlane tłumaczenie ma tyle
+wierszy co odczyt we wszystkich blokach wszystkich wariantów. Próba lokalna z korpusem: p50
+0,10 ms, p95 0,66 ms (EA); 0,32/1,92 ms (PoE2 — dłuższe bloki). Kontrola C: 6 bloków PoE2
+przyciągniętych do korpusu EA — 4 różnią się tylko wielkością liter (ogólne etykiety menu), 1
+kropką na końcu, 1 to krótka etykieta w bloku śmieci; zero zmian znaczenia (przegląd ręczny).
+W praktyce przyciąganie działa wyłącznie z korpusem aktywnego profilu, a PoE2 korpusu mieć nie
+może (ADR-014). Przegląd ręczny przyciągnięć EA (79 bloków): bez błędnych podmian; pokazał trzy
+usterki naprawione w tej rundzie — literalne `\n` w 102 tekstach UI (teraz nowy wiersz, także
+w kluczu `translate`), znacznik mówcy w środku wiersza (teraz dosłowny) i liczba jako osobny
+akapit wysyłana do dostawcy (teraz dosłowna). Odczyty z animacji pisania (ucięte zdanie)
+dostają tłumaczenie całego zdania — świadomie (jak w rundzie 2026-10-06).
+
+**Regresje.** SceneReplay bez korpusu (Mock w pamięci), przed i po zmianie, ten sam komputer:
+`displayed`, `local-reading`, `reading-jitter`, `hud-motion`, `stale-junk` — wszystkie exit 0,
+te same `fixtureValid`/`expectedBehavior`/`desiredReadingPublished`, te same liczniki zapytań
+i znaków Mock oraz trafień cache; czasy w granicach szumu (np. `stale-junk` 330 → 325 ms,
+`displayed` `middleReadyMs` 2 318 → 2 326 ms, `hud-motion` usunięcie 101/178 → 94/177 ms).
+
+Liczby: `GTO Diagnostics\20261005-natywne-spolszczenie\krok2\powtorka` (`powtorka.json`,
+`powtorka.md`, `corpustool-mock-b.json`, `sceny\przed-*.jsonl`, `sceny\po-*.jsonl`,
+`sceny\porownanie-przed-po.json`); bazy i przegląd z tekstami gry tylko w `krok2\private\powtorka`.
+Weryfikacja: build całego rozwiązania i App bez ostrzeżeń; Core 1097/1097 (+30), Infrastructure
+276/276 (+6), CorpusTool 147/147; pokrycie linii (scalone): Core 96,9%, Infrastructure 93,5%.
+
+**Otwarte.** Nie sprawdzone w oknie gry ani u prawdziwego dostawcy (tylko powtórka przez pipeline
+i SceneReplay bez korpusu); jakość tłumaczeń składanych z jednostek u DeepL/LLM to hipoteza.
+Tryb prywatny nie czyta wpisów z wyprzedzeniem. Korpus jest wczytywany przy przebudowie
+pipeline'u — po nowym `extract`/`translate` trzeba uruchomić aplikację ponownie. Ręczna korekta
+bloku złożonego z kilku części działa tylko dla tego samego odczytu.

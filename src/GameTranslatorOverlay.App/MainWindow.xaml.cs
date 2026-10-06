@@ -131,9 +131,9 @@ public partial class MainWindow : Window
         TxtLlmModel.Text = _settings.LlmModel ?? string.Empty;
         CmbClaudeModel.ItemsSource = TranslationProviderCatalog.SuggestedClaudeModels;
         CmbClaudeModel.Text = _settings.ClaudeModel;
-        foreach (var (name, endpoint) in TranslationProviderCatalog.LlmPresets)
+        foreach (var llmPreset in TranslationProviderCatalog.LlmPresets)
         {
-            var preset = new Button { Content = name, Tag = endpoint, Margin = new Thickness(4, 0, 0, 0), Padding = new Thickness(8, 4, 8, 4) };
+            var preset = new Button { Content = llmPreset.Name, Tag = llmPreset, Margin = new Thickness(4, 0, 0, 0), Padding = new Thickness(8, 4, 8, 4) };
             preset.Click += OnLlmPresetClick;
             PnlLlmPresets.Children.Add(preset);
         }
@@ -683,8 +683,10 @@ public partial class MainWindow : Window
 
     private void OnLlmPresetClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string endpoint }) return;
-        TxtLlmEndpoint.Text = endpoint;
+        if (sender is not Button { Tag: LlmServerPreset preset }) return;
+        TxtLlmEndpoint.Text = preset.Endpoint;
+        if (preset.Model is { } model) TxtLlmModel.Text = model;
+        _settings.LlmServerOptions = preset.ServerOptionsForHost();
         OnSettingChanged(sender, e);
     }
 
@@ -767,6 +769,10 @@ public partial class MainWindow : Window
                 {
                     status += $" Klucz zapisano dla innego serwera ({_settings.LlmKeyHost ?? "nieznany"}) — " +
                               $"nie jest wysyłany do {endpoint!.Authority}.";
+                }
+                if (_settings.LlmServerOptions is { HasRequestFields: true } serverOptions && serverOptions.AppliesTo(endpoint!))
+                {
+                    status += $" Opcje serwera: {serverOptions.Describe()}.";
                 }
             }
             else
@@ -876,6 +882,7 @@ public partial class MainWindow : Window
         _appliedPipelineJson = pipelineSnapshot;
 
         var profileInfo = _orchestrator.ActiveProfile is { } profile ? $", profil: {profile.Name}" : string.Empty;
+        if (_orchestrator.ActiveCorpus.IsLoaded) profileInfo += $", korpus: {_orchestrator.ActiveCorpus.Texts:N0} tekstów";
         SetStatus(warning is not null
             ? "⚠ " + warning
             : $"Ustawienia zapisane (dostawca: {CurrentProviderInfo.DisplayName}{profileInfo}).");

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>GameTranslatorOverlay.CorpusTool</AssemblyName>
+    <RootNamespace>GameTranslatorOverlay.CorpusTool</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GameTranslatorOverlay.Core\GameTranslatorOverlay.Core.csproj" />
+    <ProjectReference Include="..\..\src\GameTranslatorOverlay.Infrastructure\GameTranslatorOverlay.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\profiles\**\*.json" Link="profiles\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\glossaries\**\*.json" Link="glossaries\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="GameTranslatorOverlay.CorpusTool.Tests" />
+  </ItemGroup>
+
+</Project>

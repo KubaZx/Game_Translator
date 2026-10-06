@@ -19,9 +19,13 @@ src/
 tests/
   GameTranslatorOverlay.Core.Tests            (xUnit)
   GameTranslatorOverlay.Infrastructure.Tests  (xUnit)
+  GameTranslatorOverlay.CorpusTool.Tests      (xUnit, dane syntetyczne)
 tools/
   LiveDiag, SceneReplay, OcrLab, SmokeTest    (diagnostyka na Windows)
   GameTranslatorOverlay.ProviderEval          (konsola net10.0: porównanie dostawców na korpusie EN→PL)
+  GameTranslatorOverlay.CorpusTool            (konsola net10.0, ADR-014: extract — korpus z plików gry;
+                                               translate — tłumaczenie korpusu do cache z profilem)
+  GameTranslatorOverlay.CorpusEval            (Windows: pomiary przyciągania OCR do korpusu)
 benchmarks/
   GameTranslatorOverlay.Benchmarks            (BenchmarkDotNet, poza dotnet test; docs/BENCHMARKS.md)
 ```
@@ -50,9 +54,17 @@ Zawartość:
   limity (miesięczny, znaków na sesję), tryb Cache-only.
 - **Jakość i kontekst tłumaczeń** (`Translation/`): `TranslationQualityGate` (pusty wynik,
   liczby, brak tłumaczenia, „rozgadany” wynik), `TranslationCacheContext` (znacznik wpisu cache:
-  `reflow-1`, `qa=…`, `qa-final`, `pg=f/m`), `DialogMemory` (ostatnie linie i pary
+  `reflow-1`, `qa=…`, `qa-final`, `pg=f/m`, `src=corpus`), `DialogMemory` (ostatnie linie i pary
   źródło → tłumaczenie, tylko w RAM), `PlayerGender` z `IGenderAwareTranslationProvider`
   oraz `IRetryableTranslationProvider`. Szczegóły: [API_PROVIDERS.md](API_PROVIDERS.md).
+- **Jednostki tłumaczenia i korpus** (`Translation/TranslationUnits.cs`, `Corpus/`): gdy pipeline
+  ma `CorpusSnapper` aktywnego profilu albo `SplitParagraphs`, `TranslationUnitPlanner` dzieli blok
+  OCR na jednostki — tekst kanoniczny korpusu (klucz cache `CorpusTranslationKey`), akapit odczytu
+  albo tekst dosłowny (prefiks mówcy, klawisz, śmieciowy akapit). Słownik, cache i dostawca działają
+  na jednostkach; blok jest składany z powrotem w układzie wierszy z ekranu (`TextReflow`).
+  Ręczna korekta, słownik i stary wpis całego odczytu są sprawdzane przed/po jednostkach
+  (korekta > słownik > jednostki z cache > stary wpis całego odczytu > dostawca). Bez korpusu
+  i bez `SplitParagraphs` pipeline działa jak wcześniej (ta sama ścieżka kodu).
 - **Słownik** (`Glossary/`): `GlossaryPrecedence` — jedna reguła pierwszeństwa dla tłumaczenia
   lokalnego i glosariusza DeepL; `PersistableTerms` — terminy, które mogą trafić do trwałego
   glosariusza (bez terminów prywatnych i `scope: label`).
@@ -81,6 +93,8 @@ Implementacje kontraktów z Core, które wymagają świata zewnętrznego, ale ni
   Szczegóły: [API_PROVIDERS.md](API_PROVIDERS.md).
 - **Klucze API**: Windows DPAPI (`ProtectedData`, zakres CurrentUser), osobny sekret na
   dostawcę, zapis w `%LOCALAPPDATA%\GameTranslatorOverlay`.
+- **Korpus gry**: `CorpusCatalog` czyta `<folder danych>\corpus\<profil>.corpus.jsonl` (dane z
+  narzędzia ADR-014, nigdy pliki gry) i trzyma indeks ostatnio użytego profilu do zmiany pliku.
 - **Pliki**: odczyt/zapis profili gier i słowników (JSON, schematy w rozdz. 7),
   `settings.json`. `AppSettings.PipelineSnapshot()` to ustawienia bez pól samego wyglądu
   (czcionka, tło, tryby wyświetlania, skróty, komunikaty, ostatnia gra) — orchestrator

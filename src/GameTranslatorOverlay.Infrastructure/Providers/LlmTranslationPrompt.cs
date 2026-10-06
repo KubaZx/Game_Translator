@@ -49,6 +49,11 @@ public static partial class LlmTranslationPrompt
         builder.AppendLine("\"previous\", when present, lists earlier lines from the same game with the translations you already");
         builder.AppendLine("produced for them. Use them only as context: keep the gender you chose for the speaker and the addressee,");
         builder.AppendLine("the form of address and the spelling of names consistent with them. Never translate or return them.");
+        if (context.TextNotes.Any(static note => !string.IsNullOrWhiteSpace(note)))
+        {
+            builder.AppendLine("\"notes\", when present, has one entry per input string, in the same order: where the string appears");
+            builder.AppendLine("or who says it (speaker, interface key, context). Use the notes only as context. Never translate or return them.");
+        }
         builder.AppendLine();
         builder.AppendLine("Rules:");
         builder.AppendLine($"- Return exactly one {target} translation per input string, in the same order.");
@@ -77,6 +82,12 @@ public static partial class LlmTranslationPrompt
             builder.AppendLine($"Game: {context.GameName.Trim()}");
         }
 
+        if (!string.IsNullOrWhiteSpace(context.Scene))
+        {
+            if (string.IsNullOrWhiteSpace(context.GameName)) builder.AppendLine();
+            builder.AppendLine($"Scene: {OneLine(context.Scene)}");
+        }
+
         if (context.Terms.Count > 0)
         {
             builder.AppendLine();
@@ -103,13 +114,34 @@ public static partial class LlmTranslationPrompt
     /// Tłumaczenie pary to surowy wynik modelu — tekst, który ten dostawca już widział.
     /// </summary>
     public static string BuildUserMessage(IReadOnlyList<string> texts, IReadOnlyList<RecentExchange>? previous = null) =>
-        $"Translate these {texts.Count} strings:\n" + (previous is { Count: > 0 }
+        BuildUserMessage(texts, previous, notes: null);
+
+    public static string BuildUserMessage(
+        IReadOnlyList<string> texts, IReadOnlyList<RecentExchange>? previous, IReadOnlyList<string?>? notes)
+    {
+        var header = $"Translate these {texts.Count} strings:\n";
+        var hasNotes = notes is not null && notes.Count == texts.Count && notes.Any(static note => !string.IsNullOrWhiteSpace(note));
+        if (!hasNotes)
+        {
+            return header + (previous is { Count: > 0 }
+                ? JsonSerializer.Serialize(new
+                {
+                    previous = previous.Select(static pair => new { source = pair.Source, translation = pair.Translation }),
+                    texts,
+                }, JsonOptions)
+                : JsonSerializer.Serialize(new { texts }, JsonOptions));
+        }
+
+        var cleanNotes = notes!.Select(static note => string.IsNullOrWhiteSpace(note) ? string.Empty : OneLine(note)).ToList();
+        return header + (previous is { Count: > 0 }
             ? JsonSerializer.Serialize(new
             {
                 previous = previous.Select(static pair => new { source = pair.Source, translation = pair.Translation }),
                 texts,
+                notes = cleanNotes,
             }, JsonOptions)
-            : JsonSerializer.Serialize(new { texts }, JsonOptions));
+            : JsonSerializer.Serialize(new { texts, notes = cleanNotes }, JsonOptions));
+    }
 
     /// <summary>
     /// Czyta listę tłumaczeń z odpowiedzi modelu. Toleruje otoczkę ```json, blok &lt;think&gt;

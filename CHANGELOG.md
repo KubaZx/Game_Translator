@@ -33,6 +33,77 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
   pokazują, że napis jest w polu. Poprawiony odczyt z jedną inną literą podmienia tłumaczenie
   w jednej aktualizacji — bez ok. 1 s przerwy na czas tłumaczenia.
 
+### Korpus tekstów gry (ADR-014)
+
+- **Nowe narzędzie offline `CorpusTool`** (`tools/GameTranslatorOverlay.CorpusTool`, poza
+  paczką aplikacji): `extract --profile <id> --game-dir <folder>` czyta teksty dla gracza
+  z plików zainstalowanej gry i zapisuje lokalny korpus JSONL (klucz, tekst EN, kontekst,
+  rodzaj ui/dialog/subtitle, mówca, węzeł dialogu, kolejność, czas napisu) w
+  `%LOCALAPPDATA%\GameTranslatorOverlay\corpus` albo pod ścieżką z `--out` / `--data-dir`.
+  Wyłącznie do odczytu i bez sieci; odmawia pracy, gdy gra działa, ma anti-cheat
+  (EasyAntiCheat, BattlEye), podpisane lub zaszyfrowane kontenery, jest oznaczona jako online
+  albo jest na liście wykluczeń (Path of Exile 1/2), i nie zapisuje niczego w folderze gry ani
+  w repozytorium. Obsługiwana rodzina formatów: Unity TextAsset (kontener UnityFS z blokami LZ4
+  albo luźny plik serializowany). Nakładka nadal nie czyta plików gry. Opis:
+  [README narzędzia](tools/GameTranslatorOverlay.CorpusTool/README.md).
+- **Profil Escape Academy** (`profiles/escape-academy`): rozpoznaje grę po procesie i tytule
+  okna (bez zmiany ustawień OCR) i zawiera receptę korpusu dla narzędzia. Aplikacja włącza go
+  automatycznie, gdy żaden profil nie jest wybrany — nowe wpisy cache z tej gry dostają profil
+  `escape-academy` (dotychczasowe wpisy bez profilu nadal są czytane), a modele językowe
+  dostają nazwę gry w kontekście.
+- Profile gier mogą mieć opcjonalne sekcje `corpus` (recepta: kontener, plik, źródła z wzorcami
+  nazw i parserami `csv` / `srt`) i `online`; stare profile działają bez zmian.
+- **Tłumaczenie korpusu z wyprzedzeniem:** `CorpusTool translate --profile <id> --provider
+  deepl|llm|mock` tłumaczy korpus partiami (DeepL do 50, model językowy do 25 tekstów) z opisem
+  sceny, mówcą, kluczem i kolumną kontekstu, w kolejności linii dialogu, z kontrolą jakości jak
+  w aplikacji, i zapisuje wynik do lokalnej bazy tłumaczeń z profilem gry i znacznikiem
+  `src=corpus`. Aplikacja z aktywnym profilem czyta te wpisy jak każdy inny wpis cache. Ręczne
+  korekty, wpisy zatwierdzone i terminy słownika nie są nadpisywane; ponowne uruchomienie
+  dokańcza przerwany przebieg, a partia z nieczytelną odpowiedzią albo odmową filtra jest dzielona
+  na połowy (przepadają tylko teksty nie do przetłumaczenia). Tryb prywatny = odmowa zapisu. `--dry-run` podaje liczbę tekstów,
+  znaków i szacunek kosztu (Escape Academy: 7 632 teksty, 248 979 znaków; DeepSeek bez myślenia
+  ok. 0,12–0,24 USD, DeepL ok. 50% miesięcznego limitu API Free). Klucze wyłącznie ze zmiennych
+  środowiskowych.
+- **Dopasowanie do korpusu w trybie live i przy tłumaczeniu regionu.** Gdy aktywny profil ma
+  lokalny korpus (`<folder danych>\corpus\<id>.corpus.jsonl` z `CorpusTool extract`), aplikacja
+  wczytuje go przy przebudowie pipeline'u (wyłącznie ten plik danych, nigdy pliki gry)
+  i przyciąga odczyt OCR do znanego tekstu gry: cały blok, akapit, wiersz albo część wiersza.
+  Tłumaczenie jest szukane w cache pod tekstem z korpusu, więc trafiają wpisy
+  z `CorpusTool translate`, a różne odczyty tego samego zdania (inne zawinięcie, wielkość liter,
+  błędy OCR typu „Itls”, „11m”, ucięty koniec) dzielą jeden wpis i jedno zapytanie. Nakładka
+  pokazuje tłumaczenie w układzie wierszy z ekranu; imię mówcy, klawisz obok etykiety
+  („E Inspect” → „E Zbadaj”) i śmieciowy akapit zostają bez zmian; napis WIELKIMI LITERAMI
+  dostaje tłumaczenie wielkimi literami. Nieznana część bloku idzie do dostawcy sama, osobnymi
+  akapitami. Priorytet bez zmian: ręczna korekta (także całego bloku) > słownik > cache >
+  dostawca; dawny wpis całego odczytu jest zapasem, gdy części nie są znane (bez ponownej
+  płatności). Teksty z podstawieniem (`{0}`, `%d`) i ze znacznikiem przycisku, którego nie ma
+  na ekranie, nie są przyciągane. Przyciąganie działa tylko w obrębie aktywnego profilu, także
+  w Cache-only i w trybie prywatnym (w pamięci). Bez pliku korpusu aplikacja działa dokładnie jak
+  dotąd. Powtórka 242 bloków Escape Academy z kopii cache (Mock, korpus przetłumaczony
+  z wyprzedzeniem): lokalnie 60,4% znaków i 49,6% bloków zamiast 0,3% i 0,4%, zapytania do
+  dostawcy 241 → 122, znaki 4 214 → 1 678 —
+  [ROADMAP.md → Runda 2026-10-06 (3)](docs/ROADMAP.md).
+- Dokładny tekst korpusu aktywnego profilu (co najmniej 2 litery) przechodzi przez filtr śmieci
+  OCR, który odrzuciłby go jako zbyt krótki albo nietypowy (Escape Academy: 14 takich tekstów).
+- Literalne `\n` w tekstach korpusu (102 teksty interfejsu Escape Academy) jest nowym wierszem
+  także w kluczu cache `CorpusTool translate` — wpisy przetłumaczone wcześniej pod starym
+  kluczem tych tekstów nie będą czytane (przebiegu u prawdziwego dostawcy jeszcze nie było).
+- Opcjonalne ustawienie `paragraphCacheKeys` w `settings.json` (domyślnie wyłączone): klucze
+  cache po akapitach także bez korpusu, w każdej grze — ten sam akapit w innym bloku nie jest
+  płacony drugi raz (powtórka sesji PoE2: 21,3% znaków lokalnie zamiast 0%, zapytania 247 → 218).
+
+### Modele językowe
+
+- **Opcje serwera LLM przypisane do adresu** (ADR-013, dopisek 2026-10-06): ustawienie
+  `llmServerOptions` dodaje do zapytania `thinking`, `reasoning_effort`, `max_tokens`
+  i `response_format` — tylko dla serwera, dla którego je zapisano; bez ustawienia zapytanie
+  jest identyczne jak dotąd. Nowy gotowy serwer **DeepSeek** (`https://api.deepseek.com/v1`,
+  model `deepseek-flash`, myślenie wyłączone — bez tego model zawsze myślał: paczka 5 linii
+  trwała 7–20 s), a **Ollama** dostaje `reasoning_effort: none`. Status klucza i test połączenia
+  pokazują aktywne opcje.
+- Zużycie tokenów z odpowiedzi serwera (wejście, w tym z cache, wyjście, w tym rozumowanie)
+  trafia do logu jako same liczby, bez treści.
+
 ### Wydajność
 
 Oszczędności rzędu mikrosekund na klatkę — mniej pracy procesora w trakcie gry, nie krótszy
@@ -55,6 +126,38 @@ czas tłumaczenia (ten wyznaczają OCR i dostawca). Liczby przed/po:
 
 ### Dla deweloperów
 
+- **Core: przyciąganie odczytu OCR do korpusu gry** (`GameTranslatorOverlay.Core.Corpus`):
+  `CorpusIndex` (trigramy po tekście bez wielkości liter) i `CorpusSnapper` dopasowują cały
+  blok, akapity po `TextReflow.Unwrap` i pojedyncze wiersze (dokładnie, przybliżenie albo
+  fragment; składanie fragmentów z kolejnych wierszy). Zabezpieczenia: liczby 1:1, minimalna
+  długość przybliżeń, odstęp do drugiego kandydata, krótkie etykiety tylko dokładnie. Wpięte
+  w pipeline przez `TranslationUnitPlanner` (patrz wyżej). Pomiar na Escape Academy: 59,4% znaków z prawdziwych sesji obsłużonych
+  lokalnie (dziś 17,0%), 0,14% błędnych przyciągnięć na 880 próbkach przez Windows OCR, p95
+  0,9 ms (150 tys. tekstów: 4,8 ms) — [ROADMAP.md → Runda 2026-10-06](docs/ROADMAP.md).
+- **CorpusEval** (`tools/GameTranslatorOverlay.CorpusEval`, Windows): prawda syntetyczna przez
+  Windows OCR, przegląd progów na kopii cache i czasy dopasowania; do katalogu wyników trafiają
+  same liczby. Nowy projekt testów `tests/GameTranslatorOverlay.CorpusTool.Tests` (85 testów na
+  danych syntetycznych) i 70 nowych testów Core. Polecenie `replay` powtarza bloki z kopii cache
+  przez prawdziwy `TranslationPipeline` z Mockiem (bez korpusu, klucze po akapitach, korpus na
+  pustym cache, korpus na bazie z `translate`).
+- **Pipeline z jednostkami tłumaczenia:** `TranslationPipelineOptions.Corpus` i `SplitParagraphs`,
+  `TranslationOutcome.Parts` (części bloku: tekst z ekranu, klucz cache, pochodzenie, korpus)
+  i `CacheKey` (klucz, pod którym orkiestrator zapisuje ręczną korektę bloku będącego jednym
+  tekstem korpusu), `TranslationPipeline.IsExactCorpusText`, `CorpusCatalog` i
+  `AppPaths.CorpusDirectory` (Infrastructure). Testy: Core +30, Infrastructure +6 (dane
+  syntetyczne).
+- **ProviderEval:** opcje `--llm-thinking`, `--llm-effort`, `--llm-max-tokens`, `--llm-json`
+  i `--llm-no-preset` (pola zapytania serwera LLM bez zmiennych globalnych); po przebiegu suma
+  tokenów z `usage`. `EnvironmentTranslationProviders` (Infrastructure) buduje dostawców
+  z kluczami ze zmiennych środowiskowych dla narzędzi.
+- **Kontekst partii dla dostawców:** `TranslationContext.Scene` i `TextNotes` (opis sceny
+  i notatka do każdego tekstu — wiadomość modelu dostaje `"notes"`, DeepL scenę w `context`);
+  pipeline na żywo ich nie ustawia. `SqliteTranslationCache.PeekManyAsync` (odczyt bez liczników
+  użycia, połączenie tylko do odczytu) i `StoreManyAsync` (zapis partii w transakcji, bez
+  nadpisywania korekt i wpisów zatwierdzonych). `TranslationCacheContext` czyta i składa część
+  `src=…`; `CorpusTranslationKey` liczy klucz cache wpisu korpusu. Testy: Core +15,
+  Infrastructure +28, CorpusTool +62 (dostawcy przez atrapę HTTP, baza SQLite w katalogu
+  tymczasowym).
 - **SceneReplay: scenariusze starego napisu** (`stale-junk`, `stale-junk-ghost`, `stale-texture`,
   `stale-newtext`, `stale-busy`) do zgłoszenia „tłumaczenie Inspect/Zbadaj zostaje po zniknięciu
   etykiety”. Etykieta znika lokalnie (5% okna, bez cięcia sceny) w oknie 1500×900 fizycznych

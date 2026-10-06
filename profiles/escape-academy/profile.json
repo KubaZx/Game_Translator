@@ -1,0 +1,48 @@
+{
+  "id": "escape-academy",
+  "name": "Escape Academy",
+  "profileVersion": 1,
+  "author": "GameTranslatorOverlay",
+  "description": "Profil gry Escape Academy (Coin Crew Games). Dopasowuje okno gry po nazwie procesu i tytule okna; parametry OCR i wykrywania zmian zostają z ustawień aplikacji. Sekcja corpus to recepta dla narzędzia offline CorpusTool (ADR-014): które TextAssety z data.unity3d są tekstem dla gracza — tabele GameplayStrings (klucz, tekst EN, kontekst), angielskie tabele dialogów Yarn (sufiks en-US) i angielskie napisy SRT z mówcą. Aplikacja tej sekcji nie czyta i sama nie otwiera plików gry.",
+  "processNames": ["Escape Academy.exe"],
+  "windowTitles": ["Escape Academy"],
+  "sourceLanguage": "en",
+  "online": false,
+  "corpus": {
+    "format": "unity-textasset",
+    "container": "Escape Academy_Data/data.unity3d",
+    "file": "resources.assets",
+    "sources": [
+      {
+        "id": "gameplay-strings",
+        "parser": "csv",
+        "kind": "ui",
+        "include": ["GameplayStrings*"],
+        "keyColumn": "Key",
+        "textColumn": "Value-En",
+        "contextColumns": ["Area", "Context", "Loc Context"]
+      },
+      {
+        "id": "yarn-dialog",
+        "parser": "csv",
+        "kind": "dialog",
+        "include": ["* (en-US)"],
+        "keyColumn": "id",
+        "textColumn": "text",
+        "nodeColumns": ["file", "node"],
+        "orderColumn": "lineNumber",
+        "speakerPattern": "^(?<speaker>[^:\\r\\n]{0,40}):\\s*"
+      },
+      {
+        "id": "subtitles",
+        "parser": "srt",
+        "kind": "subtitle",
+        "include": ["*"],
+        "exclude": ["*_fr", "*_de", "*_es"],
+        "speakerPattern": "^\\[(?<speaker>[^\\]\\r\\n]{1,40})\\]\\s*",
+        "inheritSpeaker": true
+      }
+    ]
+  },
+  "minAppVersion": "0.1.0"
+}

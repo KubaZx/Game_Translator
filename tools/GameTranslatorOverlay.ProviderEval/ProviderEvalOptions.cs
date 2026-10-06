@@ -1,4 +1,5 @@
 using System.Globalization;
+using GameTranslatorOverlay.Infrastructure.Providers;
 
 namespace GameTranslatorOverlay.ProviderEval;
 
@@ -14,6 +15,23 @@ internal sealed record ProviderEvalOptions(
     bool DeepLGlossary,
     bool Help)
 {
+    public string? LlmThinking { get; init; }
+    public string? LlmReasoningEffort { get; init; }
+    public int? LlmMaxTokens { get; init; }
+    public bool LlmJson { get; init; }
+    public bool LlmPreset { get; init; } = true;
+
+    public LlmServerOptions? LlmServerOptions =>
+        LlmThinking is null && LlmReasoningEffort is null && LlmMaxTokens is null && !LlmJson
+            ? null
+            : new LlmServerOptions
+            {
+                Thinking = LlmThinking,
+                ReasoningEffort = LlmReasoningEffort,
+                MaxTokens = LlmMaxTokens,
+                ResponseFormat = LlmJson ? "json_object" : null,
+            };
+
     public static readonly IReadOnlyList<string> KnownProviders = ["mock", "deepl", "azure", "google", "claude", "llm"];
 
     public const string DefaultCorpus = "eval/en-pl.sample.jsonl";
@@ -25,7 +43,9 @@ internal sealed record ProviderEvalOptions(
         string? variant = null, glossary = null, game = null;
         int? limit = null;
         var providers = new List<string> { "mock" };
-        bool deepLGlossary = true, help = false;
+        bool deepLGlossary = true, help = false, llmJson = false, llmPreset = true;
+        string? llmThinking = null, llmEffort = null;
+        int? llmMaxTokens = null;
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
         for (var i = 0; i < args.Length; i++)
@@ -46,6 +66,15 @@ internal sealed record ProviderEvalOptions(
                 case "--glossary": glossary = Value(); break;
                 case "--game": game = Value().Trim(); break;
                 case "--no-deepl-glossary": deepLGlossary = false; break;
+                case "--llm-thinking": llmThinking = ServerValue(arg, Value()); break;
+                case "--llm-effort": llmEffort = ServerValue(arg, Value()); break;
+                case "--llm-json": llmJson = true; break;
+                case "--llm-no-preset": llmPreset = false; break;
+                case "--llm-max-tokens":
+                    if (!int.TryParse(Value(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxTokens) || maxTokens < 1)
+                        throw new ArgumentException("--llm-max-tokens wymaga liczby całkowitej ≥ 1.");
+                    llmMaxTokens = maxTokens;
+                    break;
                 case "--limit":
                     if (!int.TryParse(Value(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed < 1)
                         throw new ArgumentException("--limit wymaga liczby całkowitej ≥ 1.");
@@ -64,6 +93,18 @@ internal sealed record ProviderEvalOptions(
             }
         }
 
-        return new ProviderEvalOptions(corpus, providers, output, limit, variant, glossary, game, deepLGlossary, help);
+        return new ProviderEvalOptions(corpus, providers, output, limit, variant, glossary, game, deepLGlossary, help)
+        {
+            LlmThinking = llmThinking,
+            LlmReasoningEffort = llmEffort,
+            LlmMaxTokens = llmMaxTokens,
+            LlmJson = llmJson,
+            LlmPreset = llmPreset,
+        };
     }
+
+    private static string ServerValue(string option, string value) =>
+        LlmServerOptions.IsValidValue(value)
+            ? value.Trim()
+            : throw new ArgumentException($"{option}: dozwolone litery, cyfry, „_”, „-”, „.” (do {LlmServerOptions.MaxValueLength} znaków).");
 }

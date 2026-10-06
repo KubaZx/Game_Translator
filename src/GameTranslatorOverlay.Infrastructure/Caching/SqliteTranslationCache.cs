@@ -291,22 +291,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
         using (var reader = command.ExecuteReader())
         {
             if (!reader.Read()) return null;
-
-            result = new CachedTranslation(
-                Id: reader.GetInt64(0),
-                SourceText: reader.GetString(1),
-                NormalizedText: reader.GetString(2),
-                TranslatedText: reader.GetString(3),
-                Provider: reader.GetString(4),
-                GameProfile: reader.GetString(5),
-                IsManual: reader.GetInt64(6) != 0,
-                IsApproved: reader.GetInt64(7) != 0,
-                CreatedAt: ParseTimestamp(reader.GetString(8)),
-                LastUsedAt: ParseTimestamp(reader.GetString(9)),
-                UseCount: reader.GetInt64(10))
-            {
-                Context = reader.IsDBNull(11) ? null : reader.GetString(11),
-            };
+            result = ReadLookupRow(reader);
         }
 
         // Liczniki niezapisane jeszcze w bazie wliczamy do zwracanej wartości.
@@ -321,6 +306,90 @@ public sealed class SqliteTranslationCache : ITranslationCache
             }
         }
         return RecordUse(entry);
+    }
+
+    private static CachedTranslation ReadLookupRow(SqliteDataReader reader) =>
+        new(
+            Id: reader.GetInt64(0),
+            SourceText: reader.GetString(1),
+            NormalizedText: reader.GetString(2),
+            TranslatedText: reader.GetString(3),
+            Provider: reader.GetString(4),
+            GameProfile: reader.GetString(5),
+            IsManual: reader.GetInt64(6) != 0,
+            IsApproved: reader.GetInt64(7) != 0,
+            CreatedAt: ParseTimestamp(reader.GetString(8)),
+            LastUsedAt: ParseTimestamp(reader.GetString(9)),
+            UseCount: reader.GetInt64(10))
+        {
+            Context = reader.IsDBNull(11) ? null : reader.GetString(11),
+        };
+
+    public Task<IReadOnlyList<CachedTranslation?>> PeekManyAsync(
+        IReadOnlyList<string> normalizedTexts, string sourceLanguage, string targetLanguage,
+        string gameProfile, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.Run<IReadOnlyList<CachedTranslation?>>(() =>
+        {
+            var results = new CachedTranslation?[normalizedTexts.Count];
+            if (results.Length == 0 || !File.Exists(_databasePath)) return results;
+            var readOnly = new SqliteConnectionStringBuilder
+            {
+                DataSource = _databasePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false,
+            }.ToString();
+            try
+            {
+                using var connection = new SqliteConnection(readOnly);
+                connection.Open();
+                using (var probe = connection.CreateCommand())
+                {
+                    probe.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'translations';";
+                    if (Convert.ToInt64(probe.ExecuteScalar(), CultureInfo.InvariantCulture) == 0) return results;
+                }
+                using var command = CreateLookupCommand(connection);
+                command.Parameters["$src"].Value = sourceLanguage;
+                command.Parameters["$tgt"].Value = targetLanguage;
+                command.Parameters["$profile"].Value = gameProfile;
+                for (var i = 0; i < results.Length; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    command.Parameters["$hash"].Value = TextHasher.Sha256Hex(normalizedTexts[i]);
+                    using var reader = command.ExecuteReader();
+                    if (reader.Read()) results[i] = ReadLookupRow(reader);
+                }
+                return results;
+            }
+            catch (SqliteException ex)
+            {
+                throw new CacheStorageException($"Nie udało się odczytać bazy cache ({_databasePath}) w trybie tylko do odczytu.", ex);
+            }
+        }, cancellationToken);
+    }
+
+    public Task<int> StoreManyAsync(IReadOnlyList<NewCacheEntry> entries, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (entries.Count == 0) return Task.FromResult(0);
+        return Task.Run(() =>
+        {
+            Initialize();
+            using var connection = OpenConnection();
+            TryFlushUsage(connection);
+            var written = 0;
+            using (var transaction = connection.BeginTransaction())
+            {
+                foreach (var entry in entries)
+                {
+                    written += UpsertEntry(connection, entry, manualOverwrite: false, transaction, keepApproved: true);
+                }
+                transaction.Commit();
+            }
+            foreach (var entry in entries) ForgetMemory(entry);
+            return written;
+        }, cancellationToken);
     }
 
     private CachedTranslation RecordUse(MemoEntry entry)
@@ -492,7 +561,9 @@ public sealed class SqliteTranslationCache : ITranslationCache
         }, cancellationToken);
     }
 
-    private static void UpsertEntry(SqliteConnection connection, NewCacheEntry entry, bool manualOverwrite, SqliteTransaction? transaction = null)
+    private static int UpsertEntry(
+        SqliteConnection connection, NewCacheEntry entry, bool manualOverwrite, SqliteTransaction? transaction = null,
+        bool keepApproved = false)
     {
         var now = FormatTimestamp(DateTimeOffset.UtcNow);
         using var command = connection.CreateCommand();
@@ -511,7 +582,9 @@ public sealed class SqliteTranslationCache : ITranslationCache
                 is_manual = excluded.is_manual,
                 is_approved = excluded.is_approved,
                 last_used_at = excluded.last_used_at
-            {(manualOverwrite ? string.Empty : "WHERE translations.is_manual = 0")};
+            {(manualOverwrite ? string.Empty : keepApproved
+                ? "WHERE translations.is_manual = 0 AND translations.is_approved = 0"
+                : "WHERE translations.is_manual = 0")};
             """;
         command.Parameters.AddWithValue("$hash", TextHasher.Sha256Hex(entry.NormalizedText));
         command.Parameters.AddWithValue("$source", entry.SourceText);
@@ -525,7 +598,7 @@ public sealed class SqliteTranslationCache : ITranslationCache
         command.Parameters.AddWithValue("$manual", entry.IsManual ? 1 : 0);
         command.Parameters.AddWithValue("$approved", entry.IsApproved ? 1 : 0);
         command.Parameters.AddWithValue("$now", now);
-        command.ExecuteNonQuery();
+        return command.ExecuteNonQuery();
     }
 
     public Task<CacheStats> GetStatsAsync(CancellationToken cancellationToken = default)

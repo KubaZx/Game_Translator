@@ -17,6 +17,11 @@ internal static class Program
           --glossary PLIK      Dodatkowy słownik JSON (format glossaries/*.json).
           --game NAZWA         Nazwa gry przekazywana dostawcom kontekstowym (LLM, Claude).
           --no-deepl-glossary  DeepL bez glosariusza (nic nie powstaje na koncie DeepL).
+          --llm-thinking TYP   Pole thinking {"type": TYP} dla serwera LLM (np. disabled, enabled).
+          --llm-effort POZIOM  Pole reasoning_effort (np. none, low, medium, high).
+          --llm-max-tokens N   Pole max_tokens.
+          --llm-json           Pole response_format {"type": "json_object"}.
+          --llm-no-preset      Bez domyślnych opcji serwera z presetu (DeepSeek: thinking disabled, Ollama: reasoning_effort none).
           --help               Tylko pomoc.
         Klucze wyłącznie ze zmiennych środowiskowych: GTO_DEEPL_KEY, GTO_AZURE_KEY (+ GTO_AZURE_REGION),
         GTO_GOOGLE_KEY, ANTHROPIC_API_KEY (+ GTO_CLAUDE_MODEL), GTO_LLM_ENDPOINT + GTO_LLM_MODEL (+ GTO_LLM_KEY).
@@ -68,7 +73,7 @@ internal static class Program
                     var client = ProviderHttpClientFactory.Create();
                     ownedClients.Add(client);
                     return client;
-                }, options.DeepLGlossary);
+                }, options.DeepLGlossary, options.LlmServerOptions, options.LlmPreset);
 
                 if (provider is null)
                 {
@@ -91,6 +96,12 @@ internal static class Program
                 }, progress, cts.Token);
                 runs.Add(run);
                 Console.WriteLine($" chrF {EvalReport.FormatScore(run.CorpusChrF)}, przetłumaczono {run.TranslatedCount}/{run.Lines.Count}.");
+                if (provider is OpenAiCompatibleTranslationProvider llm)
+                {
+                    var serverOptions = llm.ActiveServerOptions();
+                    Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                        $"  opcje serwera: {serverOptions?.Describe() ?? "brak"}; zapytania {llm.Usage.Requests}, tokeny wejścia {llm.Usage.PromptTokens} (z cache {llm.Usage.CachedPromptTokens}), wyjścia {llm.Usage.CompletionTokens} (rozumowanie {llm.Usage.ReasoningTokens})"));
+                }
             }
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)

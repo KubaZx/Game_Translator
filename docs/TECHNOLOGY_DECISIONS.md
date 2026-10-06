@@ -281,6 +281,26 @@ zakres produktu; **zatwierdzona przez właściciela projektu 2026-09-29**.
 - **Słowniki DeepL (glossary API)** — wymagają zarządzania słownikami po stronie DeepL;
   możliwe w przyszłości; kontekst dla modeli językowych nie wymaga stanu na serwerze.
 
+**Dopisek 2026-10-06 — opcjonalne pola zapytania przypisane do serwera.** Pomiar z 2026-10-05
+(`GTO Diagnostics/20261005-natywne-spolszczenie`) pokazał, że przy minimalnym zestawie pól
+DeepSeek V4.1 Flash (`deepseek-flash`) zawsze myśli: mediana 0,96 s na linię, paczka 5 linii
+7–20 s; z myśleniem wyłączonym mediana 0,71 s. Dlatego zasada „tylko `model` i `messages`”
+zostaje **domyślna**, ale serwer może dostać cztery opcjonalne pola: `thinking {type}`,
+`reasoning_effort`, `max_tokens` i `response_format {type}`. Pola są w ustawieniu
+`llmServerOptions` z hostem (`host[:port]`, jak `llmKeyHost`) i trafiają do zapytania
+**wyłącznie** pod ten host — po zmianie adresu na inny serwer zapytanie jest takie jak dotąd
+(test kontraktu porównuje treść zapytania bez opcji z dotychczasowym kształtem). Wartości są
+krótkimi słowami (litery, cyfry, `_`, `-`, `.`); inne są pomijane. Gotowe ustawienia
+(`TranslationProviderCatalog.LlmPresets`): **DeepSeek** — `https://api.deepseek.com/v1`,
+model `deepseek-flash`, `thinking: disabled`; **Ollama** — `reasoning_effort: none`; OpenAI
+i LM Studio bez pól. Adapter czyta też `usage` odpowiedzi (tokeny wejścia, wyjścia,
+rozumowania i trafienia cache prefiksu) do logu — same liczby, bez treści. Łatka pomiarowa
+oparta na globalnych zmiennych środowiskowych `GTO_LLM_*` nie weszła do kodu; narzędzia
+deweloperskie (ProviderEval, CorpusTool) przyjmują te pola jako opcje wiersza poleceń.
+Odrzucone: zmienne środowiskowe w aplikacji (globalne dla każdego serwera i niewidoczne
+w ustawieniach). Poza zakresem: `temperature` (modele rozumujące części dostawców odrzucają je
+błędem 400, a tłumaczenie go nie wymagało).
+
 ## ADR-014: Odczyt tekstów z plików gry przez osobne narzędzie offline (2026-10-05)
 
 **Kontekst.** Badanie z 2026-10-05 (`GTO Diagnostics/20261005-natywne-spolszczenie`) zmierzyło,
@@ -334,3 +354,20 @@ DeepSeek przechowuje dane w ChRL. Do API trafia wyłącznie tekst, nigdy obraz.
 - **Dodatki w procesie gry (BepInEx, UE4SS)** — wstrzykiwanie DLL (zakaz).
 
 **Zatwierdzona przez właściciela projektu 2026-10-05.**
+
+**Dopisek 2026-10-06 — tłumaczenie korpusu z wyprzedzeniem (`CorpusTool translate`).** Jedyny
+ruch sieciowy narzędzia (pkt 5) to jawne polecenie `translate --provider deepl|llm` u dostawcy
+wybranego przez użytkownika; `extract` i kod czytników nie odwołują się do sieci ani do
+dostawców (test na źródłach), a dostawcy powstają w `Infrastructure` z kluczami wyłącznie ze
+zmiennych środowiskowych (`GTO_DEEPL_KEY`, `GTO_LLM_*`), nigdy z DPAPI użytkownika. Wpisy
+trafiają do `cache.db` z profilem gry, prawdziwą nazwą dostawcy i znacznikiem `src=corpus`
+w kolumnie `context`; ręczne korekty, wpisy zatwierdzone i terminy słownika nie są nadpisywane.
+Pkt 7 jest egzekwowany: włączony tryb prywatny w `settings.json` (albo nieczytelny plik
+ustawień) = odmowa zapisu, zanim cokolwiek zostanie wysłane. Baza nie może leżeć
+w repozytorium (poza `eval/private/`), a Mock zapisuje wyłącznie do jawnie wskazanej bazy.
+
+**Dopisek 2026-10-06 (2) — korpus w nakładce.** Nakładka czyta wyłącznie plik
+`<folder danych>\corpus\<id aktywnego profilu>.corpus.jsonl` (dane z `extract`), nigdy pliki gry,
+i tylko do dopasowania odczytu OCR do znanego tekstu oraz klucza cache. Bez aktywnego profilu albo
+bez pliku zachowanie jest takie jak przed tą decyzją. Do dostawcy może trafić tekst z korpusu
+zamiast odczytu z błędami OCR — ten sam tekst, który jest na ekranie.

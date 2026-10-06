@@ -221,6 +221,79 @@ i dokładniej dopasowuje pozycję. Na wzorzystym tle albo przy niepewnym OCR sta
 napis może być chwilowo podtrzymany. Te mechanizmy ograniczają błędy, ale nie
 zapewniają jednakowego czasu i wyglądu w każdej grze.
 
+## Spolszczenie z wyprzedzeniem (korpus gry)
+
+Dla gier offline, których teksty da się bezpiecznie odczytać z plików (dziś: **Escape
+Academy**), możesz raz przygotować lokalny **korpus** — listę angielskich tekstów gry — i od razu
+przetłumaczyć go w całości. W trakcie gry nakładka rozpoznaje wtedy odczyt OCR jako znany tekst
+(także z błędami OCR, innym zawinięciem wierszy albo WIELKIMI LITERAMI) i pokazuje gotowe
+tłumaczenie z lokalnej bazy, bez czekania na dostawcę. Nakładka nadal nie czyta plików gry —
+robi to wyłącznie osobne narzędzie `CorpusTool`, uruchamiane przez Ciebie przy wyłączonej grze
+([ADR-014](TECHNOLOGY_DECISIONS.md)). Narzędzie nie jest w paczce aplikacji; uruchamiasz je ze
+źródeł projektu (potrzebny .NET 10 SDK), w PowerShellu z folderu repozytorium.
+
+1. **Wyłącz grę** (także launcher Steam z jej oknem). Narzędzie odmówi pracy, gdy proces gry
+   działa, gdy gra ma anti-cheat albo zaszyfrowane pliki i dla gier online (np. Path of Exile).
+2. **Odczytaj korpus** (tylko do odczytu, bez sieci, kilka sekund):
+
+   ```powershell
+   dotnet run --project tools/GameTranslatorOverlay.CorpusTool -c Release -- extract `
+     --profile escape-academy --game-dir "C:\Program Files (x86)\Steam\steamapps\common\Escape Academy"
+   ```
+
+   Korpus trafia do `%LOCALAPPDATA%\GameTranslatorOverlay\corpus\escape-academy.corpus.jsonl` —
+   tylko tam szuka go aplikacja. Nie przenoś go i nie udostępniaj (teksty gry są chronione
+   prawem autorskim).
+3. **Przetłumacz korpus** u wybranego dostawcy. Najpierw przebieg próbny — pokazuje liczbę
+   tekstów, znaków i szacunek kosztu, niczego nie wysyła:
+
+   ```powershell
+   dotnet run --project tools/GameTranslatorOverlay.CorpusTool -c Release -- translate `
+     --profile escape-academy --provider llm --dry-run
+   ```
+
+   Potem właściwy przebieg z kluczem w zmiennej środowiskowej (narzędzie nie czyta kluczy
+   zapisanych w aplikacji), np. DeepSeek bez myślenia (ok. 0,12–0,24 USD za całą grę):
+
+   ```powershell
+   $env:GTO_LLM_ENDPOINT = "https://api.deepseek.com/v1"
+   $env:GTO_LLM_MODEL = "deepseek-flash"
+   $env:GTO_LLM_KEY = "<Twój klucz>"
+   dotnet run --project tools/GameTranslatorOverlay.CorpusTool -c Release -- translate `
+     --profile escape-academy --provider llm --llm-thinking disabled
+   ```
+
+   albo DeepL (`$env:GTO_DEEPL_KEY`, `--provider deepl`; ok. połowy miesięcznego limitu API Free).
+   Przerwany przebieg dokończysz, uruchamiając to samo polecenie jeszcze raz. Przy włączonym
+   trybie prywatnym narzędzie odmówi zapisu. Twoje ręczne poprawki i słownik zostają nietknięte.
+4. **Uruchom aplikację** (jeśli działała — zamknij ją i otwórz ponownie, żeby wczytała korpus
+   i nowe wpisy) i wybierz profil **Escape Academy** (albo zaznacz okno gry na liście — profil
+   włączy się sam). Po zapisaniu ustawień pasek stanu pokazuje „korpus: … tekstów” (to samo
+   trafia do logu przy każdym starcie). Brak tej informacji = aplikacja nie znalazła pliku korpusu.
+5. **Graj z trybem live** jak zwykle (`Ctrl+Shift+L`).
+
+Co się zmienia w grze:
+
+- Znane teksty pojawiają się bez zapytania do dostawcy — w powtórce prawdziwych sesji Escape
+  Academy ok. 60% znaków i połowa bloków była gotowa lokalnie (bez korpusu: 0,3%).
+- Odczyt z błędami OCR („Itls”, „11m”, ucięty koniec zdania) dostaje tłumaczenie poprawnego zdania.
+  Gdy gra wypisuje zdanie literka po literce, nakładka może pokazać tłumaczenie całego zdania,
+  zanim gra wypisze je do końca.
+- Tłumaczenie zachowuje układ wierszy z ekranu. Imię mówcy („Captain:”, „[CAPTAIN]”), klawisze
+  obok etykiet („E Inspect” → „E Zbadaj”) i pojedyncze liczby zostają bez zmian.
+- Nieznana część bloku (np. nowa linia pod znaną etykietą) idzie do dostawcy sama — znana część
+  nie jest płacona drugi raz.
+- Ręczna poprawka bloku, który w całości jest jednym tekstem z korpusu, zapisuje się pod tym
+  tekstem, więc działa także dla innych odczytów tego samego zdania. Poprawka bloku złożonego
+  z kilku części działa dla tego odczytu, jak dotąd.
+- Bez pliku korpusu i bez profilu aplikacja działa dokładnie jak dotąd. Cache-only działa także
+  z korpusem. **W trybie prywatnym** aplikacja nie czyta bazy z dysku, więc tłumaczenia
+  z wyprzedzeniem są wtedy niedostępne (przyciąganie nadal ujednolica odczyty w pamięci).
+
+Opcja dla zaawansowanych: `"paragraphCacheKeys": true` w `settings.json` zapisuje tłumaczenia
+po akapitach także bez korpusu (każda gra) — ten sam akapit w innym bloku nie jest płacony drugi
+raz (np. statystyki przedmiotów w PoE2). Domyślnie wyłączone.
+
 ## Szybkość
 
 Panel **Szybkość** pokazuje medianę czasów z bieżącej sesji (p90 = 9 na 10 przypadków

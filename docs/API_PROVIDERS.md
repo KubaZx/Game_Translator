@@ -11,7 +11,7 @@ z API OpenAI, Claude, Mock), mechanizmy kontroli kosztów oraz sposób dodawania
 | `DeepL` | `DeepLTranslationProvider` | `deepl-api-key` | — | kontekst klatki (parametr DeepL `context`) i glosariusz ze słownika |
 | `Azure` | `AzureTranslatorProvider` | `azure-translator-key` | `azureRegion` | — |
 | `Google` | `GoogleTranslateProvider` | `google-translate-key` | — | — |
-| `LLM` | `OpenAiCompatibleTranslationProvider` | `llm-api-key` (opcjonalny) | `llmEndpoint`, `llmModel` | tak |
+| `LLM` | `OpenAiCompatibleTranslationProvider` | `llm-api-key` (opcjonalny) | `llmEndpoint`, `llmModel`, `llmServerOptions` | tak |
 | `Claude` | `ClaudeTranslationProvider` | `anthropic-api-key` | `claudeModel` | tak |
 | `Mock` | `MockTranslationProvider` | — | — | — |
 
@@ -58,6 +58,7 @@ Całe parsowanie i składanie znacznika jest w `TranslationCacheContext`. Częś
 | `qa=…` | `reflow-1;qa=numbers` | wynik z problemem jakości (nazwy flag `TranslationQualityGate`); przy następnym wystąpieniu tłumaczony ponownie raz |
 | `qa-final` | `reflow-1;qa=numbers;qa-final` | problem został po ponownym tłumaczeniu — wynik ostateczny, bez kolejnych zapytań |
 | `pg=f` / `pg=m` | `reflow-1;pg=f` | płeć gracza, z którą tłumaczył dostawca świadomy płci; inna płeć w ustawieniach → linia z „you” tłumaczona ponownie raz |
+| `src=…` | `reflow-1;pg=f;src=corpus` | skąd pochodzi wpis; `src=corpus` = tłumaczenie z wyprzedzeniem narzędziem `CorpusTool translate` (zawsze z profilem gry); starsze wersje aplikacji tę część pomijają |
 
 Eksport/import JSON zachowuje pole `context` (pomijane, gdy puste; stare pliki bez niego
 importują się jak dotąd). Ręczne korekty nigdy nie są tłumaczone ponownie.
@@ -97,6 +98,17 @@ partii, do 6 linii i ok. 1500 znaków). Kontekst nie wpływa na klucz cache.
 Pamięć jest częścią pipeline'u, który powstaje od nowa przy zmianie dostawcy, profilu lub
 ustawień tłumaczenia — pary nigdy nie trafiają do innego dostawcy. Zmiana samego wyglądu
 (`AppSettings.PipelineSnapshot` pomija pola prezentacji) pipeline'u nie przebudowuje.
+
+Dwa pola wypełnia tylko tłumaczenie korpusu z wyprzedzeniem (`CorpusTool translate`); pipeline
+na żywo ich nie ustawia, więc zapytania w trakcie gry są takie jak dotąd:
+
+- `Scene` — krótki opis partii po angielsku (np. `Dialogue "Intro"; speakers: Ann, Bob`,
+  `User interface strings from the table "…"`). Model językowy dostaje go w prompcie systemowym
+  (`Scene: …`), DeepL jako pierwszy wiersz parametru `context` (najwyżej 300 znaków).
+- `TextNotes` — notatka do każdego tekstu partii, w tej samej kolejności (`speaker: …`,
+  `clip: …`, `key: …; context: …`). Model dostaje je w wiadomości jako `"notes"` obok `"texts"`
+  (puste notatki = brak pola), a prompt systemowy mówi, że to wyłącznie kontekst. Notatki są
+  dzielone razem z partiami po 25 tekstów i przy tłumaczeniu pojedynczym.
 
 ## Płeć postaci gracza (`IGenderAwareTranslationProvider`)
 
@@ -313,8 +325,25 @@ lokalne Ollama (`http://localhost:11434/v1`) i LM Studio (`http://localhost:1234
 - Odpowiedź modelu jest przyjmowana tylko w jednoznacznej formie (cała odpowiedź, blok
   ```json albo obiekt z kluczem `translations`); echo wejścia (`texts`), elementy niebędące
   tekstem i puste tłumaczenia unieważniają odpowiedź, zanim trafi do cache.
-- Aplikacja nie wysyła `temperature`, `max_tokens` ani `response_format` — część modeli
-  i serwerów odrzuca te parametry; format wymusza prompt i tolerancyjny parser.
+- Domyślnie zapytanie ma tylko `model`, `messages` i `stream: false` — część modeli
+  i serwerów odrzuca dodatkowe parametry; format wymusza prompt i tolerancyjny parser.
+- **Opcje serwera** (ADR-013, dopisek 2026-10-06): ustawienie `llmServerOptions`
+  (`host`, `thinking`, `reasoningEffort`, `maxTokens`, `responseFormat`) dodaje do zapytania
+  pola `thinking: {"type": …}`, `reasoning_effort`, `max_tokens`, `response_format: {"type": …}`
+  — **tylko** gdy `host` jest równy hostowi adresu serwera (jak `llmKeyHost`). Puste pola nie są
+  wysyłane; wartości spoza liter, cyfr, `_`, `-`, `.` (do 32 znaków) i `maxTokens` ≤ 0 są
+  pomijane. Brak ustawienia albo inny host = zapytanie identyczne z dotychczasowym (test
+  kontraktu). Test połączenia i status klucza pokazują aktywne opcje.
+- **Gotowe serwery** (`TranslationProviderCatalog.LlmPresets`, przyciski obok adresu):
+  OpenAI; **DeepSeek** (`https://api.deepseek.com/v1`, model `deepseek-flash`,
+  `thinking: disabled` — bez tego model zawsze myśli: mediana 0,96 s na linię zamiast 0,71 s);
+  **Ollama** (`reasoning_effort: none`); LM Studio. Kliknięcie ustawia adres, model (gdy preset
+  go ma) i opcje serwera presetu przypisane do jego hosta.
+- **Zużycie tokenów:** pole `usage` odpowiedzi (`prompt_tokens`, `completion_tokens`,
+  `completion_tokens_details.reasoning_tokens`, `prompt_cache_hit_tokens` DeepSeeka albo
+  `prompt_tokens_details.cached_tokens` OpenAI) trafia do logu jedną linią z samymi liczbami
+  i do licznika `OpenAiCompatibleTranslationProvider.Usage` (sumy na dostawcę, używane przez
+  ProviderEval i CorpusTool). Brak `usage` niczego nie psuje.
 - 401/403 → klucz; 402 i 429 `insufficient_quota` → brak środków (bez ponawiania);
   404/400 z informacją o modelu → `ModelNotFound`; inny 404 → zły adres (brak `/v1`).
 - Niedziałający serwer lokalny daje komunikat „uruchom Ollamę albo LM Studio”.
@@ -381,6 +410,23 @@ dotnet run --project tools/GameTranslatorOverlay.ProviderEval -c Release -- \
 Prawdziwe linie z gier trzymaj w `eval/private/` (w `.gitignore`). chrF na 42 liniach to
 sygnał, nie werdykt — różnice warto potwierdzić lekturą najgorszych linii z raportu. CI
 uruchamia narzędzie tylko z Mockiem. Wyników dla prawdziwych dostawców jeszcze nie zebrano.
+
+Opcje serwera LLM w ProviderEval: `--llm-thinking TYP`, `--llm-effort POZIOM`,
+`--llm-max-tokens N`, `--llm-json` (`response_format: json_object`) i `--llm-no-preset`. Bez
+nich adres pasujący do gotowego serwera dostaje jego opcje (DeepSeek: `thinking: disabled`).
+Po przebiegu narzędzie wypisuje aktywne opcje i sumę tokenów z `usage`.
+
+## Tłumaczenie korpusu z wyprzedzeniem (CorpusTool translate)
+
+`tools/GameTranslatorOverlay.CorpusTool` (ADR-014) tłumaczy lokalny korpus gry partiami
+(DeepL do 50, LLM do 25 tekstów) tymi samymi dostawcami co aplikacja, z kontekstem sceny,
+mówcy i kolumny kontekstu, kolejnością linii dialogu i kontrolą jakości jak w pipeline
+(sklejanie wierszy, `TranslationQualityGate`, jedno ponowienie u modeli językowych, dodatkowo
+zachowanie znaczników `{0}`, `[X]`, `%s`). Wpisy trafiają do cache z profilem gry, prawdziwą
+nazwą dostawcy i znacznikiem `src=corpus`; ręczne korekty, wpisy zatwierdzone i terminy
+słownika nie są nadpisywane, a tryb prywatny oznacza odmowę zapisu. `--dry-run` podaje liczbę
+tekstów, znaków i szacunek kosztu bez wysyłania. Klucze tylko ze zmiennych środowiskowych.
+Opis: [README narzędzia](../tools/GameTranslatorOverlay.CorpusTool/README.md).
 
 ## Kontrola kosztów
 

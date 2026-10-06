@@ -24,12 +24,18 @@ public readonly record struct TranslationCacheContext(
     TranslationQualityFlags QualityIssues,
     bool HasQualityMarker,
     bool QualityFinal,
-    PlayerGender PlayerGender = PlayerGender.Unknown)
+    PlayerGender PlayerGender = PlayerGender.Unknown,
+    string? Source = null)
 {
     private const char Separator = ';';
     private const string QualityPrefix = "qa=";
     private const string QualityFinalTag = "qa-final";
     private const string PlayerGenderPrefix = "pg=";
+    private const string SourcePrefix = "src=";
+
+    public const string CorpusSource = "corpus";
+
+    public bool IsFromCorpus => string.Equals(Source, CorpusSource, StringComparison.OrdinalIgnoreCase);
 
     public static TranslationCacheContext Parse(string? context)
     {
@@ -40,6 +46,7 @@ public readonly record struct TranslationCacheContext(
         var hasQuality = false;
         var final = false;
         var gender = PlayerGender.Unknown;
+        string? source = null;
         var parts = context.Split(Separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         for (var i = 0; i < parts.Length; i++)
         {
@@ -62,12 +69,16 @@ public readonly record struct TranslationCacheContext(
                     _ => PlayerGender.Unknown,
                 };
             }
+            else if (part.StartsWith(SourcePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                source = part[SourcePrefix.Length..] is { Length: > 0 } value ? value : null;
+            }
             else if (i == 0)
             {
                 format = part;
             }
         }
-        return new TranslationCacheContext(format, issues, hasQuality, final, gender);
+        return new TranslationCacheContext(format, issues, hasQuality, final, gender, source);
     }
 
     /// <summary>
@@ -76,20 +87,26 @@ public readonly record struct TranslationCacheContext(
     /// pozostałych dostawców są takie jak dotąd.
     /// </summary>
     public static string Build(
-        TranslationQualityFlags issues, bool final = false, PlayerGender playerGender = PlayerGender.Unknown)
+        TranslationQualityFlags issues, bool final = false, PlayerGender playerGender = PlayerGender.Unknown,
+        string? source = null)
     {
+        if (source is not null && (source.Length == 0 || !source.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch == '-')))
+        {
+            throw new ArgumentException("Źródło wpisu może zawierać tylko litery, cyfry i myślniki.", nameof(source));
+        }
         var marker = TextReflow.FormatVersion;
         if (issues != TranslationQualityFlags.None)
         {
             marker = $"{marker}{Separator}{QualityPrefix}{TranslationQualityGate.ToMarker(issues)}";
             if (final) marker = $"{marker}{Separator}{QualityFinalTag}";
         }
-        return playerGender switch
+        marker = playerGender switch
         {
             PlayerGender.Female => $"{marker}{Separator}{PlayerGenderPrefix}f",
             PlayerGender.Male => $"{marker}{Separator}{PlayerGenderPrefix}m",
             _ => marker,
         };
+        return source is null ? marker : $"{marker}{Separator}{SourcePrefix}{source}";
     }
 
     /// <summary>Wpis ma zgłoszony problem jakości, którego jeszcze nie próbowano naprawić.</summary>

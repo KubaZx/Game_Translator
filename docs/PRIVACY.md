@@ -133,6 +133,7 @@ Wszystkie dane programu leżą w `%LOCALAPPDATA%\GameTranslatorOverlay`:
 | klucze API (osobny dla każdego dostawcy) | zaszyfrowane Windows DPAPI (`CurrentUser`) | odczyta je tylko ten sam użytkownik Windows na tej maszynie |
 | logi (Serilog, rolling) | zdarzenia techniczne, błędy (stack trace tylko do logu) | nigdy kluczy API; bez treści tłumaczeń w trybie prywatnym |
 | profile i słowniki | pliki JSON (`profiles/`, `glossaries/`) | dane statyczne, bez treści użytkownika |
+| korpus gry (`corpus\<profil>.corpus.jsonl`) | angielskie teksty gry odczytane przez narzędzie z ADR-014 | tworzy go tylko narzędzie na polecenie użytkownika; aplikacja wyłącznie go czyta (aktywny profil) i nie wysyła go nigdzie |
 
 Usunięcie folderu `%LOCALAPPDATA%\GameTranslatorOverlay` usuwa wszystkie dane programu.
 
@@ -147,5 +148,7 @@ Usunięcie folderu `%LOCALAPPDATA%\GameTranslatorOverlay` usuwa wszystkie dane p
   wyłączonej grze, czyta wyłącznie do odczytu teksty z plików wybranej gry offline (bez
   anti-cheata, bez szyfrowania) i zapisuje lokalny korpus w `%LOCALAPPDATA%\GameTranslatorOverlay`.
   Korpus i jego tłumaczenia nigdy nie opuszczają komputera, chyba że użytkownik sam zleci
-  ich tłumaczenie u wybranego dostawcy.
+  ich tłumaczenie u wybranego dostawcy. Nakładka czyta tylko ten lokalny plik korpusu
+  aktywnego profilu, żeby dopasować odczyt OCR do znanego tekstu; do dostawcy trafia wtedy
+  tekst z korpusu zamiast odczytu z błędami OCR — ten sam tekst, który i tak jest na ekranie.
 - Nie tworzy kont, nie wymaga logowania, nie profiluje użytkownika.

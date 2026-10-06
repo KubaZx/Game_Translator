@@ -18,6 +18,8 @@ public sealed class GameProfile
     public OcrProfileSettings? Ocr { get; set; }
     public ChangeDetectionProfileSettings? ChangeDetection { get; set; }
     public string? MinAppVersion { get; set; }
+    public bool? Online { get; set; }
+    public CorpusRecipe? Corpus { get; set; }
 }
 
 public sealed class OcrProfileSettings
@@ -95,6 +97,10 @@ public static class ProfileValidator
         if (profile.ChangeDetection is { } cd && (cd.Fps <= 0 || cd.Fps > 30))
         {
             errors.Add("Wartość changeDetection.fps musi mieścić się w zakresie 0–30.");
+        }
+        if (profile.Corpus is { } corpus)
+        {
+            errors.AddRange(CorpusRecipeValidator.Validate(corpus));
         }
 
         if (!string.IsNullOrWhiteSpace(profile.MinAppVersion))

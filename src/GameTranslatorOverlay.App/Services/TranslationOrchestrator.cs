@@ -47,7 +47,8 @@ public sealed class TranslationOrchestrator(
     IOcrProvider ocrProvider,
     UsageTracker usage,
     ILoggerFactory loggerFactory,
-    IEnumerable<ITranslationProvider>? additionalProviders = null)
+    IEnumerable<ITranslationProvider>? additionalProviders = null,
+    CorpusCatalog? corpusCatalog = null)
 {
     private readonly ILogger _logger = loggerFactory.CreateLogger<TranslationOrchestrator>();
 
@@ -71,6 +72,8 @@ public sealed class TranslationOrchestrator(
     public IReadOnlyList<CatalogIssue> ProfileIssues { get; private set; } = [];
     public IReadOnlyList<string> ContentWarnings { get; private set; } = [];
     public GameProfile? ActiveProfile { get; private set; }
+
+    public CorpusLoadResult ActiveCorpus { get; private set; } = CorpusLoadResult.None;
 
     /// <summary>Dostawca wybrany w ustawieniach; nieznana nazwa oznacza DeepL (domyślny).</summary>
     public ITranslationProvider ActiveProvider =>
@@ -141,6 +144,11 @@ public sealed class TranslationOrchestrator(
 
         usage.SessionCharacterLimit = settings.SessionCharacterLimit;
 
+        ActiveCorpus = ActiveProfile is { } profileWithCorpus && corpusCatalog is not null
+            ? corpusCatalog.Load(profileWithCorpus.Id)
+            : CorpusLoadResult.None;
+        if (ActiveCorpus.Issue is { } corpusIssue) warnings.Add($"Korpus profilu „{ActiveProfile?.Id}”: {corpusIssue}");
+
         // Glosariusz DeepL jest przechowywany na koncie DeepL — tryb prywatny go nie tworzy.
         deepLProvider.Options.UseGlossary = !settings.PrivateMode;
 
@@ -155,6 +163,8 @@ public sealed class TranslationOrchestrator(
                 GameProfile = ActiveProfile?.Id ?? string.Empty,
                 GameName = ActiveProfile?.Name,
                 PlayerGender = PlayerGenders.Parse(settings.PlayerGender),
+                Corpus = ActiveCorpus.Snapper,
+                SplitParagraphs = ActiveCorpus.IsLoaded || settings.ParagraphCacheKeys,
             },
             loggerFactory.CreateLogger<TranslationPipeline>(),
             cacheWriteCancellationToken: _pipelineEpoch.Token);
@@ -162,8 +172,9 @@ public sealed class TranslationOrchestrator(
 
         ContentWarnings = warnings;
         _logger.LogInformation(
-            "Pipeline: dostawca={Provider}, profil={Profile}, słownik={Terms} terminów, cacheOnly={CacheOnly}, prywatny={Private}",
-            ActiveProvider.Name, ActiveProfile?.Id ?? "(brak)", glossaryService.TermCount, settings.CacheOnlyMode, settings.PrivateMode);
+            "Pipeline: dostawca={Provider}, profil={Profile}, słownik={Terms} terminów, cacheOnly={CacheOnly}, prywatny={Private}, korpus={CorpusTexts} tekstów, akapity={Paragraphs}",
+            ActiveProvider.Name, ActiveProfile?.Id ?? "(brak)", glossaryService.TermCount, settings.CacheOnlyMode, settings.PrivateMode,
+            ActiveCorpus.Texts, ActiveCorpus.IsLoaded || settings.ParagraphCacheKeys);
     }
 
     private void LoadGlossary(string glossaryId, List<string> warnings)
@@ -254,7 +265,7 @@ public sealed class TranslationOrchestrator(
             .ToList();
 
         var blocks = TextBlockGrouper.Group(screenLines)
-            .Where(static block => JunkFilter.IsMeaningful(block.Text))
+            .Where(block => JunkFilter.IsMeaningful(block.Text) || pipeline.IsExactCorpusText(block.Text))
             .ToList();
 
         if (blocks.Count == 0)
@@ -300,8 +311,8 @@ public sealed class TranslationOrchestrator(
     public Task SaveManualCorrectionAsync(TranslatedBlock block, string correctedText, CancellationToken cancellationToken = default)
     {
         var entry = new NewCacheEntry(
-            block.Block.Text,
-            block.Outcome.NormalizedText,
+            block.Outcome.CacheKey ?? block.Block.Text,
+            block.Outcome.CacheKey ?? block.Outcome.NormalizedText,
             settings.SourceLanguage,
             settings.TargetLanguage,
             correctedText.Trim(),
@@ -410,7 +421,7 @@ public sealed class TranslationOrchestrator(
                 continue;
             }
 
-            var hint = knownLocal is LocalProbe probe && ReferenceEquals(probe.State, state) ? knownLocal : null;
+            var hint = knownLocal is LocalProbe probe && ReferenceEquals(probe.State, state) ? probe.Outcomes : null;
             var outcomes = await state.Pipeline
                 .TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, hint, linked.Token)
                 .ConfigureAwait(false);
@@ -455,11 +466,15 @@ public sealed class TranslationOrchestrator(
         : IReadOnlyList<TranslationOutcome?>
     {
         public PipelineState State { get; } = state;
-        public TranslationOutcome? this[int index] => outcomes[index];
-        public int Count => outcomes.Count;
-        public IEnumerator<TranslationOutcome?> GetEnumerator() => outcomes.GetEnumerator();
+        public IReadOnlyList<TranslationOutcome?> Outcomes { get; } = outcomes;
+        public TranslationOutcome? this[int index] => Outcomes[index];
+        public int Count => Outcomes.Count;
+        public IEnumerator<TranslationOutcome?> GetEnumerator() => Outcomes.GetEnumerator();
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     public string SourceLanguage => settings.SourceLanguage;
+
+    public bool IsExactCorpusText(string text) =>
+        Volatile.Read(ref _pipelineState)?.Pipeline.IsExactCorpusText(text) == true;
 }

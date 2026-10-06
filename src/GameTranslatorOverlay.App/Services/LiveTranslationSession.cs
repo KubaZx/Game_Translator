@@ -1175,7 +1175,7 @@ public sealed class LiveTranslationSession(
         if (options.NoticeEcho is { } lineEcho) lines = lineEcho.RemoveEchoLines(lines);
 
         var blocks = TextBlockGrouper.Group(lines)
-            .Where(static block => JunkFilter.IsMeaningful(block.Text))
+            .Where(block => JunkFilter.IsMeaningful(block.Text) || orchestrator.IsExactCorpusText(block.Text))
             .ToList();
         var keyed = LiveBlockKeyer.AssignKeys(blocks);
 

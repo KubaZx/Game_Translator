@@ -111,6 +111,8 @@ public partial class App : Application
         services.AddSingleton<IGlossaryService, GlossaryService>();
         services.AddSingleton(sp => ProfileCatalog.CreateDefault(sp.GetRequiredService<AppPaths>()));
         services.AddSingleton(sp => GlossaryCatalog.CreateDefault(sp.GetRequiredService<AppPaths>()));
+        services.AddSingleton(sp => CorpusCatalog.CreateDefault(
+            sp.GetRequiredService<AppPaths>(), sp.GetRequiredService<ILogger<CorpusCatalog>>()));
         services.AddSingleton<UserGlossaryStore>();
         services.AddSingleton<UsageTracker>();
         services.AddSingleton<MockTranslationProvider>();
@@ -134,7 +136,8 @@ public partial class App : Application
             () => sp.GetRequiredService<AppSettings>().LlmKeyHost,
             () => sp.GetRequiredService<AppSettings>().LlmEndpoint,
             () => sp.GetRequiredService<AppSettings>().LlmModel,
-            logger: sp.GetRequiredService<ILogger<OpenAiCompatibleTranslationProvider>>()));
+            logger: sp.GetRequiredService<ILogger<OpenAiCompatibleTranslationProvider>>(),
+            serverOptionsAccessor: () => sp.GetRequiredService<AppSettings>().LlmServerOptions));
         // Osobny HttpClient: SDK Anthropic konfiguruje klienta po swojemu — nie dzielimy
         // go z pozostałymi dostawcami.
         services.AddSingleton(static sp => new ClaudeTranslationProvider(

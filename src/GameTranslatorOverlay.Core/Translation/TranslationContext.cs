@@ -48,8 +48,13 @@ public sealed record TranslationContext(string? GameName, IReadOnlyList<Glossary
     /// </summary>
     public IReadOnlyList<GlossaryTerm> GlossaryTerms { get; init; } = [];
 
+    public string? Scene { get; init; }
+
+    public IReadOnlyList<string?> TextNotes { get; init; } = [];
+
     public bool IsEmpty => string.IsNullOrWhiteSpace(GameName) && Terms.Count == 0 && RecentTexts.Count == 0
-        && RecentExchanges.Count == 0 && PlayerGender == PlayerGender.Unknown;
+        && RecentExchanges.Count == 0 && PlayerGender == PlayerGender.Unknown
+        && string.IsNullOrWhiteSpace(Scene) && !TextNotes.Any(static note => !string.IsNullOrWhiteSpace(note));
 }
 
 /// <summary>

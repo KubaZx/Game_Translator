@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using GameTranslatorOverlay.Core.Caching;
+using GameTranslatorOverlay.Core.Corpus;
 using GameTranslatorOverlay.Core.Glossary;
 using GameTranslatorOverlay.Core.Text;
 using GameTranslatorOverlay.Core.Usage;
@@ -33,6 +34,10 @@ public sealed class TranslationPipelineOptions
 
     /// <summary>Płeć postaci gracza — wskazówka dla dostawców świadomych płci (modele językowe).</summary>
     public PlayerGender PlayerGender { get; set; }
+
+    public CorpusSnapper? Corpus { get; set; }
+
+    public bool SplitParagraphs { get; set; }
 }
 
 public enum TranslationOrigin
@@ -87,6 +92,10 @@ public sealed record TranslationOutcome(
 
     /// <summary>Dlaczego zabrakło tłumaczenia (Cache-only, limit sesji, błąd dostawcy, pusty wynik).</summary>
     public OutcomeIssue Issue { get; init; }
+
+    public IReadOnlyList<TranslationOutcomePart>? Parts { get; init; }
+
+    public string? CacheKey { get; init; }
 }
 
 /// <summary>
@@ -209,7 +218,21 @@ public sealed class TranslationPipeline(
         if (texts.Count == 0) return [];
         if (knownLocal is not null && knownLocal.Count != texts.Count) knownLocal = null;
 
-        var normalizedInputs = NormalizeAll(texts);
+        var inputs = NormalizeAll(texts);
+        var plans = PlanAll(inputs);
+        return plans is null
+            ? await TranslateCoreAsync(inputs, sourceLanguage, targetLanguage, knownLocal, cancellationToken).ConfigureAwait(false)
+            : await TranslatePlannedAsync(inputs, plans, sourceLanguage, targetLanguage, knownLocal, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IReadOnlyList<TranslationOutcome>> TranslateCoreAsync(
+        (string Source, string Normalized)[] normalizedInputs,
+        string sourceLanguage,
+        string targetLanguage,
+        IReadOnlyList<TranslationOutcome?>? knownLocal,
+        CancellationToken cancellationToken)
+    {
+        if (normalizedInputs.Length == 0) return [];
 
         // Najpierw zbieramy teksty, o które trzeba zapytać cache (pierwsze wystąpienie, niepuste,
         // nieznane z próby lokalnej) — dokładnie te, o które pytała dotąd pętla niżej, tekst po
@@ -315,6 +338,314 @@ public sealed class TranslationPipeline(
         return results;
     }
 
+    private const int MaxRememberedPlans = 1024;
+    private readonly ConcurrentDictionary<string, UnitPlan?> _plans = new(StringComparer.Ordinal);
+
+    private sealed record BlockProbe(
+        string Normalized, UnitPlan Plan, TranslationOutcome? Preferred, TranslationOutcome? Fallback,
+        TranslationOutcome?[] Units)
+    {
+        public bool UnitsLocal
+        {
+            get
+            {
+                for (var i = 0; i < Units.Length; i++)
+                {
+                    if (!Plan.Units[i].Literal && Units[i] is not { TranslatedText: not null }) return false;
+                }
+                return true;
+            }
+        }
+    }
+
+    private sealed class LocalResults(TranslationOutcome?[] outcomes, BlockProbe?[] probes) : IReadOnlyList<TranslationOutcome?>
+    {
+        public BlockProbe?[] Probes { get; } = probes;
+        public TranslationOutcome? this[int index] => outcomes[index];
+        public int Count => outcomes.Length;
+        public IEnumerator<TranslationOutcome?> GetEnumerator() => ((IEnumerable<TranslationOutcome?>)outcomes).GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    public bool IsExactCorpusText(string text)
+    {
+        if (options.Corpus is not { Index.IsEmpty: false } corpus || string.IsNullOrWhiteSpace(text)) return false;
+        var key = CorpusText.MatchKey(TextNormalizer.Normalize(text));
+        if (key.Length == 0 || key.Count(char.IsLetter) < 2) return false;
+        return corpus.Index.TryGetExact(key, out var entry) && TranslationUnitPlanner.IsUsable(entry, text);
+    }
+
+    private UnitPlan?[]? PlanAll((string Source, string Normalized)[] inputs)
+    {
+        if (!options.SplitParagraphs && options.Corpus is not { Index.IsEmpty: false }) return null;
+        UnitPlan?[]? plans = null;
+        for (var i = 0; i < inputs.Length; i++)
+        {
+            var normalized = inputs[i].Normalized;
+            if (normalized.Length == 0 || PlanFor(normalized) is not { } plan) continue;
+            plans ??= new UnitPlan?[inputs.Length];
+            plans[i] = plan;
+        }
+        return plans;
+    }
+
+    private UnitPlan? PlanFor(string normalized)
+    {
+        if (_plans.TryGetValue(normalized, out var known)) return known;
+        var plan = TranslationUnitPlanner.Plan(normalized, options.Corpus, options.SplitParagraphs);
+        if (_plans.Count >= MaxRememberedPlans) _plans.Clear();
+        _plans[normalized] = plan;
+        return plan;
+    }
+
+    private async Task<BlockProbe?[]> ProbeBlocksAsync(
+        (string Source, string Normalized)[] inputs, UnitPlan?[] plans, bool[] needed,
+        string sourceLanguage, string targetLanguage, CancellationToken cancellationToken)
+    {
+        var probes = new BlockProbe?[inputs.Length];
+        var wholeTexts = new List<string>();
+        var wholeSlots = new Dictionary<string, int>(StringComparer.Ordinal);
+        var unitInputs = new List<(string Source, string Normalized)>();
+        var unitSlots = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = 0; i < inputs.Length; i++)
+        {
+            if (!needed[i] || plans[i] is not { } plan) continue;
+            if (wholeSlots.TryAdd(inputs[i].Normalized, wholeTexts.Count)) wholeTexts.Add(inputs[i].Normalized);
+            foreach (var unit in plan.Translatable)
+            {
+                if (unitSlots.TryAdd(unit.Key, unitInputs.Count)) unitInputs.Add((unit.Key, unit.Key));
+            }
+        }
+        if (wholeTexts.Count == 0) return probes;
+
+        var wholeLookups = await LookupManyAsync(wholeTexts, sourceLanguage, targetLanguage, cancellationToken)
+            .ConfigureAwait(false);
+        var (unitOutcomes, _, _) = await ProbeCoreAsync(unitInputs.ToArray(), sourceLanguage, targetLanguage, cancellationToken)
+            .ConfigureAwait(false);
+
+        for (var i = 0; i < inputs.Length; i++)
+        {
+            if (!needed[i] || plans[i] is not { } plan) continue;
+            var (source, normalized) = inputs[i];
+            cancellationToken.ThrowIfCancellationRequested();
+            var lookup = wholeLookups[wholeSlots[normalized]];
+            var whole = TryTranslateLocally(source, normalized, sourceLanguage, targetLanguage, lookup, staleFallbacks: null);
+            TranslationOutcome? preferred = null;
+            TranslationOutcome? fallback = null;
+            if (whole is not null)
+            {
+                if (whole.Origin == TranslationOrigin.Glossary || lookup.Translation is { IsManual: true }) preferred = whole;
+                else fallback = whole;
+            }
+            var units = new TranslationOutcome?[plan.Units.Count];
+            for (var k = 0; k < units.Length; k++)
+            {
+                var unit = plan.Units[k];
+                if (!unit.Literal) units[k] = unitOutcomes[unitSlots[unit.Key]];
+            }
+            probes[i] = new BlockProbe(normalized, plan, preferred, fallback, units);
+        }
+        return probes;
+    }
+
+    private static TranslationOutcome? DecideLocally((string Source, string Normalized) input, BlockProbe probe)
+    {
+        if (probe.Preferred is { } preferred) return WithSource(preferred, input.Source);
+        if (probe.UnitsLocal) return Assemble(input, probe.Plan, probe.Units);
+        return probe.Fallback is { } fallback ? WithSource(fallback, input.Source) : null;
+    }
+
+    private static TranslationOutcome Assemble(
+        (string Source, string Normalized) input, UnitPlan plan, IReadOnlyList<TranslationOutcome?> unitOutcomes)
+    {
+        var parts = new TranslationOutcomePart[plan.Units.Count];
+        var translations = new string?[plan.Units.Count];
+        TranslationOutcome? failed = null;
+        var anyProvider = false;
+        var anyCache = false;
+        string? warning = null;
+        for (var k = 0; k < parts.Length; k++)
+        {
+            var unit = plan.Units[k];
+            if (unit.Literal)
+            {
+                parts[k] = new TranslationOutcomePart(unit.ScreenText, null, null, false);
+                continue;
+            }
+            var outcome = unitOutcomes[k];
+            if (outcome?.TranslatedText is not { } translated)
+            {
+                parts[k] = new TranslationOutcomePart(unit.ScreenText, unit.Key, TranslationOrigin.Unavailable, unit.FromCorpus);
+                failed ??= outcome ?? new TranslationOutcome(unit.Key, unit.Key, null, TranslationOrigin.Unavailable, "Brak wyniku.");
+                continue;
+            }
+            parts[k] = new TranslationOutcomePart(unit.ScreenText, unit.Key, outcome.Origin, unit.FromCorpus);
+            translations[k] = translated;
+            anyProvider |= outcome.Origin == TranslationOrigin.Provider;
+            anyCache |= outcome.Origin == TranslationOrigin.Cache;
+            warning ??= outcome.QualityWarning;
+        }
+
+        if (failed is not null)
+        {
+            return new TranslationOutcome(input.Source, input.Normalized, null, TranslationOrigin.Unavailable, failed.ErrorMessage)
+            {
+                FailureKind = failed.FailureKind,
+                Issue = failed.Issue,
+                Parts = parts,
+            };
+        }
+
+        var origin = anyProvider ? TranslationOrigin.Provider : anyCache ? TranslationOrigin.Cache : TranslationOrigin.Glossary;
+        return new TranslationOutcome(input.Source, input.Normalized, TranslationUnitPlanner.Compose(plan, translations), origin)
+        {
+            QualityWarning = warning,
+            Parts = parts,
+            CacheKey = plan.SingleKey,
+        };
+    }
+
+    private async Task<IReadOnlyList<TranslationOutcome?>> TranslatePlannedLocalAsync(
+        (string Source, string Normalized)[] inputs, UnitPlan?[] plans,
+        string sourceLanguage, string targetLanguage, CancellationToken cancellationToken)
+    {
+        var needed = plans.Select(static p => p is not null).ToArray();
+        var probes = await ProbeBlocksAsync(inputs, plans, needed, sourceLanguage, targetLanguage, cancellationToken)
+            .ConfigureAwait(false);
+
+        var plainSlots = new int[inputs.Length];
+        var plainInputs = new List<(string Source, string Normalized)>();
+        for (var i = 0; i < inputs.Length; i++)
+        {
+            plainSlots[i] = -1;
+            if (plans[i] is not null) continue;
+            plainSlots[i] = plainInputs.Count;
+            plainInputs.Add(inputs[i]);
+        }
+        var (plainResults, _, plainDistinct) = await ProbeCoreAsync(plainInputs.ToArray(), sourceLanguage, targetLanguage, cancellationToken)
+            .ConfigureAwait(false);
+
+        var results = new TranslationOutcome?[inputs.Length];
+        var counted = new Dictionary<string, TranslationOutcome?>(StringComparer.Ordinal);
+        for (var i = 0; i < inputs.Length; i++)
+        {
+            results[i] = plainSlots[i] >= 0
+                ? plainResults[plainSlots[i]]
+                : DecideLocally(inputs[i], probes[i]!);
+            if (plainSlots[i] < 0) counted.TryAdd(inputs[i].Normalized, results[i]);
+        }
+
+        if (results.All(static r => r is not null))
+        {
+            foreach (var outcome in plainDistinct) RecordLocalHit(outcome);
+            foreach (var outcome in counted.Values) RecordLocalHit(outcome);
+        }
+        return new LocalResults(results, probes);
+    }
+
+    private async Task<IReadOnlyList<TranslationOutcome>> TranslatePlannedAsync(
+        (string Source, string Normalized)[] inputs, UnitPlan?[] plans,
+        string sourceLanguage, string targetLanguage, IReadOnlyList<TranslationOutcome?>? knownLocal,
+        CancellationToken cancellationToken)
+    {
+        var stored = (knownLocal as LocalResults)?.Probes;
+        var results = new TranslationOutcome?[inputs.Length];
+        var probes = new BlockProbe?[inputs.Length];
+        var needed = new bool[inputs.Length];
+        var anyNeeded = false;
+        for (var i = 0; i < inputs.Length; i++)
+        {
+            if (plans[i] is null) continue;
+            var normalized = inputs[i].Normalized;
+            if (knownLocal?[i] is { } known && known.NormalizedText == normalized)
+            {
+                RecordLocalHit(known);
+                results[i] = WithSource(known, inputs[i].Source);
+                continue;
+            }
+            if (stored?[i] is { } probe && probe.Normalized == normalized)
+            {
+                probes[i] = probe;
+                continue;
+            }
+            needed[i] = true;
+            anyNeeded = true;
+        }
+        if (anyNeeded)
+        {
+            var fresh = await ProbeBlocksAsync(inputs, plans, needed, sourceLanguage, targetLanguage, cancellationToken)
+                .ConfigureAwait(false);
+            for (var i = 0; i < inputs.Length; i++)
+            {
+                if (needed[i]) probes[i] = fresh[i];
+            }
+        }
+
+        var coreInputs = new List<(string Source, string Normalized)>(inputs.Length);
+        var coreKnown = new List<TranslationOutcome?>(inputs.Length);
+        var plainSlots = new int[inputs.Length];
+        var unitSlots = new int[inputs.Length][];
+        for (var i = 0; i < inputs.Length; i++)
+        {
+            plainSlots[i] = -1;
+            if (plans[i] is not { } plan)
+            {
+                plainSlots[i] = coreInputs.Count;
+                coreInputs.Add(inputs[i]);
+                coreKnown.Add(knownLocal?[i]);
+                continue;
+            }
+            if (results[i] is not null) continue;
+            var probe = probes[i]!;
+            if (DecideLocally(inputs[i], probe) is { } local)
+            {
+                RecordLocalHit(local);
+                results[i] = local;
+                continue;
+            }
+            var slots = new int[plan.Units.Count];
+            for (var k = 0; k < slots.Length; k++)
+            {
+                slots[k] = -1;
+                var unit = plan.Units[k];
+                if (unit.Literal) continue;
+                slots[k] = coreInputs.Count;
+                coreInputs.Add((unit.Key, unit.Key));
+                coreKnown.Add(probe.Units[k]);
+            }
+            unitSlots[i] = slots;
+        }
+
+        var coreOutcomes = coreInputs.Count == 0
+            ? []
+            : await TranslateCoreAsync(coreInputs.ToArray(), sourceLanguage, targetLanguage,
+                coreKnown.Any(static k => k is not null) ? coreKnown : null, cancellationToken).ConfigureAwait(false);
+
+        var final = new List<TranslationOutcome>(inputs.Length);
+        for (var i = 0; i < inputs.Length; i++)
+        {
+            if (plainSlots[i] >= 0)
+            {
+                final.Add(coreOutcomes[plainSlots[i]]);
+            }
+            else if (results[i] is { } done)
+            {
+                final.Add(done);
+            }
+            else
+            {
+                var slots = unitSlots[i];
+                var unitOutcomes = new TranslationOutcome?[slots.Length];
+                for (var k = 0; k < slots.Length; k++)
+                {
+                    if (slots[k] >= 0) unitOutcomes[k] = coreOutcomes[slots[k]];
+                }
+                final.Add(Assemble(inputs[i], plans[i]!, unitOutcomes));
+            }
+        }
+        return final;
+    }
+
     private const int NoLookup = -1;
     private const int DuplicateText = -2;
 
@@ -376,7 +707,28 @@ public sealed class TranslationPipeline(
     {
         if (texts.Count == 0) return [];
 
-        var normalizedInputs = NormalizeAll(texts);
+        var inputs = NormalizeAll(texts);
+        var plans = PlanAll(inputs);
+        if (plans is not null)
+            return await TranslatePlannedLocalAsync(inputs, plans, sourceLanguage, targetLanguage, cancellationToken)
+                .ConfigureAwait(false);
+
+        var (results, allLocal, distinct) = await ProbeCoreAsync(inputs, sourceLanguage, targetLanguage, cancellationToken)
+            .ConfigureAwait(false);
+        if (allLocal)
+        {
+            foreach (var outcome in distinct) RecordLocalHit(outcome);
+        }
+        return results;
+    }
+
+    private async Task<(TranslationOutcome?[] Results, bool AllLocal, IReadOnlyCollection<TranslationOutcome?> Distinct)> ProbeCoreAsync(
+        (string Source, string Normalized)[] normalizedInputs,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        if (normalizedInputs.Length == 0) return ([], true, []);
         var outcomes = new Dictionary<string, TranslationOutcome?>(normalizedInputs.Length, StringComparer.Ordinal);
 
         // Jak w TranslateAsync: jeden odczyt cache dla wszystkich różnych niepustych tekstów.
@@ -410,19 +762,29 @@ public sealed class TranslationPipeline(
             allLocal &= local is not null;
         }
 
-        if (allLocal)
+        var results = new TranslationOutcome?[normalizedInputs.Length];
+        for (var i = 0; i < results.Length; i++)
         {
-            foreach (var outcome in outcomes.Values)
-            {
-                if (outcome is { Origin: TranslationOrigin.Glossary }) usage.RecordGlossaryHit();
-                else if (outcome is { Origin: TranslationOrigin.Cache }) usage.RecordCacheHit();
-            }
+            var (source, normalized) = normalizedInputs[i];
+            results[i] = outcomes[normalized] is { } outcome ? WithSource(outcome, source) : null;
         }
+        return (results, allLocal, outcomes.Values);
+    }
 
-        var results = new List<TranslationOutcome?>(normalizedInputs.Length);
-        foreach (var (source, normalized) in normalizedInputs)
-            results.Add(outcomes[normalized] is { } outcome ? WithSource(outcome, source) : null);
-        return results;
+    private void RecordLocalHit(TranslationOutcome? outcome)
+    {
+        if (outcome is null) return;
+        if (outcome.Parts is { } parts)
+        {
+            foreach (var part in parts)
+            {
+                if (part.Origin == TranslationOrigin.Glossary) usage.RecordGlossaryHit();
+                else if (part.Origin == TranslationOrigin.Cache) usage.RecordCacheHit();
+            }
+            return;
+        }
+        if (outcome.Origin == TranslationOrigin.Glossary) usage.RecordGlossaryHit();
+        else if (outcome.Origin == TranslationOrigin.Cache) usage.RecordCacheHit();
     }
 
     /// <param name="staleFallbacks">

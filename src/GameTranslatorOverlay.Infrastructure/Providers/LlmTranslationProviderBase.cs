@@ -66,19 +66,24 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
         EnsureConfigured();
 
         var systemPrompt = LlmTranslationPrompt.BuildSystemPrompt(sourceLanguage, targetLanguage, context);
+        var notes = context.TextNotes.Count == texts.Count ? context.TextNotes : null;
         var results = new List<string>(texts.Count);
+        var offset = 0;
         foreach (var chunk in texts.Chunk(Math.Max(1, Options.MaxBatchSize)))
         {
-            results.AddRange(await TranslateChunkAsync(chunk, systemPrompt, context.RecentExchanges, cancellationToken)
+            var chunkNotes = notes?.Skip(offset).Take(chunk.Length).ToList();
+            offset += chunk.Length;
+            results.AddRange(await TranslateChunkAsync(chunk, chunkNotes, systemPrompt, context.RecentExchanges, cancellationToken)
                 .ConfigureAwait(false));
         }
         return results;
     }
 
     private async Task<IReadOnlyList<string>> TranslateChunkAsync(
-        string[] chunk, string systemPrompt, IReadOnlyList<RecentExchange> previousLines, CancellationToken cancellationToken)
+        string[] chunk, IReadOnlyList<string?>? notes, string systemPrompt, IReadOnlyList<RecentExchange> previousLines,
+        CancellationToken cancellationToken)
     {
-        var content = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage(chunk, previousLines), cancellationToken)
+        var content = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage(chunk, previousLines, notes), cancellationToken)
             .ConfigureAwait(false);
         if (LlmTranslationPrompt.ParseTranslations(content, chunk.Length) is { } parsed)
         {
@@ -95,9 +100,11 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
         Logger.LogInformation("{Provider}: nieczytelna odpowiedź dla partii {Count} tekstów — tłumaczę pojedynczo",
             Name, chunk.Length);
         var singles = new List<string>(chunk.Length);
-        foreach (var text in chunk)
+        for (var i = 0; i < chunk.Length; i++)
         {
-            var single = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage([text], previousLines), cancellationToken)
+            var text = chunk[i];
+            IReadOnlyList<string?>? note = notes is not null ? [notes[i]] : null;
+            var single = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage([text], previousLines, note), cancellationToken)
                 .ConfigureAwait(false);
             var parsedSingle = LlmTranslationPrompt.ParseTranslations(single, 1) ?? throw UnreadableResponse(1);
             singles.Add(parsedSingle[0]);

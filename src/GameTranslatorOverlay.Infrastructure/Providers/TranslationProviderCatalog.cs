@@ -26,6 +26,17 @@ public sealed record TranslationProviderInfo(
     public bool UsesApiKey => SecretName is not null;
 }
 
+public sealed record LlmServerPreset(string Name, string Endpoint)
+{
+    public string? Model { get; init; }
+    public LlmServerOptions? ServerOptions { get; init; }
+
+    public string? Host => LlmEndpoint.TryNormalize(Endpoint, out var uri, out _) ? uri!.Authority : null;
+
+    public LlmServerOptions? ServerOptionsForHost() =>
+        ServerOptions is { } options && Host is { } host ? options.ForHost(host) : null;
+}
+
 public static class TranslationProviderCatalog
 {
     public static TranslationProviderInfo DeepL { get; } = new(
@@ -90,10 +101,21 @@ public static class TranslationProviderCatalog
         [ClaudeTranslationProvider.DefaultModel, "claude-sonnet-5-5", "claude-haiku-4-5"];
 
     /// <summary>Gotowe adresy popularnych serwerów zgodnych z OpenAI.</summary>
-    public static IReadOnlyList<(string Name, string Endpoint)> LlmPresets { get; } =
+    public static IReadOnlyList<LlmServerPreset> LlmPresets { get; } =
     [
-        ("OpenAI", LlmEndpoint.OpenAiDefault),
-        ("Ollama", "http://localhost:11434/v1"),
-        ("LM Studio", "http://localhost:1234/v1"),
+        new("OpenAI", LlmEndpoint.OpenAiDefault),
+        new("DeepSeek", "https://api.deepseek.com/v1")
+        {
+            Model = "deepseek-flash",
+            ServerOptions = new LlmServerOptions { Thinking = "disabled" },
+        },
+        new("Ollama", "http://localhost:11434/v1")
+        {
+            ServerOptions = new LlmServerOptions { ReasoningEffort = "none" },
+        },
+        new("LM Studio", "http://localhost:1234/v1"),
     ];
+
+    public static LlmServerPreset? FindLlmPreset(Uri endpoint) =>
+        LlmPresets.FirstOrDefault(preset => string.Equals(preset.Host, endpoint.Authority, StringComparison.OrdinalIgnoreCase));
 }

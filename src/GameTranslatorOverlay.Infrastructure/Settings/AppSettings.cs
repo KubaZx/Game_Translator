@@ -25,6 +25,8 @@ public sealed class AppSettings
     /// </summary>
     public string? LlmKeyHost { get; set; }
 
+    public Providers.LlmServerOptions? LlmServerOptions { get; set; }
+
     /// <summary>Model Claude (Anthropic).</summary>
     public string ClaudeModel { get; set; } = Providers.ClaudeTranslationProvider.DefaultModel;
     public string TranslateHotkey { get; set; } = "Ctrl+Shift+T";
@@ -87,6 +89,8 @@ public sealed class AppSettings
     /// odmieniają według niej zwroty do gracza; brak pola w starym pliku = unknown.
     /// </summary>
     public string PlayerGender { get; set; } = Core.Translation.PlayerGenders.UnknownSetting;
+
+    public bool ParagraphCacheKeys { get; set; }
 
     /// <summary>
     /// Pola, które nie wpływają na pipeline tłumaczenia: wygląd nakładki i panelu, skróty

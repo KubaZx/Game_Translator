@@ -21,6 +21,7 @@ public sealed class AppPaths
     public string DebugCapturesDirectory => Path.Combine(RootDirectory, "debug-captures");
     public string DatabasePath => Path.Combine(RootDirectory, "cache.db");
     public string SettingsPath => Path.Combine(RootDirectory, "settings.json");
+    public string CorpusDirectory => Path.Combine(RootDirectory, "corpus");
 
     /// <summary>Prywatny słownik użytkownika — osobny plik dla każdej pary językowej.</summary>
     public string GetUserGlossaryPath(string sourceLanguage, string targetLanguage) =>

@@ -97,7 +97,7 @@ public sealed class DeepLTranslationProvider(
         // Teksty z jednej klatki i ostatnie kwestie są dla siebie kontekstem: krótka kwestia
         // („Fine.”, „I'm ready.”) tłumaczona w izolacji bywa losowa albo w złym rodzaju,
         // a z sąsiednimi liniami trafia w sens. DeepL nie tłumaczy ani nie bilinguje context.
-        var context = BuildContext(texts, translationContext.RecentTexts);
+        var context = BuildContext(texts, translationContext.RecentTexts, translationContext.Scene);
 
         // Terminy słownika w tej partii → glosariusz DeepL (spójne, odmienione nazwy także
         // w środku zdań). Brak glosariusza nigdy nie blokuje tłumaczenia.
@@ -143,13 +143,15 @@ public sealed class DeepLTranslationProvider(
 
     private const int MaxContextChars = 1500;
 
-    internal static string? BuildContext(IReadOnlyList<string> texts, IReadOnlyList<string> recentTexts)
+    internal static string? BuildContext(IReadOnlyList<string> texts, IReadOnlyList<string> recentTexts, string? scene = null)
     {
-        if (texts.Count + recentTexts.Count < 2) return null;
+        var sceneLine = string.IsNullOrWhiteSpace(scene) ? null : OneLine(scene);
+        if (sceneLine is { Length: > MaxSceneChars }) sceneLine = sceneLine[..MaxSceneChars].TrimEnd();
+        if (sceneLine is null && texts.Count + recentTexts.Count < 2) return null;
 
         // Najpierw bieżąca klatka; z pozostałego miejsca najnowsze wcześniejsze linie.
         var current = new List<string>();
-        var used = 0;
+        var used = sceneLine is null ? 0 : sceneLine.Length + 1;
         foreach (var text in texts)
         {
             var line = OneLine(text);
@@ -170,8 +172,12 @@ public sealed class DeepLTranslationProvider(
         }
 
         var lines = earlier.Concat(current).ToList();
+        var useful = texts.Count > 1 || earlier.Count > 0;
+        if (sceneLine is not null) return useful ? string.Join('\n', lines.Prepend(sceneLine)) : sceneLine;
         return lines.Count > 0 && (texts.Count > 1 || earlier.Count > 0) ? string.Join('\n', lines) : null;
     }
+
+    private const int MaxSceneChars = 300;
 
     private static string OneLine(string text) => text.Replace('\n', ' ').Trim();
 

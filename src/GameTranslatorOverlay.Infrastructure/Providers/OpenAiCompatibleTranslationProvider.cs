@@ -20,11 +20,22 @@ public sealed class OpenAiCompatibleTranslationProvider(
     Func<string?> endpointAccessor,
     Func<string?> modelAccessor,
     LlmProviderOptions? options = null,
-    ILogger<OpenAiCompatibleTranslationProvider>? logger = null)
+    ILogger<OpenAiCompatibleTranslationProvider>? logger = null,
+    Func<LlmServerOptions?>? serverOptionsAccessor = null)
     : LlmTranslationProviderBase(options, logger ?? NullLogger<OpenAiCompatibleTranslationProvider>.Instance),
       IWarmableTranslationProvider
 {
     public const string ProviderName = "LLM";
+
+    public LlmUsageTotals Usage { get; } = new();
+
+    public LlmServerOptions? ActiveServerOptions() =>
+        LlmEndpoint.TryNormalize(endpointAccessor(), out var baseUri, out _) ? ServerOptionsFor(baseUri!) : null;
+
+    private LlmServerOptions? ServerOptionsFor(Uri baseUri) =>
+        serverOptionsAccessor?.Invoke() is { } configured && configured.AppliesTo(baseUri) && configured.HasRequestFields
+            ? configured.Sanitized()
+            : null;
 
     /// <summary>Czy klucz zapisany dla <paramref name="keyHost"/> może być wysłany na <paramref name="endpoint"/>.</summary>
     public static bool KeyBelongsTo(string? keyHost, Uri endpoint) =>
@@ -69,7 +80,14 @@ public sealed class OpenAiCompatibleTranslationProvider(
         // po zmianie adresu na inny serwis albo na lokalny proces nasłuchujący na porcie).
         var keyWithheld = !string.IsNullOrEmpty(storedKey) && !KeyBelongsTo(keyHostAccessor(), baseUri);
         var apiKey = keyWithheld ? null : storedKey;
-        var request = new ChatRequest(model, [new ChatMessage("system", systemPrompt), new ChatMessage("user", userMessage)]);
+        var serverOptions = ServerOptionsFor(baseUri);
+        var request = new ChatRequest(model, [new ChatMessage("system", systemPrompt), new ChatMessage("user", userMessage)])
+        {
+            Thinking = serverOptions?.Thinking is { } thinking ? new ThinkingOption(thinking) : null,
+            ReasoningEffort = serverOptions?.ReasoningEffort,
+            MaxTokens = serverOptions?.MaxTokens,
+            ResponseFormat = serverOptions?.ResponseFormat is { } format ? new ResponseFormatOption(format) : null,
+        };
 
         HttpResponseMessage response;
         try
@@ -114,6 +132,7 @@ public sealed class OpenAiCompatibleTranslationProvider(
         {
             var payload = await ProviderHttp.ReadJsonAsync<ChatResponse>(response, ProviderName, cancellationToken)
                 .ConfigureAwait(false);
+            RecordUsage(payload?.Usage);
             var choice = payload?.Choices is { Count: > 0 } choices ? choices[0] : null;
             if (!string.IsNullOrWhiteSpace(choice?.Message?.Refusal) || choice?.FinishReason == "content_filter")
             {
@@ -132,6 +151,16 @@ public sealed class OpenAiCompatibleTranslationProvider(
             return Task.CompletedTask;
         }
         return ProviderHttp.WarmUpAsync(httpClient, new Uri(baseUri!.GetLeftPart(UriPartial.Authority) + "/"), cancellationToken);
+    }
+
+    private void RecordUsage(ChatUsage? usage)
+    {
+        var tokens = usage?.ToTokenUsage();
+        Usage.Add(tokens);
+        if (tokens is null) return;
+        Logger.LogInformation(
+            "{Provider}: tokeny wejścia {PromptTokens} (z cache {CachedTokens}), wyjścia {CompletionTokens} (rozumowanie {ReasoningTokens})",
+            ProviderName, tokens.PromptTokens, tokens.CachedPromptTokens, tokens.CompletionTokens, tokens.ReasoningTokens);
     }
 
     private static bool IsQuotaExhausted(ProviderHttpFailure failure) =>
@@ -166,20 +195,66 @@ public sealed class OpenAiCompatibleTranslationProvider(
     {
         var where = LlmEndpoint.TryNormalize(endpointAccessor(), out var baseUri, out _) ? baseUri!.Authority : "serwer LLM";
         var local = baseUri is not null && LlmEndpoint.IsLoopback(baseUri) ? " (lokalnie)" : string.Empty;
-        return ProbeTranslationAsync($"Połączono z {where}{local}, model {modelAccessor()?.Trim()}", cancellationToken);
+        var extras = baseUri is not null && ServerOptionsFor(baseUri) is { } serverOptions
+            ? $", opcje serwera: {serverOptions.Describe()}"
+            : string.Empty;
+        return ProbeTranslationAsync($"Połączono z {where}{local}, model {modelAccessor()?.Trim()}{extras}", cancellationToken);
     }
 
     private sealed record ChatRequest(
         [property: JsonPropertyName("model")] string Model,
         [property: JsonPropertyName("messages")] IReadOnlyList<ChatMessage> Messages,
-        [property: JsonPropertyName("stream")] bool Stream = false);
+        [property: JsonPropertyName("stream")] bool Stream = false)
+    {
+        [JsonPropertyName("thinking")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public ThinkingOption? Thinking { get; init; }
+
+        [JsonPropertyName("reasoning_effort")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ReasoningEffort { get; init; }
+
+        [JsonPropertyName("max_tokens")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? MaxTokens { get; init; }
+
+        [JsonPropertyName("response_format")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public ResponseFormatOption? ResponseFormat { get; init; }
+    }
+
+    private sealed record ThinkingOption([property: JsonPropertyName("type")] string Type);
+
+    private sealed record ResponseFormatOption([property: JsonPropertyName("type")] string Type);
 
     private sealed record ChatMessage(
         [property: JsonPropertyName("role")] string Role,
         [property: JsonPropertyName("content")] string Content);
 
     private sealed record ChatResponse(
-        [property: JsonPropertyName("choices")] List<ChatChoice>? Choices);
+        [property: JsonPropertyName("choices")] List<ChatChoice>? Choices,
+        [property: JsonPropertyName("usage")] ChatUsage? Usage = null);
+
+    private sealed record ChatUsage(
+        [property: JsonPropertyName("prompt_tokens")] long? PromptTokens,
+        [property: JsonPropertyName("completion_tokens")] long? CompletionTokens,
+        [property: JsonPropertyName("prompt_cache_hit_tokens")] long? PromptCacheHitTokens,
+        [property: JsonPropertyName("prompt_tokens_details")] PromptTokenDetails? PromptDetails,
+        [property: JsonPropertyName("completion_tokens_details")] CompletionTokenDetails? CompletionDetails)
+    {
+        public LlmTokenUsage? ToTokenUsage() =>
+            PromptTokens is null && CompletionTokens is null
+                ? null
+                : new LlmTokenUsage(
+                    Math.Max(0, PromptTokens ?? 0),
+                    Math.Max(0, CompletionTokens ?? 0),
+                    Math.Max(0, CompletionDetails?.ReasoningTokens ?? 0),
+                    Math.Max(0, PromptCacheHitTokens ?? PromptDetails?.CachedTokens ?? 0));
+    }
+
+    private sealed record PromptTokenDetails([property: JsonPropertyName("cached_tokens")] long? CachedTokens);
+
+    private sealed record CompletionTokenDetails([property: JsonPropertyName("reasoning_tokens")] long? ReasoningTokens);
 
     private sealed record ChatChoice(
         [property: JsonPropertyName("message")] ChatResponseMessage? Message,

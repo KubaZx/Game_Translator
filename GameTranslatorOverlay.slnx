@@ -9,9 +9,12 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/GameTranslatorOverlay.Core.Tests/GameTranslatorOverlay.Core.Tests.csproj" />
+    <Project Path="tests/GameTranslatorOverlay.CorpusTool.Tests/GameTranslatorOverlay.CorpusTool.Tests.csproj" />
     <Project Path="tests/GameTranslatorOverlay.Infrastructure.Tests/GameTranslatorOverlay.Infrastructure.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/GameTranslatorOverlay.CorpusEval/GameTranslatorOverlay.CorpusEval.csproj" />
+    <Project Path="tools/GameTranslatorOverlay.CorpusTool/GameTranslatorOverlay.CorpusTool.csproj" />
     <Project Path="tools/GameTranslatorOverlay.LiveDiag/GameTranslatorOverlay.LiveDiag.csproj" />
     <Project Path="tools/GameTranslatorOverlay.OcrLab/GameTranslatorOverlay.OcrLab.csproj" />
     <Project Path="tools/GameTranslatorOverlay.ProviderEval/GameTranslatorOverlay.ProviderEval.csproj" />
