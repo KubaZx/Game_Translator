@@ -669,7 +669,9 @@ kwestii pisanej literami.
 
 Tryb live czyta obraz **wyłącznie z okna gry** — przez PrintWindow, a w ruchu kamery przez
 Windows Graphics Capture (to samo systemowe API, którego używa np. Pasek gry Xbox; Windows 11 nie
-pokazuje przy tym żółtej ramki; na Windows 10 aplikacja z niego nie korzysta). Wyłączenie Windows Graphics Capture: `"liveGraphicsCapture":
+pokazuje przy tym żółtej ramki; na Windows 10 aplikacja z niego nie korzysta). Gdy gra na
+pełnym ekranie nie daje się przechwycić przez PrintWindow, Windows Graphics Capture przejmuje
+całe przechwytywanie (nadal tylko okno gry). Wyłączenie Windows Graphics Capture: `"liveGraphicsCapture":
 false` w `settings.json`. Jeżeli gra nie wspiera żadnego z nich (część tytułów DirectX/Vulkan),
 aplikacja przechodzi na
 zrzut ekranu w prostokącie okna gry i **wyraźnie o tym ostrzega** w statusie live —

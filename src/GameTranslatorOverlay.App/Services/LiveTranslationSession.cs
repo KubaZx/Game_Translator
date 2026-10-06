@@ -171,6 +171,8 @@ public sealed class LiveSessionOptions
 
     public bool UseGraphicsCapture { get; init; } = true;
 
+    public bool PreferGraphicsCapture { get; init; }
+
     public double FastTrackFps { get; init; } = 30;
 
     public TimeSpan TrackedMotionPause { get; init; } = TimeSpan.FromMilliseconds(900);
@@ -230,6 +232,9 @@ public sealed class LiveTranslationSession(
     private bool _graphicsCaptureUnavailable;
     private bool _graphicsCaptureAnnounced;
     private long _continuingMotionTimestamp;
+    private bool _printWindowFails;
+    private bool _printWindowFailsInitialized;
+    private int _screenFallbackStreak;
     private long _fastTrackFrame;
     private long _capturedGraphicsFrame = -1;
     private TimeSpan _lastFastTrackAt;
@@ -676,7 +681,7 @@ public sealed class LiveTranslationSession(
 
     private void ReleaseIdleGraphicsCapture()
     {
-        if (_graphicsCapture is not { } source || _lastFrameMoving
+        if (_graphicsCapture is not { } source || _lastFrameMoving || _printWindowFails
             || Stopwatch.GetElapsedTime(_continuingMotionTimestamp) < GraphicsCaptureIdle) return;
         source.Dispose();
         _graphicsCapture = null;
@@ -686,9 +691,15 @@ public sealed class LiveTranslationSession(
 
     private (System.Drawing.Bitmap? Bitmap, bool UsedScreenFallback) CaptureGameFrame()
     {
+        if (!_printWindowFailsInitialized)
+        {
+            _printWindowFailsInitialized = true;
+            _printWindowFails = options.PreferGraphicsCapture && options.UseGraphicsCapture;
+        }
         ReleaseIdleGraphicsCapture();
-        if (_lastFrameMoving && GraphicsCapture() is { } source && source.SinceLastFrame < GraphicsCaptureStaleAfter
-            && source.FrameCount != _capturedGraphicsFrame
+        if ((_lastFrameMoving || _printWindowFails) && GraphicsCapture() is { } source
+            && source.SinceLastFrame < GraphicsCaptureStaleAfter
+            && (_printWindowFails || source.FrameCount != _capturedGraphicsFrame)
             && NativeMethods.IsWindow(gameWindowHandle) && !NativeMethods.IsIconic(gameWindowHandle))
         {
             var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
@@ -703,6 +714,7 @@ public sealed class LiveTranslationSession(
                 logger.LogWarning(ex, "Windows Graphics Capture: błąd odczytu klatki — wracam do PrintWindow");
                 source.Dispose();
                 _graphicsCapture = null;
+                _graphicsCaptureUnavailable = true;
             }
             if (frame is not null)
             {
@@ -715,8 +727,29 @@ public sealed class LiveTranslationSession(
                 frame.Dispose();
             }
         }
-        return ScreenCapture.CaptureWindowEx(gameWindowHandle);
+        var captured = ScreenCapture.CaptureWindowEx(gameWindowHandle);
+        if (captured.UsedScreenFallback && captured.Bitmap is not null && !_printWindowFails)
+        {
+            _printWindowFails = true;
+            if (GraphicsCapture() is not null)
+                logger.LogInformation("Okno gry nie wspiera PrintWindow — tryb live przechodzi na Windows Graphics Capture");
+        }
+        return captured;
     }
+
+    private bool ShouldWarnScreenFallback(bool usedScreenFallback)
+    {
+        if (!usedScreenFallback)
+        {
+            _screenFallbackStreak = 0;
+            return false;
+        }
+        _screenFallbackStreak++;
+        return !_warnedAboutScreenFallback
+            && (!options.UseGraphicsCapture || _graphicsCaptureUnavailable || _screenFallbackStreak >= ScreenFallbackWarningStreak);
+    }
+
+    private const int ScreenFallbackWarningStreak = 6;
 
     private bool FastTrackReady =>
         _lastFrameMoving && _graphicsCapture is { IsClosed: false } && TracksBlocks
@@ -815,7 +848,7 @@ public sealed class LiveTranslationSession(
             }
             orchestrator.Latency.Record(LatencyStage.Capture, captureWatch.Elapsed.TotalMilliseconds);
 
-            if (usedScreenFallback && !_warnedAboutScreenFallback)
+            if (ShouldWarnScreenFallback(usedScreenFallback))
             {
                 _warnedAboutScreenFallback = true;
                 logger.LogWarning("Okno gry nie wspiera PrintWindow — tryb live używa zrzutu ekranu (możliwe obce okna w kadrze)");
@@ -1495,7 +1528,7 @@ public sealed class LiveTranslationSession(
                 InvalidateUnavailableScene(cancellationToken);
                 return;
             }
-            if (usedScreenFallback && !_warnedAboutScreenFallback)
+            if (ShouldWarnScreenFallback(usedScreenFallback))
             {
                 _warnedAboutScreenFallback = true;
                 logger.LogWarning("Kontrola sceny wymaga przechwytywania ekranu");

@@ -17,6 +17,7 @@ MotionLab replay NAGRANIE --out KATALOG [--speed 1] [--provider-delay-ms 500] [-
          [--corpus PLIK] [--profile escape-academy] [--placement cover] [--live at-source] [--render-every 1]
          [--composite-scale 0.5] [--opacity 0.4] [--font-size 0] [--font-family auto] [--tail-ms 2000]
          [--max-frames 0] [--lookahead 10] [--show-overlay] [--no-analyze] [--keep-work] [--no-angle-probe]
+         [--capture auto|wgc|gdi]
 MotionLab analyze KATALOG_REPLAY [--truth PLIK] [--worst 15]
 ```
 
@@ -71,6 +72,11 @@ gotowym katalogu (np. po zmianie metryk) bez ponownego odtwarzania.
 - Kąt tekstu w odczytach live: po każdym OCR sesji ten sam obraz jest (w tle, najwyżej jeden naraz,
   osobnym silnikiem) czytany ponownie bez sesji tylko po `TextAngle` (`ocr.jsonl` pole `angle`;
   wyłączenie: `--no-angle-probe`).
+- Przechwytywanie (`--capture`): `auto` jak aplikacja (PrintWindow, Windows Graphics Capture
+  w trwającym ruchu), `wgc` — WGC jako główne źródło jak przy grze bez PrintWindow
+  (`LiveSessionOptions.PreferGraphicsCapture`), `gdi` — bez WGC. Migawki nakładki zapisują też
+  grubość i rozmiar kroju elementu (`shown.jsonl`: `weight`, `em`), a łatki — gęstość i wysokość
+  liter linii wzorcowej (`density`, `ascent`).
 
 ## Prawda (`truth`)
 

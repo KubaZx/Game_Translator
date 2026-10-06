@@ -12,7 +12,7 @@ internal static class Program
           Offline Windows OCR każdej klatki (ramki odkręcone o TextAngle) → NAGRANIE\truth.jsonl (gotowy plik jest używany ponownie).
 
         MotionLab replay NAGRANIE --out KATALOG [--speed 1] [--provider-delay-ms 500] [--cache KOPIA_cache.db]
-                 [--corpus PLIK] [--profile escape-academy] [--placement cover] [--live at-source] [--render-every 1]
+                 [--corpus PLIK] [--profile escape-academy] [--placement cover] [--live at-source] [--render-every 1] [--capture auto|wgc|gdi]
                  [--composite-scale 0.5] [--opacity 0.4] [--font-size 0] [--font-family auto] [--tail-ms 2000]
                  [--max-frames 0] [--lookahead 10] [--show-overlay] [--no-analyze] [--keep-work] [--no-angle-probe]
           Odtwarza klatki w oknie WPF w czasie z frames.jsonl, na nim prawdziwa LiveTranslationSession i OverlayWindow;
@@ -82,7 +82,8 @@ internal static class Program
                         (int)Number(options, "--max-frames", 0, 0, 1_000_000),
                         options.ContainsKey("--keep-work"),
                         !options.ContainsKey("--no-angle-probe"),
-                        (int)Number(options, "--lookahead", 10, 2, 60)));
+                        (int)Number(options, "--lookahead", 10, 2, 60),
+                        OneOf(options, "--capture", "auto", "auto", "wgc", "gdi")));
                 }
                 case "analyze":
                 {

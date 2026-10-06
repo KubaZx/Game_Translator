@@ -1545,8 +1545,10 @@ bez ikony klawisza — wcześniej poprawnie pokazany „Tab Items” liczył si�
   trwający ruch przy śledzeniu nie unieważnia sceny; OCR w ruchu co 0,9 s; nowy blok z klatki
   w ruchu szukany na świeżej klatce i pokazywany w nowym miejscu; migawka ramek z chwili
   przechwycenia (blok przesunięty w trakcie OCR nie wraca na stare miejsce).
-- `GraphicsCaptureSource`: Windows Graphics Capture tylko w trwającym ruchu (sesja zamykana po
-  2 s spokoju), pełna klatka i wycinki przez teksturę staging; szybkie śledzenie na wycinkach
+- `GraphicsCaptureSource`: Windows Graphics Capture w trwającym ruchu (sesja zamykana po
+  2 s spokoju) albo na stałe, gdy okno gry nie wspiera PrintWindow (zamiast zrzutu ekranu, przy
+  którym śledzenie było wyłączone — tak było w porannej sesji gry 2026-10-06 na pełnym ekranie;
+  MotionLab `--capture wgc`: przechwycenie 4K ok. 18 ms, metryki ruchu jak przy PrintWindow), pełna klatka i wycinki przez teksturę staging; szybkie śledzenie na wycinkach
   budzone nową klatką WGC, do 30×/s, tylko odświeżające. Koszt: pełna klatka 4K ok. 22 ms (PrintWindow
   ok. 51 ms), szybkie śledzenie ok. 2,5 ms.
 - `OcrGeometry.Unrotate`: ramki słów przy `TextAngle` obracane wokół środka obrazu (bez tego

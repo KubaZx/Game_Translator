@@ -575,6 +575,13 @@ zapasowego zrzutu ekranu.
   sesja opóźniała w SceneReplay zauważenie zmiany o 20–45 ms. Klatka o rozmiarze innym niż widoczna ramka
   okna, czarna albo starsza niż 1,5 s oznacza `PrintWindow` dla tego przechwycenia.
   `liveGraphicsCapture: false` wyłącza WGC.
+- **Okno bez PrintWindow.** Gdy `PrintWindow` da pusty obraz i sesja musiałaby użyć zrzutu ekranu
+  (gra na pełnym ekranie), WGC staje się głównym źródłem na stałe dla tej sesji live, także na
+  stojącym obrazie: klatka WGC to obraz samego okna, więc nie jest „zapasowym zrzutem ekranu”
+  i śledzenie działa. Pierwsze klatki przed startem WGC idą przez zrzut ekranu; ostrzeżenie
+  o zrzucie ekranu (i komunikat o pełnym ekranie) sesja pokazuje dopiero po 6 kolejnych zrzutach
+  albo gdy WGC jest niedostępne. `LiveSessionOptions.PreferGraphicsCapture` wymusza ten tryb
+  (MotionLab `--capture wgc`).
 - **Śledzenie.** Łatka bloku niesie `GlyphTrack`: punkty wnętrza liter i obrysu (albo pierścienia
   tła) w układzie roboczym łatki. Na każdej przechwyconej klatce (także kontrolnej w trakcie OCR)
   `GlyphTracker.Locate` szuka przesunięcia: najpierw wokół przewidywanego z poprzedniego ruchu,

@@ -13,6 +13,13 @@ oglądał.** Pomiary jednego nagrania różnią się między przebiegami o kilka
 
 **Najważniejsze dla gracza (0.5.0 → teraz, nagranie „pokój” z panoramami, krokami i obrotami):**
 
+- **Gra na pełnym ekranie bez zrzutu ekranu.** Gdy okno gry nie wspiera PrintWindow (w porannej
+  sesji Escape Academy na pełnym ekranie aplikacja przechodziła na zrzut ekranu, a wtedy całe
+  śledzenie w ruchu było wyłączone), tryb live czyta teraz samo okno gry przez Windows Graphics
+  Capture — bez obcych okien w kadrze, z działającym śledzeniem. Ostrzeżenie o zrzucie ekranu
+  pojawia się tylko, gdy i to zawiedzie. Na nagraniu odtwarzanym w ten sposób (`--capture wgc`)
+  przechwycenie 4K trwało ok. 18 ms, a wyniki w ruchu były takie jak wyżej.
+
 - **Napisy nie znikają przy ruchu kamery.** Czas z tłumaczeniem przy ruchu kamery: 3,5% → ok. 75%
   (stałe napisy HUD: 3,6% → ok. 80%); w nagraniu prologu z dialogiem 8% → ok. 46–51% (HUD 14% →
   ok. 80–90%). Dziury w tłumaczeniu obecnego napisu: 61 s → ok. 3,5–7 s.

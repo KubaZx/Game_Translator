@@ -19,7 +19,8 @@ using Microsoft.Extensions.Logging;
 internal sealed record ReplayOptions(
     string Out, double Speed, int ProviderDelayMs, string? Cache, string Corpus, string Profile, string Placement,
     string Live, double Opacity, double FontSize, string FontFamily, int RenderEvery, double CompositeScale,
-    bool ShowOverlay, bool Analyze, int TailMs, int MaxFrames, bool KeepWork, bool AngleProbe, int Lookahead);
+    bool ShowOverlay, bool Analyze, int TailMs, int MaxFrames, bool KeepWork, bool AngleProbe, int Lookahead,
+    string Capture = "auto");
 
 internal static class ReplayCommand
 {
@@ -192,6 +193,8 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
                     || _host.Window.IsCaptureExclusionActive,
                 IgnoreRegions = profile?.Live?.IgnoreRegions ?? [],
                 EnableDiagnostics = true,
+                UseGraphicsCapture = options.Capture != "gdi",
+                PreferGraphicsCapture = options.Capture == "wgc",
             };
             header = new ReplayHeaderDto(recording.Directory, recording.Name, _frameCount, recording.Width, recording.Height,
                 options.Speed, options.ProviderDelayMs, options.Cache, options.Corpus, options.Profile, options.Placement,
