@@ -432,6 +432,18 @@ public class TranslationPipelineOcrMatchingTests
         Assert.False(setup.Pipeline.IsCorpusPrefix("Completely unrelated sentence about rockets"));
         Assert.False(bare.Pipeline.IsCorpusPrefix("Take the rod"));
     }
+
+    [Fact]
+    public void Ikona_klawisza_przed_etykieta_nie_zmienia_tozsamosci_napisu()
+    {
+        var setup = Create();
+
+        var plain = setup.Pipeline.CorpusIdentity("Use Item");
+        Assert.NotNull(plain);
+        Assert.Equal(plain, setup.Pipeline.CorpusIdentity("Tab Use Item"));
+        Assert.Equal(plain, setup.Pipeline.CorpusIdentity("Userltem"));
+        Assert.Equal(setup.Pipeline.CorpusIdentity("Inspect"), setup.Pipeline.CorpusIdentity("X Inspect"));
+    }
 }
 
 public class PrefixLayoutTests

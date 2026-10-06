@@ -427,7 +427,8 @@ public sealed class TranslationPipeline(
         }
         var translatable = plan.Translatable.ToList();
         if (translatable.Count == 0 || translatable.Any(static unit => !unit.FromCorpus)) return null;
-        return IdentityPrefix + string.Join(IdentitySeparator, plan.Units.Select(static unit =>
+        var units = plan.Units.SkipWhile(static unit => unit.Literal && GameTranslatorOverlay.Core.Vision.GlyphCoverBuilder.IsIconToken(unit.ScreenText));
+        return IdentityPrefix + string.Join(IdentitySeparator, units.Select(static unit =>
             unit.Literal ? CorpusText.LooseKey(CorpusText.MatchKey(unit.ScreenText)) : unit.Key));
     }
 

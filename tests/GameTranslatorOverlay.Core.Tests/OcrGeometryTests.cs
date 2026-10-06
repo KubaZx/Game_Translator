@@ -13,8 +13,8 @@ public class OcrGeometryTests
 
         Assert.InRange(box.X, expectedX - 6, expectedX + 4);
         Assert.InRange(box.Y, expectedY - 6, expectedY + 4);
-        Assert.InRange(box.Width, 41, 48);
-        Assert.InRange(box.Height, 43, 50);
+        Assert.Equal(41, box.Width);
+        Assert.Equal(43, box.Height);
     }
 
     [Fact]
