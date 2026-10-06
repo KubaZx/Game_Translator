@@ -349,10 +349,17 @@ public static class GlyphCoverBuilder
         var skipLeft = iconSkip > 0 ? textLocal.X - regionLocal.X : 0;
         var skipRight = tailSkip > 0 ? regionLocal.Right - textLocal.Right : 0;
         var patch = BuildPatch(filled, mask, work.Width, regionLocal, soft, feather, skipLeft, skipRight);
-        var track = BuildTrack(work, refined, outline, contrast, inRegion, mask, regionLocal, soft, feather, skipLeft, skipRight, outer, map);
+        var track = BuildTrack(work, refined, outlineRgb >= 0 && outlinePx >= 1 ? outline : null, outlinePx, contrast, inRegion, mask, regionLocal,
+            soft, feather, skipLeft, skipRight, outer, map);
 
         var coverLines = MeasureLines(refined, work.Width, work.Height, lines, outer, margin, lineTexts);
         var stroke = MeasureStroke(refined, work.Width, coverLines.Count > 0 ? coverLines[0] : null);
+        if (track is not null)
+        {
+            var glyphArea = refined.Count(static v => v);
+            var glyphPerimeter = Morphology.Perimeter(refined, work.Width, work.Height);
+            track = track with { Stroke = glyphPerimeter > 0 ? 2.0 * glyphArea / glyphPerimeter : 0 };
+        }
         var align = AlignmentOf(coverLines);
 
         var origin = (X: box.X - outer.X, Y: box.Y - outer.Y);
@@ -389,11 +396,17 @@ public static class GlyphCoverBuilder
     }
 
     private static GlyphTrack? BuildTrack(
-        Workspace work, bool[] glyph, bool[] outline, float[] contrast, bool[] inRegion, bool[] mask, RectPx regionLocal,
+        Workspace work, bool[] glyph, bool[]? detectedOutline, double outlinePx, float[] contrast, bool[] inRegion, bool[] mask, RectPx regionLocal,
         bool soft, int feather, int skipLeft, int skipRight, RectPx outer, GlyphTrackMap map)
     {
         var width = work.Width;
         var height = work.Height;
+        var outline = new bool[glyph.Length];
+        if (detectedOutline is not null)
+        {
+            var near = Morphology.Dilate(glyph, width, height, (int)Math.Ceiling(outlinePx) + 1);
+            for (var i = 0; i < outline.Length; i++) outline[i] = detectedOutline[i] && near[i] && !glyph[i];
+        }
         var points = new List<int>();
         var strong = new List<int>();
         for (var y = 1; y < height - 1; y++)
@@ -418,7 +431,7 @@ public static class GlyphCoverBuilder
                 points.Add(i);
             }
         }
-        var chosen = strong.Count >= 24 ? strong : points;
+        var chosen = strong.Count >= Math.Max(24, points.Count * 0.3) ? strong : points;
         if (chosen.Count < 8) return null;
         var values = new float[chosen.Count];
         double contrastSum = 0;
@@ -436,7 +449,8 @@ public static class GlyphCoverBuilder
         var glyphPoints = chosen.Where(i => glyph[i]).ToArray();
         var outlinePoints = chosen.Where(i => outline[i] && !glyph[i]).ToArray();
         int[] partners;
-        if (outlinePoints.Length >= Math.Max(8, glyphPoints.Length * 0.3))
+        var partnerIsOutline = outlinePoints.Length >= Math.Max(8, glyphPoints.Length * 0.3);
+        if (partnerIsOutline)
         {
             partners = outlinePoints;
         }
@@ -468,7 +482,8 @@ public static class GlyphCoverBuilder
             level,
             glyphPoints,
             partners,
-            templateContrast);
+            templateContrast,
+            partnerIsOutline);
     }
 
     public static GlyphCover? Refill(GlyphCover cover, OcrBitmap region, int regionX, int regionY, int workDx = 0, int workDy = 0, bool? soft = null)
@@ -514,13 +529,14 @@ public static class GlyphCoverBuilder
         PushPull.Fill(channels, known, width, height);
         var useSoft = soft ?? track.Soft;
         var patch = BuildPatch(channels, track.Mask, width, track.Region, useSoft, track.Feather, track.SkipLeft, track.SkipRight);
-        var dx = (int)Math.Round(workDx * track.Step);
-        var dy = (int)Math.Round(workDy * track.Step);
+        var moved = track.Shifted(workDx, workDy);
+        var dx = (int)Math.Floor(moved.OriginX) - (int)Math.Floor(track.OriginX);
+        var dy = (int)Math.Floor(moved.OriginY) - (int)Math.Floor(track.OriginY);
         return cover with
         {
             PatchPbgra = patch,
             Soft = useSoft,
-            Track = track.Shifted(workDx, workDy),
+            Track = moved,
             Anchor = dx == 0 && dy == 0 ? cover.Anchor : cover.Anchor.Offset(dx, dy),
         };
     }

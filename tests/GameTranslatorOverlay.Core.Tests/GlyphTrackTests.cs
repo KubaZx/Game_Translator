@@ -151,6 +151,79 @@ public class GlyphTrackTests
         Assert.True(match is null || !match.Value.IsConfident, $"koszt {match?.Cost:F1}, kontrast {match?.LocalContrast:F1}");
     }
 
+    [Theory]
+    [InlineData(3, 3)]
+    [InlineData(-5, 1)]
+    [InlineData(7, -3)]
+    public void Cienki_maly_napis_jest_znaleziony_z_nieparzystym_przesunieciem(int dx, int dy)
+    {
+        var first = Solid(Width, Height, 0x283038);
+        Paint(first, Word(60, 80, capHeight: 16, stroke: 2), 0x000000, grow: 1);
+        Paint(first, Word(60, 80, capHeight: 16, stroke: 2), 0xF0F0F0);
+        var box = new RectPx(56, 76, 90, 24);
+        var cover = GlyphCoverBuilder.Build(first, box, [box], ["Hill"])!;
+
+        var moved = Solid(Width, Height, 0x283038);
+        Paint(moved, Word(60 + dx, 80 + dy, capHeight: 16, stroke: 2), 0x000000, grow: 1);
+        Paint(moved, Word(60 + dx, 80 + dy, capHeight: 16, stroke: 2), 0xF0F0F0);
+        var match = GlyphTracker.Locate(cover.Track!, moved, 0, 0, 72);
+
+        Assert.NotNull(match);
+        Assert.True(match.Value.IsConfident, $"koszt {match.Value.Cost:F1}");
+        Assert.Equal(dx, match.Value.WorkDx);
+        Assert.Equal(dy, match.Value.WorkDy);
+    }
+
+    [Fact]
+    public void Napis_bez_obrysu_na_teksturze_zostaje_po_zmianie_tekstury()
+    {
+        var first = Background(seed: 11);
+        Paint(first, Word(60, 70, capHeight: 40, stroke: 6), 0xF4F4F4);
+        var box = new RectPx(56, 66, 210, 50);
+        var cover = GlyphCoverBuilder.Build(first, box, [box], ["Hill"])!;
+
+        var second = Background(seed: 12);
+        Paint(second, Word(60, 70, capHeight: 40, stroke: 6), 0xF4F4F4);
+        var match = GlyphTracker.Locate(cover.Track!, second, 0, 0, 8);
+
+        Assert.True(match!.Value.IsConfident, $"koszt {match.Value.Cost:F1}, kontrast {match.Value.LocalContrast:F1}/{match.Value.TemplateContrast:F1}");
+        Assert.True(match.Value.IsStatic);
+    }
+
+    [Fact]
+    public void Kotwica_nie_dryfuje_przy_ulamkowym_kroku()
+    {
+        var frame = Scene(seed: 13, x: 60, y: 70);
+        var box = new RectPx(56, 66, 210, 50);
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"], map: new GlyphTrackMap(0, 0, 0.5))! with { Anchor = box };
+
+        var current = cover;
+        for (var i = 0; i < 12; i++)
+            current = GlyphCoverBuilder.Refill(current, frame, 0, 0, 1, 0) ?? current;
+
+        Assert.Equal(box.X + 6, current.Anchor.X);
+    }
+
+    [Fact]
+    public void Przygaszony_albo_odwrocony_napis_to_nie_brak_liter_a_jednolite_pole_tak()
+    {
+        var frame = Solid(Width, Height, 0x282828);
+        var glyphs = Word(60, 70, capHeight: 40, stroke: 6).ToList();
+        Paint(frame, glyphs, 0xF0F0F0);
+        var box = new RectPx(56, 66, 210, 50);
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"])!;
+
+        var dim = Solid(Width, Height, 0x282828);
+        Paint(dim, glyphs, 0x7A7A7A);
+        var inverted = Solid(Width, Height, 0xFFDC00);
+        Paint(inverted, glyphs, 0x000000);
+        var empty = Solid(Width, Height, 0x282828);
+
+        Assert.False(GlyphTracker.Locate(cover.Track!, dim, 0, 0, 0)!.Value.LettersGone);
+        Assert.False(GlyphTracker.Locate(cover.Track!, inverted, 0, 0, 0)!.Value.LettersGone);
+        Assert.True(GlyphTracker.Locate(cover.Track!, empty, 0, 0, 0)!.Value.LettersGone);
+    }
+
     private static OcrBitmap Scene(int seed, int x, int y, int background = -1)
     {
         var frame = background >= 0 ? Solid(Width, Height, background) : Background(seed);

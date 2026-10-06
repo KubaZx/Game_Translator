@@ -24,7 +24,9 @@ public sealed record GlyphTrack(
     float Contrast,
     int[] GlyphPoints,
     int[] PartnerPoints,
-    float TemplateContrast)
+    float TemplateContrast,
+    bool PartnerIsOutline = false,
+    double Stroke = 0)
 {
     public RectPx WindowBounds => new(
         (int)Math.Floor(OriginX),
@@ -40,78 +42,97 @@ public sealed record GlyphTrack(
 
 public readonly record struct GlyphMatch(
     int WorkDx, int WorkDy, double WindowDx, double WindowDy, double Cost, double StaticCost, double Typical, float Contrast,
-    double? LocalContrast = null, float TemplateContrast = 0)
+    double? LocalContrast = null, float TemplateContrast = 0, bool PartnerIsOutline = false, bool Ambiguous = false,
+    double? StaticLocalContrast = null)
 {
     public bool IsStatic => WorkDx == 0 && WorkDy == 0;
 
     public double AcceptLimit => Math.Max(8.0, Contrast * 0.14);
 
-    public bool KeepsContrast => LocalContrast is not { } local || Math.Abs(TemplateContrast) < 12
-        || (Math.Sign(local) == Math.Sign(TemplateContrast) && Math.Abs(local) >= Math.Abs(TemplateContrast) * 0.5);
+    public bool KeepsContrast => Keeps(LocalContrast);
 
-    public bool IsConfident => Cost <= AcceptLimit && (Typical <= 0 || Cost <= Typical * 0.55) && KeepsContrast;
+    public bool IsConfident => Cost <= AcceptLimit && (Typical <= 0 || Cost <= Typical * 0.55) && KeepsContrast && !Ambiguous;
+
+    public bool LettersGone => StaticLocalContrast is { } local && Math.Abs(TemplateContrast) >= 12
+        ? Math.Abs(local) < Math.Max(6.0, Math.Abs(TemplateContrast) * 0.2)
+        : StaticCost > Math.Max(Contrast * 0.84, 80);
+
+    private bool Keeps(double? measured)
+    {
+        if (measured is not { } local || Math.Abs(TemplateContrast) < 12) return true;
+        if (Math.Sign(local) != Math.Sign(TemplateContrast)) return false;
+        var share = PartnerIsOutline || TemplateContrast < 0 ? 0.5 : 0.2;
+        return Math.Abs(local) >= Math.Max(6.0, Math.Abs(TemplateContrast) * share);
+    }
 }
 
 public static class GlyphTracker
 {
     public const int CoarsePoints = 256;
 
-    public static GlyphMatch? Locate(GlyphTrack track, OcrBitmap region, int regionX, int regionY, double maxShift)
+    public static GlyphMatch? Locate(GlyphTrack track, OcrBitmap region, int regionX, int regionY, double maxShift, int centerDx = 0, int centerDy = 0)
     {
         if (track.Points.Length < 8 || region.Width <= 0 || region.Height <= 0) return null;
         var lum = Luminance(region);
         var radius = Math.Max(0, (int)Math.Ceiling(maxShift / track.Step));
-        var full = Cost(track, lum, region.Width, region.Height, regionX, regionY, 0, 0, 1);
-        if (full <= Math.Max(6.0, track.Contrast * 0.15) || radius == 0)
-            return new GlyphMatch(0, 0, 0, 0, full, full, 0, track.Contrast,
-                LocalContrast(track, lum, region.Width, region.Height, regionX, regionY, 0, 0), track.TemplateContrast);
+        var centerCost = Cost(track, lum, region.Width, region.Height, regionX, regionY, centerDx, centerDy, 1);
+        var centerContrast = LocalContrast(track, lum, region.Width, region.Height, regionX, regionY, centerDx, centerDy);
+        if (centerCost <= Math.Max(6.0, track.Contrast * 0.12) || radius == 0)
+            return Match(track, centerDx, centerDy, centerCost, centerCost, 0, centerContrast, false, centerContrast);
 
         var stride = Math.Max(1, track.Points.Length / CoarsePoints);
-        var step = radius >= 6 ? 2 : 1;
-        var bestX = 0;
-        var bestY = 0;
-        var best = Cost(track, lum, region.Width, region.Height, regionX, regionY, 0, 0, stride);
-        var samples = new List<double>(((2 * radius / step) + 1) * ((2 * radius / step) + 1));
-        for (var sy = -radius; sy <= radius; sy += step)
+        var step = radius > 12 && track.Stroke >= 4 ? 2 : 1;
+        var coarse = new List<(int X, int Y, double Cost)>((2 * radius / step + 1) * (2 * radius / step + 1));
+        for (var sy = centerDy - radius; sy <= centerDy + radius; sy += step)
         {
-            for (var sx = -radius; sx <= radius; sx += step)
+            for (var sx = centerDx - radius; sx <= centerDx + radius; sx += step)
             {
                 var c = Cost(track, lum, region.Width, region.Height, regionX, regionY, sx, sy, stride);
-                if (c == double.MaxValue) continue;
-                samples.Add(c);
-                if (c < best)
-                {
-                    best = c;
-                    bestX = sx;
-                    bestY = sy;
-                }
+                if (c != double.MaxValue) coarse.Add((sx, sy, c));
             }
         }
-        if (samples.Count == 0) return null;
-        samples.Sort();
-        var typical = samples[samples.Count / 2];
+        if (coarse.Count == 0) return null;
+        var ordered = coarse.OrderBy(static c => c.Cost).ToList();
+        var typical = ordered[ordered.Count / 2].Cost;
+        var seeds = new List<(int X, int Y, double Cost)>(3);
+        foreach (var candidate in ordered)
+        {
+            if (seeds.Any(s => Math.Abs(s.X - candidate.X) <= 2 && Math.Abs(s.Y - candidate.Y) <= 2)) continue;
+            seeds.Add(candidate);
+            if (seeds.Count == 3) break;
+        }
 
         var refined = double.MaxValue;
-        var refinedX = bestX;
-        var refinedY = bestY;
-        for (var sy = bestY - step; sy <= bestY + step; sy++)
+        var refinedX = centerDx;
+        var refinedY = centerDy;
+        foreach (var seed in seeds)
         {
-            for (var sx = bestX - step; sx <= bestX + step; sx++)
+            for (var sy = seed.Y - step; sy <= seed.Y + step; sy++)
             {
-                if (Math.Abs(sx) > radius || Math.Abs(sy) > radius) continue;
-                var c = Cost(track, lum, region.Width, region.Height, regionX, regionY, sx, sy, 1);
-                if (c < refined)
+                for (var sx = seed.X - step; sx <= seed.X + step; sx++)
                 {
-                    refined = c;
-                    refinedX = sx;
-                    refinedY = sy;
+                    if (Math.Abs(sx - centerDx) > radius || Math.Abs(sy - centerDy) > radius) continue;
+                    var c = Cost(track, lum, region.Width, region.Height, regionX, regionY, sx, sy, 1);
+                    if (c < refined)
+                    {
+                        refined = c;
+                        refinedX = sx;
+                        refinedY = sy;
+                    }
                 }
             }
         }
         if (refined == double.MaxValue) return null;
-        return new GlyphMatch(refinedX, refinedY, refinedX * track.Step, refinedY * track.Step, refined, full, typical, track.Contrast,
-            LocalContrast(track, lum, region.Width, region.Height, regionX, regionY, refinedX, refinedY), track.TemplateContrast);
+        var bestCoarse = ordered[0].Cost;
+        var ambiguous = ordered.Any(c => (Math.Abs(c.X - refinedX) > 3 || Math.Abs(c.Y - refinedY) > 3)
+            && c.Cost <= Math.Max(bestCoarse * 1.2, bestCoarse + 2));
+        return Match(track, refinedX, refinedY, refined, centerCost, typical,
+            LocalContrast(track, lum, region.Width, region.Height, regionX, regionY, refinedX, refinedY), ambiguous, centerContrast);
     }
+
+    private static GlyphMatch Match(GlyphTrack track, int dx, int dy, double cost, double centerCost, double typical, double? contrast, bool ambiguous, double? centerContrast) =>
+        new(dx, dy, dx * track.Step, dy * track.Step, cost, centerCost, typical, track.Contrast,
+            contrast, track.TemplateContrast, track.PartnerIsOutline, ambiguous, centerContrast);
 
     private static double? LocalContrast(GlyphTrack track, float[] lum, int width, int height, int regionX, int regionY, int sx, int sy)
     {
