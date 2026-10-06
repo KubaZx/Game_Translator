@@ -82,6 +82,42 @@ public class GameFolderGuardTests
     }
 
     [Fact]
+    public void Katalog_glowny_gry_to_folder_w_bibliotece_albo_folder_z_plikiem_gry_z_profilu()
+    {
+        using var temp = new TempDirectory();
+        temp.WriteFile("SteamLibrary/steamapps/common/Game/Game_Data/data.unity3d", [1]);
+        temp.WriteFile("Epic Games/Other/Content/data.pak", [1]);
+        temp.WriteFile("Games/Plain/Plain.exe", [0]);
+        temp.WriteFile("Games/Plain/Data/x/data.bin", [1]);
+
+        Assert.Equal(temp.Combine("SteamLibrary", "steamapps", "common", "Game"),
+            GameFolderGuard.ResolveGameRoot(temp.Combine("SteamLibrary", "steamapps", "common", "Game", "Game_Data")));
+        Assert.Equal(temp.Combine("Epic Games", "Other"), GameFolderGuard.ResolveGameRoot(temp.Combine("Epic Games", "Other", "Content")));
+        Assert.Equal(temp.Combine("Games", "Plain"), GameFolderGuard.ResolveGameRoot(temp.Combine("Games", "Plain", "Data", "x"), ["Plain.exe"]));
+        Assert.Equal(temp.Combine("Games", "Plain", "Data"), GameFolderGuard.ResolveGameRoot(temp.Combine("Games", "Plain", "Data")));
+        Assert.Equal(temp.Combine("SteamLibrary", "steamapps", "common"), GameFolderGuard.LibraryDirectory(temp.Combine("SteamLibrary", "steamapps", "common", "x.json")));
+        Assert.Null(GameFolderGuard.LibraryDirectory(temp.Combine("steamapps", "workshop", "x.json")));
+        Assert.Null(GameFolderGuard.LibraryGameRoot(temp.Combine("SteamLibrary", "steamapps", "common")));
+    }
+
+    [Fact]
+    public void Folder_nadrzedny_gry_jest_sprawdzany_bez_powtarzania_wskazanego_folderu()
+    {
+        using var temp = new TempDirectory();
+        temp.WriteFile("steamapps/common/Game/EasyAntiCheat/settings.json", [0]);
+        temp.WriteFile("steamapps/common/Game/Content/Paks/secret.pak", PakTail(encrypted: true));
+        temp.WriteFile("steamapps/common/Game/Game_Data/bin/pakchunk0.sig", [0]);
+        temp.WriteFile("steamapps/common/Other/BattlEye/BEClient_x64.dll", [0]);
+
+        var violations = GameFolderGuard.CheckFolder(temp.Combine("steamapps", "common", "Game", "Game_Data"));
+
+        Assert.Single(violations, static v => v.Code == GameFolderGuard.SignedContainer);
+        Assert.Single(violations, static v => v.Code == GameFolderGuard.AntiCheat && v.Message.Contains("EasyAntiCheat", StringComparison.Ordinal));
+        Assert.Single(violations, static v => v.Code == GameFolderGuard.EncryptedContainer);
+        Assert.DoesNotContain(violations, static v => v.Message.Contains("BattlEye", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Brak_folderu_jest_zglaszany()
     {
         Assert.Equal("missing", Assert.Single(GameFolderGuard.CheckFolder(Path.Combine(Path.GetTempPath(), "gto-missing-" + Guid.NewGuid().ToString("N")))).Code);
@@ -137,6 +173,18 @@ public class RunningGameGuardTests
     }
 
     [Fact]
+    public void Wykrywa_exe_z_katalogu_glownego_gry()
+    {
+        using var temp = new TempDirectory();
+        temp.WriteFile("Game/Launcher.exe", [0]);
+        temp.WriteFile("Game/Data/readme.txt", [0]);
+        var profile = new GameProfile { Id = "g", Name = "G" };
+
+        Assert.Empty(RunningGameGuard.FindRunning(profile, temp.Combine("Game", "Data"), new FakeProcessLister("Launcher")));
+        Assert.Equal(["Launcher"], RunningGameGuard.FindRunning(profile, temp.Combine("Game", "Data"), new FakeProcessLister("Launcher"), temp.Combine("Game")));
+    }
+
+    [Fact]
     public void Systemowa_lista_procesow_zawiera_biezacy_proces()
     {
         var names = new SystemProcessLister().RunningProcessNames();
@@ -184,6 +232,22 @@ public class OutputLocationGuardTests
         Assert.Equal(temp.Combine("worktree"), OutputLocationGuard.FindRepositoryRoot(temp.Combine("worktree")));
         Assert.Null(OutputLocationGuard.FindRepositoryRoot(temp.Combine("emptygit", "x")));
         Assert.Null(OutputLocationGuard.FindRepositoryRoot(temp.Combine("notgit")));
+    }
+
+    [Fact]
+    public void Biblioteka_gier_i_folder_z_plikiem_gry_sa_odrzucane()
+    {
+        using var temp = new TempDirectory();
+        temp.WriteFile("Games/G/g.exe", [0]);
+
+        Assert.NotNull(OutputLocationGuard.CheckOutsideGame(temp.Combine("steamapps", "common", "x.json"), "Plik", null));
+        Assert.NotNull(OutputLocationGuard.CheckOutsideGame(temp.Combine("GOG Galaxy", "Games", "G", "x.json"), "Plik", null));
+        Assert.NotNull(OutputLocationGuard.CheckOutsideGame(temp.Combine("Games", "G", "sub", "x.json"), "Plik", ["g.exe"]));
+        Assert.NotNull(OutputLocationGuard.CheckOutsideGame(temp.Combine("Games", "G", "x.json"), "Plik", ["g"]));
+        Assert.NotNull(OutputLocationGuard.CheckOutsideGame(temp.Combine("A", "x.json"), "Plik", null, temp.Combine("A")));
+        Assert.Null(OutputLocationGuard.CheckOutsideGame(temp.Combine("Games", "G", "x.json"), "Plik", ["other.exe"]));
+        Assert.Null(OutputLocationGuard.CheckOutsideGame(temp.Combine("steamapps", "x.json"), "Plik", null));
+        Assert.Null(OutputLocationGuard.CheckOutsideGame(temp.Combine("data", "x.json"), "Plik", ["g.exe"], temp.Combine("A"), null));
     }
 
     [Fact]

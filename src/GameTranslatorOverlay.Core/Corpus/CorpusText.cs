@@ -67,10 +67,46 @@ public static partial class CorpusText
     {
         var start = 0;
         var end = key.Length;
-        while (start < end && !char.IsLetterOrDigit(key[start])) start++;
-        while (end > start && !char.IsLetterOrDigit(key[end - 1])) end--;
+        while (start < end && !char.IsLetterOrDigit(key[start]) && !IsNumberSign(key, start)) start++;
+        while (end > start && !char.IsLetterOrDigit(key[end - 1]) && !IsNumberSign(key, end - 1)) end--;
         return start == 0 && end == key.Length ? key : key[start..end];
     }
+
+    public static bool IsNumberSign(ReadOnlySpan<char> text, int index)
+    {
+        switch (text[index])
+        {
+            case '-' or '−' or '#':
+                return DigitAt(text, index + 1);
+            case '+':
+                return DigitAt(text, index + 1) || DigitAt(text, index - 1);
+            case '%':
+                return DigitAt(text, index - 1) || (index >= 2 && text[index - 1] == ' ' && DigitAt(text, index - 2));
+            case '$' or '€' or '£' or '¥':
+                return DigitAt(text, index + 1) || DigitAt(text, index - 1)
+                    || (index + 2 < text.Length && text[index + 1] == ' ' && DigitAt(text, index + 2))
+                    || (index >= 2 && text[index - 1] == ' ' && DigitAt(text, index - 2));
+            default:
+                return false;
+        }
+    }
+
+    public static bool IsNumberCharacter(ReadOnlySpan<char> text, int index) =>
+        char.IsAsciiDigit(text[index]) || IsNumberSign(text, index);
+
+    public static bool HasDigit(ReadOnlySpan<char> text) => text.ContainsAnyInRange('0', '9');
+
+    public static bool IsDigitMistakenFor(char digit, char corpusCharacter) => (digit, char.ToLowerInvariant(corpusCharacter)) switch
+    {
+        ('1', 'l' or 'i' or '\'') => true,
+        ('0', 'o') => true,
+        ('5', 's') => true,
+        ('8', 'b') => true,
+        _ => false,
+    };
+
+    private static bool DigitAt(ReadOnlySpan<char> text, int index) =>
+        index >= 0 && index < text.Length && char.IsAsciiDigit(text[index]);
 
     public static string DigitSignature(string text)
     {

@@ -21,6 +21,8 @@ public static class GameFolderGuard
     private static readonly string[] ExcludedFileNames = ["content.ggpk", "_.index.bin"];
     private static readonly string[] ExcludedDirectoryNames = ["bundles2"];
 
+    private static readonly string[][] LibraryMarkers = [["steamapps", "common"], ["Epic Games"], ["GOG Galaxy", "Games"]];
+
     private static readonly byte[] PakMagic = [0xE1, 0x12, 0x6F, 0x5A];
     private static readonly byte[] UtocMagic = "-==--==--==--==-"u8.ToArray();
 
@@ -40,10 +42,11 @@ public static class GameFolderGuard
         return violations;
     }
 
-    public static IReadOnlyList<GuardViolation> CheckFolder(string gameDirectory, int maxEntries = 500_000, int maxViolations = 20)
+    public static IReadOnlyList<GuardViolation> CheckFolder(string gameDirectory, int maxEntries = 500_000, int maxViolations = 20,
+        IReadOnlyCollection<string>? processNames = null)
     {
         var violations = new List<GuardViolation>();
-        var root = Path.GetFullPath(gameDirectory);
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(gameDirectory));
         if (!Directory.Exists(root))
         {
             violations.Add(new GuardViolation("missing", $"Folder gry „{root}” nie istnieje."));
@@ -59,6 +62,21 @@ public static class GameFolderGuard
             }
         }
 
+        var seen = 0;
+        ScanTree(root, root, null, violations, ref seen, maxEntries, maxViolations);
+
+        var gameRoot = ResolveGameRoot(root, processNames);
+        if (!string.Equals(gameRoot, root, StringComparison.OrdinalIgnoreCase) && Directory.Exists(gameRoot))
+        {
+            ScanTree(gameRoot, gameRoot, root, violations, ref seen, maxEntries, maxViolations);
+        }
+
+        return violations;
+    }
+
+    private static void ScanTree(string tree, string root, string? skip, List<GuardViolation> violations, ref int seen,
+        int maxEntries, int maxViolations)
+    {
         var options = new EnumerationOptions
         {
             RecurseSubdirectories = true,
@@ -67,10 +85,10 @@ public static class GameFolderGuard
             ReturnSpecialDirectories = false,
         };
 
-        var seen = 0;
-        foreach (var directory in Directory.EnumerateDirectories(root, "*", options))
+        foreach (var directory in Directory.EnumerateDirectories(tree, "*", options))
         {
-            if (++seen > maxEntries || violations.Count >= maxViolations) break;
+            if (++seen > maxEntries || violations.Count >= maxViolations) return;
+            if (skip is not null && OutputLocationGuard.IsInside(directory, skip)) continue;
             var name = Path.GetFileName(directory);
             if (AntiCheatDirectoryMarkers.Any(marker => name.Contains(marker, StringComparison.OrdinalIgnoreCase)))
             {
@@ -82,14 +100,72 @@ public static class GameFolderGuard
             }
         }
 
-        foreach (var file in Directory.EnumerateFiles(root, "*", options))
+        foreach (var file in Directory.EnumerateFiles(tree, "*", options))
         {
-            if (++seen > maxEntries || violations.Count >= maxViolations) break;
+            if (++seen > maxEntries || violations.Count >= maxViolations) return;
+            if (skip is not null && OutputLocationGuard.IsInside(file, skip)) continue;
             var violation = CheckFile(root, file);
             if (violation is not null) violations.Add(violation);
         }
+    }
 
-        return violations;
+    public static string ResolveGameRoot(string gameDirectory, IReadOnlyCollection<string>? processNames = null)
+    {
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(gameDirectory));
+        return LibraryGameRoot(full) ?? FindDirectoryWithExecutable(full, processNames) ?? full;
+    }
+
+    public static string? LibraryDirectory(string path)
+    {
+        for (var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)); !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+        {
+            if (IsLibraryDirectory(current)) return current;
+        }
+        return null;
+    }
+
+    public static string? LibraryGameRoot(string path)
+    {
+        for (var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)); !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+        {
+            if (Path.GetDirectoryName(current) is { } parent && IsLibraryDirectory(parent)) return current;
+        }
+        return null;
+    }
+
+    public static string? FindDirectoryWithExecutable(string? directory, IReadOnlyCollection<string>? processNames)
+    {
+        if (directory is null || processNames is null || processNames.Count == 0) return null;
+        var executables = processNames
+            .Select(static name => name.Trim())
+            .Where(static name => name.Length > 0 && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0)
+            .Select(static name => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name : name + ".exe")
+            .ToList();
+        if (executables.Count == 0) return null;
+
+        string? found = null;
+        for (var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)); !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+        {
+            var candidate = current;
+            if (executables.Any(exe => File.Exists(Path.Combine(candidate, exe)))) found = candidate;
+        }
+        return found;
+    }
+
+    private static bool IsLibraryDirectory(string directory)
+    {
+        foreach (var marker in LibraryMarkers)
+        {
+            string? current = directory;
+            var matches = true;
+            for (var k = marker.Length - 1; k >= 0 && matches; k--)
+            {
+                matches = !string.IsNullOrEmpty(current) && Path.GetFileName(current).Equals(marker[k], StringComparison.OrdinalIgnoreCase);
+                current = matches ? Path.GetDirectoryName(current) : null;
+            }
+            if (matches) return true;
+        }
+        return false;
     }
 
     private static GuardViolation? CheckFile(string root, string file)

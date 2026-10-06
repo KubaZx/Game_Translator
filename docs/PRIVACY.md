@@ -24,9 +24,12 @@ takiego dostawcę (patrz niżej).
 
 ## Co trafia do API tłumaczeniowego
 
-- Do zewnętrznego API (np. DeepL) wysyłany jest **wyłącznie rozpoznany tekst** — krótkie
+- Do zewnętrznego API (np. DeepL) wysyłany jest **wyłącznie tekst** — krótkie
   fragmenty, które faktycznie wymagają tłumaczenia (po odfiltrowaniu śmieci i po sprawdzeniu
-  słownika oraz cache).
+  słownika oraz cache). Zwykle to tekst rozpoznany na ekranie. Gdy aktywny profil gry ma
+  lokalny korpus (ADR-014), zamiast odczytu może pójść dopasowany do niego **tekst z korpusu**
+  — pełne zdanie gry, także wtedy, gdy na ekranie widać dopiero jego część (np. napis
+  wypisywany litera po literze albo odczyt ucięty przez OCR).
 - **Nigdy nie są wysyłane screenshoty** ani żadne inne obrazy.
 - Dostawcy oparci na modelach językowych (**Claude** oraz **Model językowy** zgodny z API
   OpenAI) dostają razem z tekstem nazwę gry z aktywnego profilu i te terminy słownika
@@ -133,7 +136,7 @@ Wszystkie dane programu leżą w `%LOCALAPPDATA%\GameTranslatorOverlay`:
 | klucze API (osobny dla każdego dostawcy) | zaszyfrowane Windows DPAPI (`CurrentUser`) | odczyta je tylko ten sam użytkownik Windows na tej maszynie |
 | logi (Serilog, rolling) | zdarzenia techniczne, błędy (stack trace tylko do logu) | nigdy kluczy API; bez treści tłumaczeń w trybie prywatnym |
 | profile i słowniki | pliki JSON (`profiles/`, `glossaries/`) | dane statyczne, bez treści użytkownika |
-| korpus gry (`corpus\<profil>.corpus.jsonl`) | angielskie teksty gry odczytane przez narzędzie z ADR-014 | tworzy go tylko narzędzie na polecenie użytkownika; aplikacja wyłącznie go czyta (aktywny profil) i nie wysyła go nigdzie |
+| korpus gry (`corpus\<profil>.corpus.jsonl`) | angielskie teksty gry odczytane przez narzędzie z ADR-014 | tworzy go tylko narzędzie na polecenie użytkownika; aplikacja go czyta (aktywny profil) i nie wysyła pliku, ale do dostawcy może trafić pojedynczy tekst korpusu dopasowany do odczytu z ekranu; `CorpusTool translate` wysyła teksty korpusu do dostawcy wybranego przez użytkownika, tylko na jego polecenie |
 
 Usunięcie folderu `%LOCALAPPDATA%\GameTranslatorOverlay` usuwa wszystkie dane programu.
 
@@ -147,8 +150,12 @@ Usunięcie folderu `%LOCALAPPDATA%\GameTranslatorOverlay` usuwa wszystkie dane p
   Wyjątek opisuje ADR-014: osobne narzędzie offline, uruchamiane przez użytkownika przy
   wyłączonej grze, czyta wyłącznie do odczytu teksty z plików wybranej gry offline (bez
   anti-cheata, bez szyfrowania) i zapisuje lokalny korpus w `%LOCALAPPDATA%\GameTranslatorOverlay`.
-  Korpus i jego tłumaczenia nigdy nie opuszczają komputera, chyba że użytkownik sam zleci
-  ich tłumaczenie u wybranego dostawcy. Nakładka czyta tylko ten lokalny plik korpusu
-  aktywnego profilu, żeby dopasować odczyt OCR do znanego tekstu; do dostawcy trafia wtedy
-  tekst z korpusu zamiast odczytu z błędami OCR — ten sam tekst, który i tak jest na ekranie.
+  Plik korpusu i baza tłumaczeń nie są nigdzie wysyłane. Teksty korpusu trafiają do dostawcy
+  w dwóch sytuacjach: gdy użytkownik sam zleci tłumaczenie korpusu (`CorpusTool translate`,
+  wybrany dostawca) oraz gdy nakładka dopasuje odczyt OCR do tekstu korpusu aktywnego profilu
+  i tego tekstu nie ma jeszcze w cache — wtedy zamiast odczytu z błędami OCR idzie tekst
+  z korpusu. Nie zawsze jest to dokładnie to, co widać na ekranie: przy odczycie uciętym albo
+  przy napisie, który dopiero się wyświetla, wysyłane jest pełne zdanie z korpusu (także jego
+  część, której gracz jeszcze nie widział). Nakładka czyta tylko lokalny plik korpusu
+  aktywnego profilu, nigdy pliki gry.
 - Nie tworzy kont, nie wymaga logowania, nie profiluje użytkownika.

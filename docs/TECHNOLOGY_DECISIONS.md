@@ -370,4 +370,23 @@ w repozytorium (poza `eval/private/`), a Mock zapisuje wyłącznie do jawnie wsk
 `<folder danych>\corpus\<id aktywnego profilu>.corpus.jsonl` (dane z `extract`), nigdy pliki gry,
 i tylko do dopasowania odczytu OCR do znanego tekstu oraz klucza cache. Bez aktywnego profilu albo
 bez pliku zachowanie jest takie jak przed tą decyzją. Do dostawcy może trafić tekst z korpusu
-zamiast odczytu z błędami OCR — ten sam tekst, który jest na ekranie.
+zamiast odczytu z błędami OCR (sprostowanie w dopisku (3): nie zawsze jest to tekst widoczny
+na ekranie w całości).
+
+**Dopisek 2026-10-06 (3) — poprawki po recenzji kroku 2.**
+- *Co idzie do dostawcy.* Wcześniejsze zdanie „ten sam tekst, który jest na ekranie” było
+  nieprecyzyjne. Przy przyciągnięciu do korpusu wysyłany jest pełny tekst wpisu korpusu —
+  także gdy na ekranie widać dopiero jego część (napis wypisywany litera po literze, odczyt
+  ucięty przez OCR, zdanie złożone z kolejnych wierszy). Część zdania, której gracz jeszcze
+  nie widział, może więc trafić do dostawcy wcześniej niż na ekran. `PRIVACY.md` opisuje to
+  wprost; plik korpusu i baza tłumaczeń nadal nie są nigdzie wysyłane.
+- *Pkt 2 (gra wyłączona).* Proces gry jest sprawdzany **przed** jakimkolwiek odczytem w folderze
+  gry, także przed skanem nagłówków `.pak`/`.utoc`; lista procesów obejmuje pliki `*.exe`
+  z katalogu głównego gry.
+- *Pkt 3 (anti-cheat).* Katalog główny gry to folder `<…>\steamapps\common\<gra>` (także
+  `Epic Games\<gra>`, `GOG Galaxy\Games\<gra>`) albo najwyższy folder nad `--game-dir`
+  zawierający plik gry z `processNames` profilu. Gdy `--game-dir` wskazuje podfolder, znaczniki
+  anti-cheata, pliki `.sig` i zaszyfrowane kontenery są szukane w całym katalogu głównym.
+- *Pkt 1 i 6 (zapis).* `--out`, `--stats` (`extract`) oraz `--cache`, `--stats` (`translate`)
+  nie mogą leżeć w folderze gry, w jej katalogu głównym, pod `steamapps\common` (i analogicznie
+  w bibliotekach Epic/GOG) ani w folderze zawierającym plik gry z `processNames` profilu.

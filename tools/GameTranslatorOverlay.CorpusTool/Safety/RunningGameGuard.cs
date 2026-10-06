@@ -32,7 +32,7 @@ public sealed class SystemProcessLister : IProcessLister
 
 public static class RunningGameGuard
 {
-    public static IReadOnlyList<string> CandidateProcessNames(GameProfile profile, string gameDirectory)
+    public static IReadOnlyList<string> CandidateProcessNames(GameProfile profile, string gameDirectory, string? gameRoot = null)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var name in profile.ProcessNames)
@@ -40,9 +40,10 @@ public static class RunningGameGuard
             var bare = StripExe(name);
             if (bare.Length > 0) names.Add(bare);
         }
-        if (Directory.Exists(gameDirectory))
+        foreach (var directory in new[] { gameDirectory, gameRoot })
         {
-            foreach (var exe in Directory.EnumerateFiles(gameDirectory, "*.exe", SearchOption.TopDirectoryOnly))
+            if (directory is null || !Directory.Exists(directory)) continue;
+            foreach (var exe in Directory.EnumerateFiles(directory, "*.exe", SearchOption.TopDirectoryOnly))
             {
                 names.Add(StripExe(Path.GetFileName(exe)));
             }
@@ -50,10 +51,10 @@ public static class RunningGameGuard
         return names.ToList();
     }
 
-    public static IReadOnlyList<string> FindRunning(GameProfile profile, string gameDirectory, IProcessLister lister)
+    public static IReadOnlyList<string> FindRunning(GameProfile profile, string gameDirectory, IProcessLister lister, string? gameRoot = null)
     {
         var running = new HashSet<string>(lister.RunningProcessNames().Select(StripExe), StringComparer.OrdinalIgnoreCase);
-        return CandidateProcessNames(profile, gameDirectory).Where(running.Contains).OrderBy(static n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        return CandidateProcessNames(profile, gameDirectory, gameRoot).Where(running.Contains).OrderBy(static n => n, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static string StripExe(string name)

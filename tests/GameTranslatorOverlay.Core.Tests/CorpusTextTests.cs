@@ -36,6 +36,43 @@ public class CorpusTextTests
     }
 
     [Theory]
+    [InlineData("+10%", "+10%")]
+    [InlineData("(-5)", "-5")]
+    [InlineData("$25.", "$25")]
+    [InlineData("€ 40!", "€ 40")]
+    [InlineData("25 %", "25 %")]
+    [InlineData("#1:", "#1")]
+    [InlineData("- go", "go")]
+    [InlineData("score: 10 -", "score: 10")]
+    public void LooseKey_zostawia_znak_waluty_i_procent_przy_liczbie(string key, string expected)
+    {
+        Assert.Equal(expected, CorpusText.LooseKey(key));
+    }
+
+    [Theory]
+    [InlineData("you need 3 keys", "you need 3 keys", 0)]
+    [InlineData("the o1d vau1t", "the old vault", 2)]
+    [InlineData("th1s 0ld 5ign 8ox", "this old sign box", 4)]
+    [InlineData("level 4", "level 3", -1)]
+    [InlineData("5kg", "6kg", -1)]
+    [InlineData("10am", "ioam", 2)]
+    [InlineData("ioam", "10am", -1)]
+    [InlineData("x3", "x", -1)]
+    [InlineData("x", "x3", -1)]
+    [InlineData("-10%", "+10%", -1)]
+    [InlineData("10", "10%", -1)]
+    [InlineData("$5", "s5", -1)]
+    [InlineData("a-b", "a+b", 1)]
+    [InlineData("11m sure", "i'm sure", 2)]
+    [InlineData("it's", "it1s", -1)]
+    public void Odleglosc_z_ochrona_liczb(string reading, string corpus, int expected)
+    {
+        var distance = EditDistance.BoundedGuarded(reading, corpus, 10);
+
+        Assert.Equal(expected < 0 ? 11 : expected, distance);
+    }
+
+    [Theory]
     [InlineData("level 3 of 10", "3|10")]
     [InlineData("no digits", "")]
     [InlineData("+25% and 3/5", "25|3|5")]

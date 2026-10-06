@@ -63,7 +63,12 @@ Zawartość:
   albo tekst dosłowny (prefiks mówcy, klawisz, śmieciowy akapit). Słownik, cache i dostawca działają
   na jednostkach; blok jest składany z powrotem w układzie wierszy z ekranu (`TextReflow`).
   Ręczna korekta, słownik i stary wpis całego odczytu są sprawdzane przed/po jednostkach
-  (korekta > słownik > jednostki z cache > stary wpis całego odczytu > dostawca). Bez korpusu
+  (korekta > słownik > jednostki z cache > stary wpis całego odczytu > dostawca; nieaktualny wpis
+  całego odczytu — stary format, `qa=…`, inna płeć — jest zapasem, gdy dostawca zawiedzie).
+  Ręczna korekta bloku idzie pod klucz kanoniczny tylko przy dokładnym dopasowaniu do korpusu,
+  przy przybliżeniu — pod klucz odczytu. Dopasowanie chroni liczby: znaki `+ - − # $ € £ ¥ %`
+  przy liczbie muszą się zgadzać, a cyfra odczytu może różnić się od korpusu tylko naprzeciw
+  litery mylonej przez OCR (`EditDistance.BoundedGuarded`). Bez korpusu
   i bez `SplitParagraphs` pipeline działa jak wcześniej (ta sama ścieżka kodu).
 - **Słownik** (`Glossary/`): `GlossaryPrecedence` — jedna reguła pierwszeństwa dla tłumaczenia
   lokalnego i glosariusza DeepL; `PersistableTerms` — terminy, które mogą trafić do trwałego

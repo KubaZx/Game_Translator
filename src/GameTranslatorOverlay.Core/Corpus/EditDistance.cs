@@ -51,6 +51,64 @@ public static class EditDistance
         return distance > maxDistance ? 0.0 : 1.0 - (double)distance / longest;
     }
 
+    public static int BoundedGuarded(ReadOnlySpan<char> reading, ReadOnlySpan<char> corpus, int maxDistance)
+    {
+        if (maxDistance < 0) return 0;
+        if (Math.Abs(reading.Length - corpus.Length) > maxDistance) return maxDistance + 1;
+
+        var blocked = maxDistance + 1;
+        var width = corpus.Length + 1;
+        Span<bool> readingGuard = reading.Length <= 512 ? stackalloc bool[reading.Length] : new bool[reading.Length];
+        Span<bool> corpusGuard = corpus.Length <= 512 ? stackalloc bool[corpus.Length] : new bool[corpus.Length];
+        for (var i = 0; i < reading.Length; i++) readingGuard[i] = CorpusText.IsNumberCharacter(reading, i);
+        for (var j = 0; j < corpus.Length; j++) corpusGuard[j] = CorpusText.IsNumberCharacter(corpus, j);
+
+        Span<int> buffer = width <= 512 ? stackalloc int[width * 2] : new int[width * 2];
+        var previous = buffer[..width];
+        var current = buffer[width..];
+        previous[0] = 0;
+        for (var j = 1; j < width; j++) previous[j] = Math.Min(blocked, corpusGuard[j - 1] ? blocked : previous[j - 1] + 1);
+
+        for (var i = 1; i <= reading.Length; i++)
+        {
+            var r = reading[i - 1];
+            var rGuard = readingGuard[i - 1];
+            current[0] = rGuard ? blocked : Math.Min(blocked, previous[0] + 1);
+            var rowMin = current[0];
+            for (var j = 1; j < width; j++)
+            {
+                var c = corpus[j - 1];
+                var cGuard = corpusGuard[j - 1];
+                int step;
+                if (r == c) step = 0;
+                else if (!rGuard && !cGuard) step = 1;
+                else if (!cGuard && char.IsAsciiDigit(r) && CorpusText.IsDigitMistakenFor(r, c)) step = 1;
+                else step = blocked;
+                var value = Math.Min(blocked, previous[j - 1] + step);
+                if (!rGuard) value = Math.Min(value, previous[j] + 1);
+                if (!cGuard) value = Math.Min(value, current[j - 1] + 1);
+                current[j] = value;
+                if (value < rowMin) rowMin = value;
+            }
+            if (rowMin > maxDistance) return blocked;
+            var swap = previous;
+            previous = current;
+            current = swap;
+        }
+
+        return Math.Min(blocked, previous[corpus.Length]);
+    }
+
+    public static double GuardedRatio(ReadOnlySpan<char> reading, ReadOnlySpan<char> corpus, double minimumRatio)
+    {
+        if (!CorpusText.HasDigit(reading) && !CorpusText.HasDigit(corpus)) return Ratio(reading, corpus, minimumRatio);
+        var longest = Math.Max(reading.Length, corpus.Length);
+        if (longest == 0) return 1.0;
+        var maxDistance = (int)Math.Floor((1.0 - minimumRatio) * longest + 1e-9);
+        var distance = BoundedGuarded(reading, corpus, maxDistance);
+        return distance > maxDistance ? 0.0 : 1.0 - (double)distance / longest;
+    }
+
     public static AlignmentResult? FindWithin(ReadOnlySpan<char> pattern, ReadOnlySpan<char> text, int maxDistance)
     {
         if (pattern.Length == 0 || text.Length == 0 || maxDistance < 0) return null;

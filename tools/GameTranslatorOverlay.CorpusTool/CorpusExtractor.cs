@@ -44,21 +44,23 @@ public sealed class CorpusExtractor(IProcessLister processLister)
         var refusals = GameFolderGuard.CheckProfile(profile).ToList();
         if (refusals.Count > 0) throw Refuse(refusals);
 
-        var gameDirectory = Path.GetFullPath(options.GameDirectory!);
-        refusals.AddRange(GameFolderGuard.CheckFolder(gameDirectory));
-        if (refusals.Count > 0) throw Refuse(refusals);
-
-        var running = RunningGameGuard.FindRunning(profile, gameDirectory, processLister);
+        var gameDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.GameDirectory!));
+        var gameRoot = GameFolderGuard.ResolveGameRoot(gameDirectory, profile.ProcessNames);
+        var running = RunningGameGuard.FindRunning(profile, gameDirectory, processLister, gameRoot);
         if (running.Count > 0)
         {
             throw new RefusedException($"Gra jest uruchomiona (proces: {string.Join(", ", running)}). Zamknij ją i spróbuj ponownie.");
         }
 
+        refusals.AddRange(GameFolderGuard.CheckFolder(gameDirectory, processNames: profile.ProcessNames));
+        if (refusals.Count > 0) throw Refuse(refusals);
+
         var outputPath = options.ResolveOutputPath(profile.Id);
-        if (OutputLocationGuard.Check(outputPath, gameDirectory) is { } outputProblem) throw new RefusedException(outputProblem);
-        if (options.StatsPath is { } statsPath && OutputLocationGuard.IsInside(statsPath, gameDirectory))
+        if (OutputLocationGuard.Check(outputPath, gameDirectory, gameRoot, profile.ProcessNames) is { } outputProblem) throw new RefusedException(outputProblem);
+        if (options.StatsPath is { } statsPath
+            && OutputLocationGuard.CheckOutsideGame(statsPath, "Plik statystyk", profile.ProcessNames, gameDirectory, gameRoot) is { } statsProblem)
         {
-            throw new RefusedException("Plik statystyk nie może leżeć w folderze gry.");
+            throw new RefusedException(statsProblem);
         }
 
         if (!recipe.Format.Equals(UnityTextAssetReader.FormatId, StringComparison.OrdinalIgnoreCase))

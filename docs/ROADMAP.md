@@ -954,7 +954,8 @@ oddaje wyniki jednostek do `TranslateAsync`, więc znana jednostka nie jest czyt
 Przyciąganie nie używa tekstów z podstawieniem (`{…}`, `%s/%d/%i/%f`) ani ze znacznikiem przycisku
 `[X]`, którego nie ma w odczycie. Krótki tekst, który odrzuca `JunkFilter`, przechodzi tylko przy
 dokładnym dopasowaniu do korpusu (min. 2 litery). Ręczna korekta bloku będącego jednym tekstem
-korpusu zapisuje się pod kluczem kanonicznym (`TranslationOutcome.CacheKey`). Tryb prywatny
+korpusu zapisuje się pod kluczem kanonicznym (`TranslationOutcome.CacheKey`; od kroku 2b tylko
+przy dopasowaniu dokładnym). Tryb prywatny
 i Cache-only: przyciąganie w pamięci, reszta jak dotąd (w trybie prywatnym baza z dysku nie jest
 czytana, więc wpisy z wyprzedzeniem nie działają). Bez korpusu i bez `paragraphCacheKeys` plan
 jest pusty i pipeline idzie dokładnie dawną ścieżką kodu.
@@ -999,7 +1000,8 @@ przyciągniętych do korpusu EA — 4 różnią się tylko wielkością liter (o
 kropką na końcu, 1 to krótka etykieta w bloku śmieci; zero zmian znaczenia (przegląd ręczny).
 W praktyce przyciąganie działa wyłącznie z korpusem aktywnego profilu, a PoE2 korpusu mieć nie
 może (ADR-014). Przegląd ręczny przyciągnięć EA (79 bloków): bez błędnych podmian; pokazał trzy
-usterki naprawione w tej rundzie — literalne `\n` w 102 tekstach UI (teraz nowy wiersz, także
+usterki naprawione w tej rundzie — literalne `\n` w 30 tekstach UI (sprostowanie w kroku 2b: wcześniej
+podano 102 — tyle tekstów ma prawdziwy nowy wiersz; teraz nowy wiersz, także
 w kluczu `translate`), znacznik mówcy w środku wiersza (teraz dosłowny) i liczba jako osobny
 akapit wysyłana do dostawcy (teraz dosłowna). Odczyty z animacji pisania (ucięte zdanie)
 dostają tłumaczenie całego zdania — świadomie (jak w rundzie 2026-10-06).
@@ -1016,8 +1018,107 @@ Liczby: `GTO Diagnostics\20261005-natywne-spolszczenie\krok2\powtorka` (`powtork
 Weryfikacja: build całego rozwiązania i App bez ostrzeżeń; Core 1097/1097 (+30), Infrastructure
 276/276 (+6), CorpusTool 147/147; pokrycie linii (scalone): Core 96,9%, Infrastructure 93,5%.
 
-**Otwarte.** Nie sprawdzone w oknie gry ani u prawdziwego dostawcy (tylko powtórka przez pipeline
-i SceneReplay bez korpusu); jakość tłumaczeń składanych z jednostek u DeepL/LLM to hipoteza.
+**Otwarte.** Nie sprawdzone w oknie gry (tylko powtórka przez pipeline i SceneReplay bez korpusu);
+jakość tłumaczeń składanych z jednostek u DeepL/LLM na żywo to hipoteza. Tłumaczenie korpusu
+u prawdziwego dostawcy wykonano 2026-10-06 (DeepSeek V4.1 Flash bez rozumowania, 7 581 tekstów,
+337 partii bez błędu, 8 z uwagą kontroli jakości, ok. 0,12–0,24 USD, 5 min 23 s).
 Tryb prywatny nie czyta wpisów z wyprzedzeniem. Korpus jest wczytywany przy przebudowie
 pipeline'u — po nowym `extract`/`translate` trzeba uruchomić aplikację ponownie. Ręczna korekta
 bloku złożonego z kilku części działa tylko dla tego samego odczytu.
+
+#### Krok 2b — poprawki po recenzji (2026-10-06)
+
+Recenzja kroku 2 (rundy 2026-10-06 (1)–(3)): ok-with-fixes, 2 × medium, 5 × low. Każda poprawka
+ma najpierw test odtwarzający na HEAD `f37ef8f` (na HEAD nie przechodziło 31 nowych testów Core
+i 13 CorpusTool; testy nowych funkcji — `BoundedGuarded`, `ResolveGameRoot`, `CheckOutsideGame` —
+powstały razem ze zmianą), potem zmianę. L1 odtworzono pomiarem (3 próbki z kluczem prawdy
+różnym od bieżącego `MatchKey`).
+
+- **M1 — znak, waluta i procent przy liczbie.** `LooseKey` obcinał na brzegach wszystko poza
+  literami i cyframi, więc „-10%” przyciągało się dokładnie (1,0) do „+10%”, „€25” do „$25”,
+  a samo „10” do „+10%”. Teraz `CorpusText.IsNumberSign` zostawia przy liczbie `+ - − #`
+  (bezpośrednio przed cyfrą; `+` także po), `%` (po liczbie, także po spacji) i `$ € £ ¥`
+  (przed albo po, także ze spacją), a te znaki muszą się zgadzać również w przybliżeniach,
+  fragmentach i częściach wiersza (`EditDistance.BoundedGuarded`). Fragment nie może zaczynać się
+  ani kończyć w środku liczby ze znakiem.
+- **M2 — liczby sklejone z literami.** „5kg”, „10am”, „1st”, „x3” nie wchodziły do sygnatury
+  cyfr, więc „6kg” zamiast „5kg” przechodziło jako literówka. `BoundedGuarded` liczy odległość
+  edycyjną, w której cyfry i znaki liczb muszą stać naprzeciw identycznych znaków; dopuszczalna
+  jest tylko cyfra odczytu naprzeciw litery mylonej przez OCR w korpusie (1/l/I, 0/O, 5/S, 8/B)
+  i — rozszerzenie po pomiarze — `1` naprzeciw apostrofu (OCR czyta „I'm” jako „11m”: bez tego
+  reguła odrzucała 6 próbek syntetycznych i 1 blok prawdziwej sesji EA). Wstawiona albo
+  zgubiona cyfra, inna cyfra i litera odczytu naprzeciw cyfry korpusu = brak dopasowania.
+  Dotychczasowa reguła „liczby samodzielne 1:1” zostaje.
+- **L1 — klucz prawdy w ewaluatorze.** `CorpusEval evaluate` brał `truthKey` zapisany przy renderze
+  (stary `MatchKey` sprzed zamiany literalnego `\n`); teraz liczy go przy ocenie z `truth`.
+  Tekstów korpusu z literalnym `\n` jest **30** (UI), nie 102 — 102 to teksty z prawdziwym nowym
+  wierszem (poprawione w rundzie (3) i w CHANGELOG).
+- **L2 — nieaktualny wpis całego bloku przy błędzie dostawcy.** Przy aktywnym korpusie wpis całego
+  odczytu w starym formacie (bez `reflow-1`), z `qa=…` albo z inną płcią nie był zapasem: próba
+  całego bloku szła bez słownika wpisów zastępowanych. Teraz `ProbeBlocksAsync` go zbiera
+  (bez liczenia trafień), a gdy złożenie jednostek kończy się brakiem (błąd dostawcy, limit),
+  wynikiem jest stary wpis — jak bez korpusu. Gdy dostawca odpowie, wygrywa nowe tłumaczenie.
+- **L3 — korekta bloku przyciągniętego przybliżeniem.** `TranslationOutcome.CacheKey` (klucz
+  ręcznej korekty w orkiestratorze) jest kanoniczny tylko przy dopasowaniu dokładnym
+  (`UnitPlan.CorrectionKey`, `TranslationUnit.ExactMatch`); przy przybliżeniu jest pusty, więc
+  `TranslationOrchestrator.SaveManualCorrectionAsync` zapisuje korektę pod kluczem odczytu OCR —
+  błędne przybliżenie nie przenosi korekty na inne odczyty tego zdania.
+- **L4 — straże ADR-014.** `extract` sprawdza proces gry przed jakimkolwiek odczytem w folderze
+  gry (wcześniej po skanie nagłówków `.pak`/`.utoc`), także `*.exe` z katalogu głównego gry.
+  Katalog główny (`GameFolderGuard.ResolveGameRoot`): `<…>\steamapps\common\<gra>` (też
+  `Epic Games\<gra>`, `GOG Galaxy\Games\<gra>`) albo najwyższy folder nad `--game-dir` z plikiem
+  z `processNames` profilu; gdy `--game-dir` to podfolder, anti-cheat, `.sig` i zaszyfrowane
+  kontenery są szukane w całym katalogu głównym (anti-cheat innej gry w bibliotece nie blokuje).
+  `--out`/`--stats` (`extract`) i `--cache`/`--stats` (`translate`) nie mogą leżeć w folderze gry,
+  w katalogu głównym, pod `steamapps\common` (ani w bibliotekach Epic/GOG) ani w folderze z plikiem
+  gry z profilu (`OutputLocationGuard.CheckOutsideGame`).
+- **L5 — prywatność.** `PRIVACY.md` i dopisek (3) do ADR-014 nie obiecują już, że do dostawcy idzie
+  tylko tekst widoczny na ekranie: przy przyciągnięciu może to być pełne zdanie z korpusu, którego
+  część dopiero się wyświetla. Usunięte sprzeczne „korpusu nie wysyła nigdzie” (`CorpusTool
+  translate` wysyła teksty korpusu na polecenie gracza).
+
+**Eksperyment przeliczony** (2026-10-06, te same 880 próbek OCR bez nowego renderu, świeża kopia
+cache; pełny przegląd 448 konfiguracji w każdym wariancie — zawsze wybiera T 0,80 / m 0,08 / L 16):
+
+| | HEAD, klucz z renderu | HEAD + L1 | Po poprawkach (stan końcowy) |
+|---|---:|---:|---:|
+| Poprawnie przyciągnięte | 695 (78,98%) | 697 (79,2%) | 690 (78,4%) |
+| Błędnie (z przyciągniętych) | 3 (0,43%) | 1 (0,14%) | 1 (0,14%) |
+| Tylko fragment / bez dopasowania | 10 / 172 | 10 / 172 | 12 / 177 |
+| Wariant ścisły: poprawne / błędne | 621 / 2 | 623 / 0 | 616 / 0 |
+| Cache EA 242: znaki / bloki lokalnie | 59,44% / 48,76% | 59,44% / 48,76% | 59,44% / 48,76% |
+| PoE2: bloki z trafieniem / ze zmianą tekstu | 3,24% / 0 | 3,24% / 0 | 3,24% / 0 |
+
+HEAD z kluczem z renderu liczył 2 poprawne przyciągnięcia jako błędne (3 próbki z literalnym `\n`).
+Stan końcowy traci 7 poprawnych z 697: odczyty, w których OCR wstawił cyfrę w słowo albo naprzeciw
+znaku, który nie jest mylną literą — koszt reguły M2 (5 → bez dopasowania, 2 → tylko fragment).
+Ten sam jedyny błąd co dotąd (OCR zgubił cenę, została sama etykieta). Wariant z regułą M2 bez
+apostrofu: 684 poprawne, 1 błędne, cache EA 58,89% znaków / 48,35% bloków. Prawdziwy cache EA
+i PoE2: liczby, przegląd przyciągnięć przybliżonych i trafienia PoE2 identyczne jak na HEAD.
+Czas `SnapBlock` (2 przebiegi): EA p95 0,86–0,88 → 0,91–0,94 ms, p99 1,8–1,9 → 2,3 ms; korpus
+150 tys. p95 4,7 → 4,8 ms.
+
+**Powtórka przeliczona** (`CorpusEval replay`, Mock, świeża kopia cache i świeżo wypełniona baza B —
+`corpustool-mock-b.json` identyczny z poprzednim): wszystkie liczniki identyczne z poprzednią
+powtórką i z HEAD na tych samych kopiach — EA 217 B: 2 024 / 3 154 znaków (64,2%), 113 / 217
+bloków (52,1%), 104 zapytania, 110 tekstów / 1 393 znaki do dostawcy; EA 242 B: 60,4% / 49,6%,
+122 zapytania; kontrola PoE2 (korpus EA przy innej grze): 36 / 247 bloków (14,6%), 1 569 / 7 139
+znaków (22,0%), 211 zapytań, 6 przyciągniętych (1 zmiana treści, 4 wielkość liter). Przegląd
+przyciągnięć (85 bloków z wyświetlanym tekstem) identyczny. Próba lokalna p50/p95 w granicach
+szumu (EA 217 B 0,110/0,701 → 0,100/0,692 ms). Wniosek z pomiaru: w tych sesjach nie ma
+przyciągnięcia zależnego od znaku przy liczbie ani od liczby sklejonej z literą; spadek błędnych
+podmian na tekstach z liczbami (np. statystyki przedmiotów) to hipoteza bez pomiaru.
+
+Stan kodu pomiaru „po”: `f37ef8f` + niezatwierdzone zmiany kroku 2b (`git diff HEAD --
+'src/*.cs' 'tools/*.cs'`: 11 plików, sha256 `4028e8b0d3b36144…`). Liczby: `GTO Diagnostics\20261005-natywne-spolszczenie\krok2`
+— `eksperyment-po-poprawkach` (`podsumowanie.md`, `r0-…`–`r3-…`, `czasy-*`) i
+`powtorka-po-poprawkach` (`porownanie.md`, `head\`, `po\`, `corpustool-mock-b.json`); teksty gry
+tylko w `krok2\private\po-poprawkach` i `krok2\private\powtorka-po-poprawkach`. Weryfikacja:
+build całego rozwiązania (z App) bez ostrzeżeń; Core 1155/1155 (+58), Infrastructure 276/276,
+CorpusTool 166/166 (+19). SceneReplay nie był powtarzany: bez korpusu pipeline idzie dawną ścieżką
+(zmiany dotyczą tylko planu jednostek), testy tej ścieżki bez zmian.
+
+**Otwarte po kroku 2b.** Reguła M2 odrzuca odczyty z cyfrą wstawioną przez OCR w słowo (7 z 880
+próbek) — świadomie, precyzja przed zasięgiem. Lista znaków liczb i mylnych liter jest stała (bez
+np. `2/Z`, `6/G`, `|`, `!`). Katalog główny gry poza bibliotekami Steam/Epic/GOG jest rozpoznawany
+tylko po pliku z `processNames` profilu.

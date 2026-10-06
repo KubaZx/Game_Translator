@@ -5,16 +5,28 @@ public static class OutputLocationGuard
     private static StringComparison PathComparison =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-    public static string? Check(string outputPath, string gameDirectory)
-    {
-        var output = Path.GetFullPath(outputPath);
-        var game = Path.GetFullPath(gameDirectory);
-        if (IsInside(output, game))
-        {
-            return "Plik wynikowy nie może leżeć w folderze gry — narzędzie niczego tam nie zapisuje.";
-        }
+    public static string? Check(string outputPath, string gameDirectory, string? gameRoot = null, IReadOnlyCollection<string>? processNames = null) =>
+        CheckOutsideGame(outputPath, "Plik wynikowy", processNames, gameDirectory, gameRoot) ?? CheckLocalData(outputPath);
 
-        return CheckLocalData(output);
+    public static string? CheckOutsideGame(string path, string what, IReadOnlyCollection<string>? processNames, params string?[] gameDirectories)
+    {
+        var full = Path.GetFullPath(path);
+        foreach (var directory in gameDirectories)
+        {
+            if (directory is not null && IsInside(full, directory))
+            {
+                return $"{what} nie może leżeć w folderze gry — narzędzie niczego tam nie zapisuje.";
+            }
+        }
+        if (GameFolderGuard.LibraryDirectory(full) is { } library)
+        {
+            return $"{what} nie może leżeć w bibliotece gier („{library}”) — narzędzie niczego tam nie zapisuje.";
+        }
+        if (GameFolderGuard.FindDirectoryWithExecutable(Path.GetDirectoryName(full), processNames) is { } game)
+        {
+            return $"{what} nie może leżeć w folderze gry („{game}” zawiera plik gry z profilu) — narzędzie niczego tam nie zapisuje.";
+        }
+        return null;
     }
 
     public static string? CheckLocalData(string outputPath)

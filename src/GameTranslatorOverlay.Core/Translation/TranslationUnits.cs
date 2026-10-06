@@ -10,13 +10,15 @@ public sealed record TranslationOutcomePart(string ScreenText, string? CacheKey,
     public bool IsLiteral => CacheKey is null;
 }
 
-internal sealed record TranslationUnit(string Key, string ScreenText, string Separator, bool Literal, bool FromCorpus);
+internal sealed record TranslationUnit(string Key, string ScreenText, string Separator, bool Literal, bool FromCorpus, bool ExactMatch = false);
 
 internal sealed class UnitPlan(IReadOnlyList<TranslationUnit> units)
 {
     public IReadOnlyList<TranslationUnit> Units { get; } = units;
 
     public string? SingleKey => Units is [{ Literal: false } only] ? only.Key : null;
+
+    public string? CorrectionKey => Units is [{ Literal: false } only] && (!only.FromCorpus || only.ExactMatch) ? only.Key : null;
 
     public IEnumerable<TranslationUnit> Translatable => Units.Where(static u => !u.Literal);
 }
@@ -126,6 +128,8 @@ internal static partial class TranslationUnitPlanner
         private void Add(int line, string key, string screenText, bool literal, bool fromCorpus) =>
             Units.Add(new TranslationUnit(key, screenText, SeparatorFor(line), literal, fromCorpus));
 
+        private void Add(int line, TranslationUnit unit) => Units.Add(unit with { Separator = SeparatorFor(line) });
+
         public void AddRun(int start, int end)
         {
             if (end <= start) return;
@@ -187,7 +191,7 @@ internal static partial class TranslationUnitPlanner
                 if (starts.TryGetValue(line, out var segment) && TryWhole(corpus, segment) is { } whole)
                 {
                     AddRun(runStart, line);
-                    foreach (var (offset, unit) in whole) Add(line + offset, unit.Key, unit.ScreenText, unit.Literal, unit.FromCorpus);
+                    foreach (var (offset, unit) in whole) Add(line + offset, unit);
                     _lastLine = line + segment.LineCount - 1;
                     line += segment.LineCount;
                     runStart = line;
@@ -196,7 +200,7 @@ internal static partial class TranslationUnitPlanner
                 if (partials.TryGetValue(line, out var list) && TryPartial(corpus, line, snap.LineKeys[line], list) is { } parts)
                 {
                     AddRun(runStart, line);
-                    foreach (var unit in parts) Add(line, unit.Key, unit.ScreenText, unit.Literal, unit.FromCorpus);
+                    foreach (var unit in parts) Add(line, unit);
                     line++;
                     runStart = line;
                     continue;
@@ -241,7 +245,8 @@ internal static partial class TranslationUnitPlanner
             if (!IsUsable(entry, screenText)) return null;
             var units = new List<(int, TranslationUnit)>(2);
             if (literal is not null) units.Add((0, new TranslationUnit(literal, literal, string.Empty, Literal: true, FromCorpus: false)));
-            units.Add((offset, new TranslationUnit(key, screenText, string.Empty, Literal: false, FromCorpus: true)));
+            units.Add((offset, new TranslationUnit(key, screenText, string.Empty, Literal: false, FromCorpus: true,
+                ExactMatch: segment.Match.Kind == CorpusMatchKind.Exact)));
             return units;
         }
 
@@ -269,7 +274,8 @@ internal static partial class TranslationUnitPlanner
                 var speakerTag = corpus.SpeakerPrefixLength(segment.Text) >= segment.Text.Length;
                 units.Add(speakerTag
                     ? new TranslationUnit(screenText, screenText, string.Empty, Literal: true, FromCorpus: false)
-                    : new TranslationUnit(key, screenText, string.Empty, Literal: false, FromCorpus: true));
+                    : new TranslationUnit(key, screenText, string.Empty, Literal: false, FromCorpus: true,
+                        ExactMatch: segment.Match.Kind == CorpusMatchKind.Exact));
                 position = end;
             }
             if (position < screenTokens.Length)

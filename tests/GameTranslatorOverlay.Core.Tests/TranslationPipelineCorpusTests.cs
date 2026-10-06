@@ -31,6 +31,23 @@ public class TranslationPipelineCorpusTests
             Task.FromResult(new ProviderStatus(true, "ok"));
     }
 
+    private sealed class FailingProvider : ITranslationProvider
+    {
+        public int Calls { get; private set; }
+        public string Name => "Failing";
+        public bool RequiresApiKey => false;
+
+        public Task<IReadOnlyList<string>> TranslateBatchAsync(
+            IReadOnlyList<string> texts, string sourceLanguage, string targetLanguage, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            throw new TranslationException(TranslationFailureKind.NetworkError, "Brak połączenia.");
+        }
+
+        public Task<ProviderStatus> TestConnectionAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ProviderStatus(false, "brak"));
+    }
+
     private sealed class CountingCache(InMemoryTranslationCache inner) : ITranslationCache
     {
         public List<string> Looked { get; } = [];
@@ -120,7 +137,7 @@ public class TranslationPipelineCorpusTests
         Assert.Equal(2, outcome.TranslatedText!.Split('\n').Length);
         Assert.Equal("Latarnik zostawił notatkę pod niebieską lampą.", outcome.TranslatedText.Replace('\n', ' '));
         Assert.Equal(SentenceRead, outcome.NormalizedText);
-        Assert.Equal(Sentence, outcome.CacheKey);
+        Assert.Null(outcome.CacheKey);
         var part = Assert.Single(outcome.Parts!);
         Assert.True(part.FromCorpus);
         Assert.Equal(1, setup.Usage.CacheHits);
@@ -165,7 +182,81 @@ public class TranslationPipelineCorpusTests
         var outcome = Assert.Single(await setup.Pipeline.TranslateAsync(["The lighthouse keeper left a nole under the blue lamp"], "en", "pl"));
 
         Assert.Equal("Poprawione zdanie", outcome.TranslatedText);
+        Assert.Null(outcome.CacheKey);
+    }
+
+    [Fact]
+    public async Task Korekta_bloku_dopasowanego_dokladnie_idzie_pod_klucz_kanoniczny()
+    {
+        var setup = Create();
+        await StoreCorpus(setup.Cache, Sentence, "Z korpusu");
+
+        var outcome = Assert.Single(await setup.Pipeline.TranslateAsync(["THE LIGHTHOUSE KEEPER LEFT A NOTE\nUNDER THE BLUE LAMP."], "en", "pl"));
+
         Assert.Equal(Sentence, outcome.CacheKey);
+        Assert.True(Assert.Single(outcome.Parts!).FromCorpus);
+    }
+
+    [Fact]
+    public async Task Korekta_bloku_dopasowanego_przyblizeniem_idzie_pod_klucz_odczytu()
+    {
+        var setup = Create();
+        await StoreCorpus(setup.Cache, Sentence, "Z korpusu");
+        var read = Assert.Single(await setup.Pipeline.TranslateAsync([SentenceRead], "en", "pl"));
+        Assert.True(Assert.Single(read.Parts!).FromCorpus);
+
+        var key = read.CacheKey ?? read.NormalizedText;
+        await setup.Cache.SaveManualCorrectionAsync(new NewCacheEntry(key, key, "en", "pl", "Korekta odczytu", "manual", Profile));
+        var same = Assert.Single(await setup.Pipeline.TranslateAsync([SentenceRead], "en", "pl"));
+        var other = Assert.Single(await setup.Pipeline.TranslateAsync(["The lighthouse keeper left a nole under the blue lamp"], "en", "pl"));
+        var exact = Assert.Single(await setup.Pipeline.TranslateAsync([Sentence], "en", "pl"));
+
+        Assert.Equal(SentenceRead, key);
+        Assert.Equal("Korekta odczytu", same.TranslatedText);
+        Assert.Equal("Z korpusu", other.TranslatedText);
+        Assert.Equal("Z korpusu", exact.TranslatedText);
+    }
+
+    [Fact]
+    public async Task Nieaktualny_wpis_calego_odczytu_jest_zapasem_przy_bledzie_dostawcy()
+    {
+        foreach (var probeFirst in new[] { false, true })
+        {
+            var cache = new InMemoryTranslationCache();
+            await cache.StoreAsync(new NewCacheEntry(SentenceRead, SentenceRead, "en", "pl", "Stare tłumaczenie", "Failing", GameProfile: Profile));
+            var provider = new FailingProvider();
+            var pipeline = new TranslationPipeline(new GlossaryService(), cache, provider, new UsageTracker(), new TranslationPipelineOptions
+            {
+                GameProfile = Profile,
+                Corpus = TranslationUnitPlannerTests.Snapper(),
+                SplitParagraphs = true,
+            });
+            var texts = new[] { SentenceRead };
+
+            var local = probeFirst ? await pipeline.TranslateLocalAsync(texts, "en", "pl") : null;
+            var outcome = Assert.Single(await pipeline.TranslateAsync(texts, "en", "pl", local));
+
+            Assert.Null(local?[0]);
+            Assert.Equal(1, provider.Calls);
+            Assert.Equal("Stare tłumaczenie", outcome.TranslatedText);
+            Assert.Equal(TranslationOrigin.Cache, outcome.Origin);
+            Assert.Null(outcome.ErrorMessage);
+            Assert.Equal(OutcomeIssue.None, outcome.Issue);
+            Assert.Null(outcome.CacheKey);
+        }
+    }
+
+    [Fact]
+    public async Task Nieaktualny_wpis_calego_odczytu_nie_zastepuje_nowego_tlumaczenia_jednostek()
+    {
+        var setup = Create();
+        await setup.Cache.StoreAsync(new NewCacheEntry(SentenceRead, SentenceRead, "en", "pl", "Stare tłumaczenie", "Recording", GameProfile: Profile));
+
+        var outcome = Assert.Single(await setup.Pipeline.TranslateAsync([SentenceRead], "en", "pl"));
+
+        Assert.Equal([Sentence], setup.Provider.Sent);
+        Assert.Equal("PL:" + Sentence, outcome.TranslatedText!.Replace('\n', ' '));
+        Assert.Equal(TranslationOrigin.Provider, outcome.Origin);
     }
 
     [Fact]

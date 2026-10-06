@@ -345,6 +345,8 @@ public sealed class TranslationPipeline(
         string Normalized, UnitPlan Plan, TranslationOutcome? Preferred, TranslationOutcome? Fallback,
         TranslationOutcome?[] Units)
     {
+        public StaleEntry? Stale { get; init; }
+
         public bool UnitsLocal
         {
             get
@@ -422,6 +424,7 @@ public sealed class TranslationPipeline(
             .ConfigureAwait(false);
         var (unitOutcomes, _, _) = await ProbeCoreAsync(unitInputs.ToArray(), sourceLanguage, targetLanguage, cancellationToken)
             .ConfigureAwait(false);
+        var staleWholes = new Dictionary<string, StaleEntry>(StringComparer.Ordinal);
 
         for (var i = 0; i < inputs.Length; i++)
         {
@@ -429,7 +432,7 @@ public sealed class TranslationPipeline(
             var (source, normalized) = inputs[i];
             cancellationToken.ThrowIfCancellationRequested();
             var lookup = wholeLookups[wholeSlots[normalized]];
-            var whole = TryTranslateLocally(source, normalized, sourceLanguage, targetLanguage, lookup, staleFallbacks: null);
+            var whole = TryTranslateLocally(source, normalized, sourceLanguage, targetLanguage, lookup, staleWholes, countUsage: false);
             TranslationOutcome? preferred = null;
             TranslationOutcome? fallback = null;
             if (whole is not null)
@@ -443,7 +446,10 @@ public sealed class TranslationPipeline(
                 var unit = plan.Units[k];
                 if (!unit.Literal) units[k] = unitOutcomes[unitSlots[unit.Key]];
             }
-            probes[i] = new BlockProbe(normalized, plan, preferred, fallback, units);
+            probes[i] = new BlockProbe(normalized, plan, preferred, fallback, units)
+            {
+                Stale = staleWholes.TryGetValue(normalized, out var stale) && stale.TranslatedText is not null ? stale : null,
+            };
         }
         return probes;
     }
@@ -501,7 +507,7 @@ public sealed class TranslationPipeline(
         {
             QualityWarning = warning,
             Parts = parts,
-            CacheKey = plan.SingleKey,
+            CacheKey = plan.CorrectionKey,
         };
     }
 
@@ -640,7 +646,20 @@ public sealed class TranslationPipeline(
                 {
                     if (slots[k] >= 0) unitOutcomes[k] = coreOutcomes[slots[k]];
                 }
-                final.Add(Assemble(inputs[i], plans[i]!, unitOutcomes));
+                var assembled = Assemble(inputs[i], plans[i]!, unitOutcomes);
+                final.Add(assembled.TranslatedText is null && probes[i]?.Stale is { TranslatedText: { } staleText } stale
+                    ? assembled with
+                    {
+                        TranslatedText = staleText,
+                        Origin = TranslationOrigin.Cache,
+                        ErrorMessage = null,
+                        FailureKind = null,
+                        Issue = OutcomeIssue.None,
+                        QualityWarning = TranslationQualityGate.Describe(stale.Context.QualityIssues),
+                        Parts = null,
+                        CacheKey = null,
+                    }
+                    : assembled);
             }
         }
         return final;
@@ -814,9 +833,9 @@ public sealed class TranslationPipeline(
     /// <summary>Jak <see cref="TryTranslateLocallyAsync"/>, z gotowym wynikiem odczytu cache tego tekstu.</summary>
     private TranslationOutcome? TryTranslateLocally(
         string source, string normalized, string sourceLanguage, string targetLanguage,
-        CacheLookupResult lookup, Dictionary<string, StaleEntry>? staleFallbacks)
+        CacheLookupResult lookup, Dictionary<string, StaleEntry>? staleFallbacks, bool countUsage = true)
     {
-        var probeOnly = staleFallbacks is null;
+        var probeOnly = staleFallbacks is null || !countUsage;
         var cached = lookup.Translation;
         string? degradedHit = null;
         if (lookup.Error is { } ex)

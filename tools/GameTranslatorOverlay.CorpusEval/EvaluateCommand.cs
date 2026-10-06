@@ -35,6 +35,7 @@ internal sealed class SyntheticStats
     public int BackgroundSnaps { get; set; }
     public int RawExactCase { get; set; }
     public int RawExactNoCase { get; set; }
+    public int TruthKeysRecomputed { get; set; }
     public double WrongOfSnappedPct => EvalData.Pct(Wrong, Correct + Wrong);
     public double WrongOfAllPct => EvalData.Pct(Wrong, Samples);
     public double CorrectPct => EvalData.Pct(Correct, Samples);
@@ -192,10 +193,12 @@ internal static class EvaluateCommand
         foreach (var sample in samples)
         {
             stats.Samples++;
+            var truthKey = CorpusText.MatchKey(sample.Truth);
+            if (truthKey != sample.TruthKey) stats.TruthKeysRecomputed++;
             var textBlocks = sample.Blocks.Where(static b => b.OverlapsText).ToList();
             var joined = string.Join(' ', textBlocks.Select(static b => b.Text.Replace('\n', ' ')));
             if (CollapseSpaces(joined) == CollapseSpaces(sample.Truth.Replace('\n', ' '))) stats.RawExactCase++;
-            if (CorpusText.MatchKey(joined) == sample.TruthKey) stats.RawExactNoCase++;
+            if (CorpusText.MatchKey(joined) == truthKey) stats.RawExactNoCase++;
 
             foreach (var background in sample.Blocks.Where(static b => !b.OverlapsText))
             {
@@ -203,8 +206,8 @@ internal static class EvaluateCommand
             }
 
             var segments = textBlocks.SelectMany(b => snapper.SnapBlock(b.Text).Segments).ToList();
-            var wrongFull = segments.Where(s => s.Match.Kind != CorpusMatchKind.Fragment && s.Match.CorpusKey != sample.TruthKey).ToList();
-            var correctFull = segments.FirstOrDefault(s => s.Match.Kind != CorpusMatchKind.Fragment && s.Match.CorpusKey == sample.TruthKey);
+            var wrongFull = segments.Where(s => s.Match.Kind != CorpusMatchKind.Fragment && s.Match.CorpusKey != truthKey).ToList();
+            var correctFull = segments.FirstOrDefault(s => s.Match.Kind != CorpusMatchKind.Fragment && s.Match.CorpusKey == truthKey);
             string outcome;
             if (wrongFull.Count > 0)
             {
@@ -218,7 +221,7 @@ internal static class EvaluateCommand
                 else stats.CorrectFuzzy++;
                 outcome = "poprawne";
             }
-            else if (segments.Any(s => s.Match.CorpusKey == sample.TruthKey))
+            else if (segments.Any(s => s.Match.CorpusKey == truthKey))
             {
                 stats.FragmentCorrect++;
                 outcome = "fragment-poprawny";
@@ -238,7 +241,7 @@ internal static class EvaluateCommand
             {
                 var detail = string.Join(" || ", segments.Select(static s =>
                     $"{s.Match.Kind}{(s.Partial ? "/czesc" : "")}{(s.Assembled ? "/zlozone" : "")} {s.Match.Score:0.000}: [{s.Text}] -> [{s.Match.CorpusKey}]"));
-                errors.Add($"{sample.Dataset}\t{sample.Id}\t{sample.Stratum}\t{outcome}\t{sample.Font} {sample.Size}{(sample.Bold ? "b" : "")}\t{sample.TruthKey}\t{OneLine(string.Join(" ## ", textBlocks.Select(static b => b.Text)))}\t{detail}");
+                errors.Add($"{sample.Dataset}\t{sample.Id}\t{sample.Stratum}\t{outcome}\t{sample.Font} {sample.Size}{(sample.Bold ? "b" : "")}\t{truthKey}\t{OneLine(string.Join(" ## ", textBlocks.Select(static b => b.Text)))}\t{detail}");
             }
         }
         return stats;

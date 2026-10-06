@@ -175,6 +175,25 @@ public sealed class TranslateCommandTests : IDisposable
         Assert.True(File.Exists(allowed));
     }
 
+    [Theory]
+    [InlineData("steamapps/common/Some Game/cache.db", null)]
+    [InlineData("SteamLibrary/steamapps/common/cache.db", null)]
+    [InlineData(null, "steamapps/common/Some Game/stats.json")]
+    [InlineData("Games/Test Game/data/cache.db", null)]
+    [InlineData(null, "Games/Test Game/stats.json")]
+    public async Task Baza_i_statystyki_pod_steamapps_common_i_w_katalogu_gry_sa_odrzucane(string? cache, string? stats)
+    {
+        _temp.WriteFile("Games/Test Game/test.exe", [0x4D, 0x5A]);
+        var cachePath = _temp.Combine((cache ?? "elsewhere/cache.db").Split('/'));
+        var args = new List<string> { "translate", "--profile-file", _profileFile, "--provider", "mock", "--corpus", _corpus, "--cache", cachePath };
+        if (stats is not null) args.AddRange(["--stats", _temp.Combine(stats.Split('/'))]);
+
+        await Assert.ThrowsAsync<RefusedException>(() => Run(TranslateOptions.Parse(args)));
+
+        Assert.False(cache is not null && File.Exists(cachePath));
+        Assert.False(stats is not null && File.Exists(_temp.Combine(stats.Split('/'))));
+    }
+
     [Fact]
     public async Task Mock_bez_jawnej_bazy_jest_odrzucany()
     {

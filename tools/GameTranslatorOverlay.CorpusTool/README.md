@@ -33,18 +33,26 @@ opcje, 3 — odmowa (zabezpieczenia ADR-014, brak profilu albo recepty).
 ## Zabezpieczenia (twarde, bez opcji obejścia)
 
 - **Gra wyłączona.** Odmowa, gdy działa proces z `processNames` profilu albo dowolny plik
-  `*.exe` z głównego folderu gry.
-- **Bez anti-cheatu i gier online.** Odmowa, gdy w folderze gry są foldery EasyAntiCheat /
-  BattlEye albo pliki ich usług, gdy profil ma `"online": true` albo jest na liście wykluczeń
-  (`path-of-exile`, `path-of-exile-2`), gdy ścieżka gry prowadzi do „Path of Exile” /
-  „Grinding Gear Games” albo w folderze są `Content.ggpk`, `Bundles2`, `PathOfExile*.exe`.
+  `*.exe` z `--game-dir` lub z katalogu głównego gry. Procesy są sprawdzane, zanim narzędzie
+  przeczyta cokolwiek w folderze gry (także nagłówki `.pak`/`.utoc`).
+- **Katalog główny gry.** Folder `<…>\steamapps\common\<gra>` (albo `Epic Games\<gra>`,
+  `GOG Galaxy\Games\<gra>`), a poza bibliotekami — najwyższy folder nad `--game-dir` z plikiem
+  gry z `processNames` profilu. Gdy `--game-dir` wskazuje podfolder, zabezpieczenia niżej
+  sprawdzają cały katalog główny.
+- **Bez anti-cheatu i gier online.** Odmowa, gdy w folderze gry (także w katalogu głównym nad
+  `--game-dir`) są foldery EasyAntiCheat / BattlEye albo pliki ich usług, gdy profil ma
+  `"online": true` albo jest na liście wykluczeń (`path-of-exile`, `path-of-exile-2`), gdy
+  ścieżka gry prowadzi do „Path of Exile” / „Grinding Gear Games” albo w folderze są
+  `Content.ggpk`, `Bundles2`, `PathOfExile*.exe`.
 - **Bez podpisanych i zaszyfrowanych kontenerów.** Odmowa przy plikach `.sig`, pakach Unreal
   z zaszyfrowanym indeksem, kontenerach IoStore (`.utoc`) z flagą Encrypted/Signed oraz
   kontenerach UnityFS z nieznanymi flagami albo znacznikiem szyfrowania UnityCN. Narzędzie nie
   ma kodu deszyfrującego.
 - **Tylko odczyt.** Pliki gry są otwierane z `FileAccess.Read` i `FileShare.ReadWrite |
   FileShare.Delete` (nie blokują aktualizacji Steam). Wynik i statystyki nie mogą leżeć
-  w folderze gry; korpus nie może też trafić do repozytorium (poza `eval/private/`).
+  w folderze gry ani w jej katalogu głównym, pod `steamapps\common` (ani w bibliotekach
+  Epic/GOG) ani w folderze z plikiem gry z profilu; korpus nie może też trafić do repozytorium
+  (poza `eval/private/`).
 - **Bez sieci.** Narzędzie niczego nie pobiera; test sprawdza, że jego biblioteka nie odwołuje
   się do bibliotek sieciowych .NET, a kod `extract` (czytniki, parsery, straże) — także do
   dostawców tłumaczeń. Dekompresja LZ4 jest własna (format bloku LZ4). Jedyny możliwy ruch
@@ -181,7 +189,8 @@ pomija takie teksty.
 `GTO_LLM_ENDPOINT` + `GTO_LLM_MODEL` + opcjonalnie `GTO_LLM_KEY` wysyłany tylko na ten adres),
 nigdy z DPAPI. Włączony tryb prywatny w `settings.json` albo nieczytelny plik ustawień =
 odmowa (kod 3) przed wysłaniem czegokolwiek; `--dry-run` tylko ostrzega. Baza i statystyki nie
-mogą leżeć w repozytorium (poza `eval/private/`). Mock zapisuje tylko do jawnie wskazanej bazy —
+mogą leżeć w repozytorium (poza `eval/private/`), pod `steamapps\common` (ani w bibliotekach
+Epic/GOG) ani w folderze z plikiem gry z `processNames` profilu. Mock zapisuje tylko do jawnie wskazanej bazy —
 jego atrapy przy prawdziwym dostawcy zasłaniają wpisy globalne. Na wyjściu są same liczby;
 teksty gry i tłumaczenia zostają w bazie. Przerwanie (Ctrl+C) kończy po bieżących partiach;
 zapisane wpisy zostają.

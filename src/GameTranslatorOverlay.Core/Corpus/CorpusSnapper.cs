@@ -284,7 +284,7 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
         var second = 0.0;
         foreach (var (id, _) in candidates)
         {
-            var ratio = EditDistance.Ratio(loose, Index[id].Loose, floor);
+            var ratio = EditDistance.GuardedRatio(loose, Index[id].Loose, floor);
             if (ratio > best)
             {
                 second = best;
@@ -344,7 +344,8 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
         while (position >= 0)
         {
             if (CorpusText.IsBoundary(target, position) && CorpusText.IsBoundary(target, position + query.Length)
-                && CorpusText.DigitSignature(target.AsSpan(position, query.Length).ToString()) == digits)
+                && CorpusText.DigitSignature(target.AsSpan(position, query.Length).ToString()) == digits
+                && !CutsNumber(target, position, position + query.Length))
             {
                 return 1.0;
             }
@@ -354,8 +355,18 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
         if (EditDistance.FindWithin(query, target, maxDistance) is not { } alignment) return 0.0;
         if (!NearBoundary(target, alignment.Start) || !NearBoundary(target, alignment.End)) return 0.0;
         if (CorpusText.DigitSignature(target[alignment.Start..alignment.End]) != digits) return 0.0;
+        if (CutsNumber(target, alignment.Start, alignment.End)) return 0.0;
+        if ((CorpusText.HasDigit(query) || CorpusText.HasDigit(target.AsSpan(alignment.Start, alignment.End - alignment.Start)))
+            && EditDistance.BoundedGuarded(query, target.AsSpan(alignment.Start, alignment.End - alignment.Start), maxDistance) > maxDistance)
+        {
+            return 0.0;
+        }
         return 1.0 - (double)alignment.Distance / query.Length;
     }
+
+    private static bool CutsNumber(string text, int start, int end) =>
+        (start > 0 && CorpusText.IsNumberCharacter(text, start - 1) && start < text.Length && CorpusText.IsNumberCharacter(text, start))
+        || (end > 0 && end < text.Length && CorpusText.IsNumberCharacter(text, end - 1) && CorpusText.IsNumberCharacter(text, end));
 
     private static bool NearBoundary(string text, int index) =>
         CorpusText.IsBoundary(text, index) || CorpusText.IsBoundary(text, index - 1) || CorpusText.IsBoundary(text, index + 1);
@@ -476,7 +487,7 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
             if (first < 0 || last < first) continue;
             var text = key[tokens[first].Start..tokens[last].End];
             if (CorpusText.DigitSignature(text) != target.Digits) continue;
-            var ratio = EditDistance.Ratio(CorpusText.LooseKey(text), target.Loose, threshold);
+            var ratio = EditDistance.GuardedRatio(CorpusText.LooseKey(text), target.Loose, threshold);
             if (ratio < threshold) continue;
             if (first == 0 && last == tokens.Count - 1) continue;
             if (!IsUniqueContainment(text, id, ratio)) continue;
@@ -493,7 +504,7 @@ public sealed class CorpusSnapper(CorpusIndex index, CorpusSnapOptions? options 
             && t.Loose.Length >= loose.Length * floor && t.Loose.Length <= loose.Length / Math.Max(floor, 0.01), Options.MaxCandidates);
         foreach (var (other, _) in others)
         {
-            if (ratio - EditDistance.Ratio(loose, Index[other].Loose, floor) < Options.Margin) return false;
+            if (ratio - EditDistance.GuardedRatio(loose, Index[other].Loose, floor) < Options.Margin) return false;
         }
         return true;
     }

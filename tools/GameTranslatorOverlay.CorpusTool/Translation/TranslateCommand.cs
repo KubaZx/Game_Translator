@@ -47,8 +47,17 @@ public static class TranslateCommand
         }
 
         var cachePath = options.ResolvedCachePath;
-        if (OutputLocationGuard.CheckLocalData(cachePath) is { } cacheProblem) throw new RefusedException(cacheProblem.Replace("Plik wynikowy", "Baza tłumaczeń", StringComparison.Ordinal));
-        if (options.StatsPath is { } statsPath && OutputLocationGuard.CheckLocalData(statsPath) is { } statsProblem) throw new RefusedException(statsProblem);
+        if ((OutputLocationGuard.CheckOutsideGame(cachePath, "Baza tłumaczeń", profile.ProcessNames)
+             ?? OutputLocationGuard.CheckLocalData(cachePath)?.Replace("Plik wynikowy", "Baza tłumaczeń", StringComparison.Ordinal)) is { } cacheProblem)
+        {
+            throw new RefusedException(cacheProblem);
+        }
+        if (options.StatsPath is { } statsPath
+            && (OutputLocationGuard.CheckOutsideGame(statsPath, "Plik statystyk", profile.ProcessNames)
+                ?? OutputLocationGuard.CheckLocalData(statsPath)) is { } statsProblem)
+        {
+            throw new RefusedException(statsProblem);
+        }
 
         if (options.Provider == "mock" && !options.DryRun && options.CachePath is null && options.DataDirectory is null)
         {

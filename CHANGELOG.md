@@ -85,12 +85,37 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
   [ROADMAP.md → Runda 2026-10-06 (3)](docs/ROADMAP.md).
 - Dokładny tekst korpusu aktywnego profilu (co najmniej 2 litery) przechodzi przez filtr śmieci
   OCR, który odrzuciłby go jako zbyt krótki albo nietypowy (Escape Academy: 14 takich tekstów).
-- Literalne `\n` w tekstach korpusu (102 teksty interfejsu Escape Academy) jest nowym wierszem
+- Literalne `\n` w tekstach korpusu (30 tekstów interfejsu Escape Academy) jest nowym wierszem
   także w kluczu cache `CorpusTool translate` — wpisy przetłumaczone wcześniej pod starym
-  kluczem tych tekstów nie będą czytane (przebiegu u prawdziwego dostawcy jeszcze nie było).
+  kluczem tych tekstów nie będą czytane (prawdziwy przebieg DeepSeek z 2026-10-06 użył już nowego klucza).
 - Opcjonalne ustawienie `paragraphCacheKeys` w `settings.json` (domyślnie wyłączone): klucze
   cache po akapitach także bez korpusu, w każdej grze — ten sam akapit w innym bloku nie jest
   płacony drugi raz (powtórka sesji PoE2: 21,3% znaków lokalnie zamiast 0%, zapytania 247 → 218).
+- **Liczby przy dopasowaniu do korpusu** (poprawka po recenzji): odczyt różniący się znakiem,
+  walutą albo procentem przy liczbie nie jest już przyciągany do tekstu korpusu („-10%” do
+  „+10%”, „€25” do „$25”, samo „10” do „+10%” — wcześniej jako pewne dopasowanie dokładne), także
+  w dłuższych zdaniach. Liczba sklejona z literami („5kg”, „10am”, „1st”, „x3”) musi się zgadzać
+  cyfra w cyfrę — inna, dopisana albo zgubiona cyfra to brak dopasowania; dopuszczalna jest tylko
+  cyfra odczytu w miejscu litery, którą OCR myli z cyfrą (1/l/I, 0/O, 5/S, 8/B) i `1` w miejscu
+  apostrofu („11m” → „I'm”). Pomiar na 880 próbkach przez Windows OCR: 690 poprawnych
+  przyciągnięć zamiast 697 (7 odczytów z cyfrą wstawioną przez OCR w słowo nie jest już
+  dopasowywanych), błędne bez zmian (1); prawdziwe sesje Escape Academy i kontrola PoE2 bez zmian.
+- Gdy dostawca zawiedzie (sieć, limit), blok z korpusem dostaje — jak bez korpusu — stary
+  tłumaczony wpis całego odczytu (sprzed sklejania wierszy, z uwagą kontroli jakości albo z inną
+  płcią gracza) zamiast komunikatu o błędzie.
+- Ręczna korekta bloku przyciągniętego do korpusu **przybliżeniem** zapisuje się pod tekstem
+  odczytu z ekranu, nie pod tekstem z korpusu — błędne przybliżenie nie przenosi korekty na inne
+  odczyty. Przy dopasowaniu dokładnym (inna wielkość liter, zawinięcie) korekta nadal obowiązuje
+  dla wszystkich odczytów tego tekstu.
+- **CorpusTool — mocniejsze zabezpieczenia ADR-014:** proces gry jest sprawdzany przed
+  jakimkolwiek odczytem w folderze gry (wcześniej po skanie nagłówków `.pak`/`.utoc`); gdy
+  `--game-dir` wskazuje podfolder, anti-cheat, podpisane i zaszyfrowane kontenery są szukane
+  w całym folderze gry (`steamapps\common\<gra>`, `Epic Games\<gra>`, `GOG Galaxy\Games\<gra>`
+  albo folder z plikiem gry z profilu); `--out`, `--cache` i `--stats` nie mogą leżeć w folderze
+  gry, pod `steamapps\common` ani w bibliotekach Epic/GOG.
+- `PRIVACY.md` i ADR-014: przy dopasowaniu do korpusu do dostawcy może trafić pełne zdanie
+  z korpusu, którego część dopiero pojawia się na ekranie (wcześniej dokument obiecywał „ten sam
+  tekst, który jest na ekranie”).
 
 ### Modele językowe
 
@@ -158,6 +183,18 @@ czas tłumaczenia (ten wyznaczają OCR i dostawca). Liczby przed/po:
   `src=…`; `CorpusTranslationKey` liczy klucz cache wpisu korpusu. Testy: Core +15,
   Infrastructure +28, CorpusTool +62 (dostawcy przez atrapę HTTP, baza SQLite w katalogu
   tymczasowym).
+- **Poprawki po recenzji korpusu (krok 2b):** `EditDistance.BoundedGuarded` / `GuardedRatio`
+  (odległość edycyjna z ochroną cyfr i znaków liczb), `CorpusText.IsNumberSign`,
+  `IsNumberCharacter`, `HasDigit`, `IsDigitMistakenFor`; `LooseKey` zostawia znak liczby na
+  brzegu. `TranslationOutcome.CacheKey` jest kanoniczny tylko przy dokładnym dopasowaniu
+  (`UnitPlan.CorrectionKey`). CorpusTool: `GameFolderGuard.ResolveGameRoot`, `LibraryDirectory`,
+  `LibraryGameRoot`, `FindDirectoryWithExecutable`, `CheckFolder(..., processNames)`,
+  `RunningGameGuard.FindRunning(..., gameRoot)`, `OutputLocationGuard.CheckOutsideGame`.
+  `CorpusEval evaluate` liczy klucz prawdy przy ocenie (`truthKeysRecomputed`); eksperyment
+  przeliczony na tych samych próbkach: 690 / 880 poprawnych (79,2% → 78,4%), błędne 0,14%,
+  cache EA 59,4% znaków bez zmian, p95 dopasowania 0,9 ms; powtórka przez pipeline bez zmian
+  (EA 217: 64,2% znaków, 52,1% bloków, 104 zapytania) —
+  [ROADMAP.md → Krok 2b](docs/ROADMAP.md). Testy: Core +58, CorpusTool +19.
 - **SceneReplay: scenariusze starego napisu** (`stale-junk`, `stale-junk-ghost`, `stale-texture`,
   `stale-newtext`, `stale-busy`) do zgłoszenia „tłumaczenie Inspect/Zbadaj zostaje po zniknięciu
   etykiety”. Etykieta znika lokalnie (5% okna, bez cięcia sceny) w oknie 1500×900 fizycznych

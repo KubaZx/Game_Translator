@@ -117,6 +117,91 @@ public sealed class CorpusExtractorTests : IDisposable
     }
 
     [Fact]
+    public void Uruchomiona_gra_jest_sprawdzana_przed_czytaniem_naglowkow_kontenerow()
+    {
+        _temp.WriteFile("Synthetic Game/Paks/secret.pak", GameFolderGuardTests.PakTail(encrypted: true));
+
+        var error = Assert.Throws<RefusedException>(() => new CorpusExtractor(new FakeProcessLister("Synthetic Game")).Run(Options()));
+
+        Assert.Contains("uruchomiona", error.Message);
+        Assert.DoesNotContain("zaszyfrowany", error.Message);
+    }
+
+    private ExtractOptions SubfolderOptions(string root, string? output = null, string? stats = null)
+    {
+        var serialized = SyntheticUnity.SerializedFile(RecipeRunnerTests.Assets()
+            .Select(static a => new SyntheticAsset(a.Name, a.Script)).ToList());
+        _temp.WriteFile(root + "/Game_Data/data.unity3d",
+            SyntheticUnity.Bundle([new SyntheticUnity.BundleFile("resources.assets", serialized)], blockSize: 128));
+        _temp.WriteFile(root + "/Synthetic Game.exe", [0x4D, 0x5A]);
+        var recipe = RecipeRunnerTests.Recipe();
+        recipe.Container = "data.unity3d";
+        WriteProfile(new GameProfile
+        {
+            Id = "synthetic-sub",
+            Name = "Synthetic Game",
+            ProcessNames = ["Synthetic Game.exe"],
+            SourceLanguage = "en",
+            Corpus = recipe,
+        });
+        return Options(output) with
+        {
+            ProfileId = "synthetic-sub",
+            GameDirectory = _temp.Combine([.. root.Split('/'), "Game_Data"]),
+            StatsPath = stats ?? _temp.Combine("stats", "stats.json"),
+        };
+    }
+
+    [Fact]
+    public void Folder_gry_wskazany_podfolderem_dziala()
+    {
+        var report = new CorpusExtractor(new FakeProcessLister("explorer")).Run(SubfolderOptions("steamapps/common/Synthetic Game"));
+
+        Assert.True(report.Entries > 0);
+    }
+
+    [Theory]
+    [InlineData("steamapps/common/Synthetic Game", "steamapps/common/Synthetic Game/EasyAntiCheat/Settings.json")]
+    [InlineData("Games/Synthetic Game", "Games/Synthetic Game/BattlEye/BEClient_x64.dll")]
+    public void Anti_cheat_w_folderze_nadrzednym_gry_blokuje_ekstrakcje(string root, string marker)
+    {
+        var options = SubfolderOptions(root);
+        _temp.WriteFile(marker, [0]);
+
+        var error = Assert.Throws<RefusedException>(() => new CorpusExtractor(new FakeProcessLister()).Run(options));
+
+        Assert.Contains("anti-cheat", error.Message);
+        Assert.False(File.Exists(options.ResolveOutputPath("synthetic-sub")));
+    }
+
+    [Fact]
+    public void Anti_cheat_innej_gry_w_bibliotece_nie_blokuje()
+    {
+        var options = SubfolderOptions("steamapps/common/Synthetic Game");
+        _temp.WriteFile("steamapps/common/Other Game/EasyAntiCheat/Settings.json", [0]);
+
+        Assert.True(new CorpusExtractor(new FakeProcessLister()).Run(options).Entries > 0);
+    }
+
+    [Theory]
+    [InlineData("steamapps/common/Synthetic Game/corpus.jsonl", null)]
+    [InlineData("steamapps/common/Other Game/corpus.jsonl", null)]
+    [InlineData(null, "steamapps/common/Synthetic Game/stats.json")]
+    [InlineData(null, "steamapps/common/stats.json")]
+    [InlineData("Games/Synthetic Game/corpus.jsonl", null)]
+    public void Wynik_i_statystyki_pod_steamapps_common_i_w_katalogu_gry_sa_odrzucane(string? output, string? stats)
+    {
+        var root = (output ?? stats)!.StartsWith("Games/", StringComparison.Ordinal) ? "Games/Synthetic Game" : "steamapps/common/Synthetic Game";
+        var outputPath = output is null ? null : _temp.Combine(output.Split('/'));
+        var statsPath = stats is null ? null : _temp.Combine(stats.Split('/'));
+        var options = SubfolderOptions(root, outputPath, statsPath);
+
+        Assert.Throws<RefusedException>(() => new CorpusExtractor(new FakeProcessLister()).Run(options));
+        Assert.False(outputPath is not null && File.Exists(outputPath));
+        Assert.False(statsPath is not null && File.Exists(statsPath));
+    }
+
+    [Fact]
     public void Profil_wykluczony_i_profil_online_sa_odrzucane()
     {
         WriteProfile(new GameProfile { Id = "path-of-exile-2", Name = "PoE2", SourceLanguage = "en", Corpus = RecipeRunnerTests.Recipe() });

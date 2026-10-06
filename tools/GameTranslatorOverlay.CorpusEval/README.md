@@ -27,6 +27,11 @@ CorpusEval bench --corpus … --ocr … --cache KOPIA/cache.db --out LICZBY --fu
 CorpusEval replay --corpus … --cache KOPIA/cache.db --prefilled PRYWATNY/b/cache.db --work PRYWATNY/robocze --out LICZBY
 ```
 
+`evaluate` liczy klucz prawdy przy ocenie z pola `truth` bieżącym `CorpusText.MatchKey`, a nie
+bierze go z próbki (`truthKey` zapisany przy renderze jest nieaktualny po zmianie klucza, np. po
+zamianie literalnego `\n` na nowy wiersz); liczbę takich próbek podaje `truthKeysRecomputed`.
+Stare pliki próbek można więc oceniać bez ponownego renderu.
+
 `replay` tworzy w `--work` świeże bazy dla każdego wariantu (bazy `--cache` i `--prefilled` tylko
 czyta albo kopiuje) i zapisuje tam `przyciagniecia-do-przegladu.tsv` z odczytami i tym, co
 pokazałaby nakładka — to teksty gry, więc `--work` musi być folderem prywatnym. Do `--out` trafiają

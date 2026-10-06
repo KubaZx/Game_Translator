@@ -234,6 +234,8 @@ robi to wyłącznie osobne narzędzie `CorpusTool`, uruchamiane przez Ciebie prz
 
 1. **Wyłącz grę** (także launcher Steam z jej oknem). Narzędzie odmówi pracy, gdy proces gry
    działa, gdy gra ma anti-cheat albo zaszyfrowane pliki i dla gier online (np. Path of Exile).
+   Gdy wskażesz podfolder gry, zabezpieczenia sprawdzą cały jej folder (np.
+   `steamapps\common\<gra>`), a wyników nie da się zapisać w folderze gry ani pod `steamapps\common`.
 2. **Odczytaj korpus** (tylko do odczytu, bez sieci, kilka sekund):
 
    ```powershell
@@ -278,14 +280,20 @@ Co się zmienia w grze:
   Academy ok. 60% znaków i połowa bloków była gotowa lokalnie (bez korpusu: 0,3%).
 - Odczyt z błędami OCR („Itls”, „11m”, ucięty koniec zdania) dostaje tłumaczenie poprawnego zdania.
   Gdy gra wypisuje zdanie literka po literce, nakładka może pokazać tłumaczenie całego zdania,
-  zanim gra wypisze je do końca.
+  zanim gra wypisze je do końca — a gdy tego zdania nie ma jeszcze w bazie, do dostawcy idzie
+  całe zdanie z korpusu, także jego niewyświetlona jeszcze część.
+- Liczby muszą się zgadzać: odczyt z innym znakiem, walutą albo procentem („-10%” zamiast „+10%”)
+  albo z inną liczbą sklejoną z literami („6kg” zamiast „5kg”) nie jest przyciągany do korpusu
+  i idzie do tłumaczenia tak, jak go odczytano. Wyjątek: cyfra w miejscu litery, którą OCR myli
+  z cyfrą („o1d” → „old”, „11m” → „I'm”).
 - Tłumaczenie zachowuje układ wierszy z ekranu. Imię mówcy („Captain:”, „[CAPTAIN]”), klawisze
   obok etykiet („E Inspect” → „E Zbadaj”) i pojedyncze liczby zostają bez zmian.
 - Nieznana część bloku (np. nowa linia pod znaną etykietą) idzie do dostawcy sama — znana część
   nie jest płacona drugi raz.
-- Ręczna poprawka bloku, który w całości jest jednym tekstem z korpusu, zapisuje się pod tym
-  tekstem, więc działa także dla innych odczytów tego samego zdania. Poprawka bloku złożonego
-  z kilku części działa dla tego odczytu, jak dotąd.
+- Ręczna poprawka bloku, który w całości jest jednym tekstem z korpusu odczytanym dokładnie
+  (najwyżej inna wielkość liter albo zawinięcie wierszy), zapisuje się pod tym tekstem, więc
+  działa także dla innych odczytów tego samego zdania. Gdy blok został dopasowany przybliżeniem
+  (odczyt z błędami OCR) albo składa się z kilku części, poprawka działa dla tego odczytu, jak dotąd.
 - Bez pliku korpusu i bez profilu aplikacja działa dokładnie jak dotąd. Cache-only działa także
   z korpusem. **W trybie prywatnym** aplikacja nie czyta bazy z dysku, więc tłumaczenia
   z wyprzedzeniem są wtedy niedostępne (przyciąganie nadal ujednolica odczyty w pamięci).
