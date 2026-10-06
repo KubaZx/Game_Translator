@@ -988,4 +988,42 @@ tylko dotychczasowy status „⚠ To okno wymaga przechwytywania ekranu…”, b
 w nakładce. Bez „Komunikaty w nakładce” — tylko status w oknie aplikacji. Jeśli w wyłącznym
 pełnym ekranie nakładki w ogóle nie widać nad grą (M09), sprawdź status i log i zapisz to
 w zgłoszeniu. Znane ograniczenie: okno bez ramki zakrywające cały monitor, którego nie da się
-przechwycić jako okna, też dostaje ten komunikat.
+przechwycić jako okna, też dostaje ten komunikat. Od 0.6.0 na Windows 11 przechwytywanie
+takiego okna przejmuje Windows Graphics Capture (M42), więc komunikat pojawia się tylko wtedy,
+gdy WGC też zawiedzie (po 6 kolejnych zrzutach ekranu albo przy braku WGC).
+
+## M41 — Napisy w ruchu kamery (0.6.0)
+
+**Kroki:**
+1. Escape Academy (albo inna gra z HUD i napisami w świecie), okno bez ramki, **Położenie dymków:
+   Na oryginale (zakrywa)**, **Wyświetlanie: Przy oryginale**; uruchom live w pokoju z HUD
+   („X Hint”, „Tab Items”) i napisem na ścianie albo kartce.
+2. Wolna panorama w lewo i w prawo (ok. 5 s), potem szybki obrót o 90°.
+3. Chodzenie przodem i bokiem przez kilka sekund, potem zatrzymanie.
+4. Podejdź do napisu na ścianie, aż wyraźnie urośnie.
+5. Przełącz **Położenie dymków** na „Pod oryginałem” i powtórz krok 2.
+
+**Oczekiwany wynik:** w krokach 2–3 tłumaczenia HUD zostają na miejscu przez cały ruch (bez
+znikania i powrotu), a tło pod nimi nadąża za obrazem z co najwyżej lekkim, krótkim smużeniem
+przy szybkim obrocie. Napis na ścianie w trakcie panoramy jedzie razem z nim albo znika i wraca
+w ciągu ok. 1 s; nie zostaje w starym miejscu. Po zatrzymaniu napisy są na właściwych miejscach.
+Znane ograniczenia: w kroku 4 napis rosnący przy podchodzeniu może znikać i wracać po kolejnym
+odczycie OCR; w kroku 5 (bez trybu zakrywania) śledzenia nie ma — w ruchu napisy znikają
+i wracają jak w 0.5.0. Zapisz też, czy gra działała płynnie (bez nowych przycięć) i czy log
+(`logs\app-*.log`) ma wpis „w ruchu kamery przechwytywanie okna przez Windows Graphics Capture”.
+
+## M42 — Gra na pełnym ekranie bez PrintWindow (0.6.0)
+
+**Kroki:**
+1. Windows 11. Gra na pełnym ekranie (w 0.5.0 log miał tu „Okno gry nie wspiera PrintWindow —
+   tryb live używa zrzutu ekranu”); uruchom live w trybie zakrywania.
+2. Ruszaj kamerą jak w M41, kroki 2–3.
+3. Otwórz nad grą inne okno (np. powiadomienie, okno aplikacji) na kilka sekund.
+4. Windows 10 (jeśli dostępny): krok 1.
+
+**Oczekiwany wynik:** log ma „Okno gry nie wspiera PrintWindow — tryb live przechodzi na Windows
+Graphics Capture”, bez ostrzeżenia o zrzucie ekranu w statusie i bez komunikatu o pełnym ekranie
+(o ile WGC działa); w ruchu napisy zachowują się jak w M41. Okno otwarte nad grą w kroku 3 nie
+jest tłumaczone (WGC czyta tylko okno gry). Na Windows 10 (ramki WGC nie da się ukryć) zostaje
+zrzut ekranu z dotychczasowym ostrzeżeniem i komunikatem jak w M40. Jeśli nakładki nad grą nie
+widać w ogóle, zapisz to razem z trybem pełnego ekranu gry.

@@ -1,4 +1,10 @@
-# Sprawdzenie wydania 0.5.0 w grze — checklista (~45 min)
+# Sprawdzenie wydań 0.5.0–0.6.0 w grze — checklista (~55 min)
+
+**0.6.0 (ruch kamery, ~10 min):** w trybie „Na oryginale (zakrywa)” przejdź scenariusze M41
+(panorama, obrót, chodzenie przy HUD i napisie na ścianie) i M42 (gra na pełnym ekranie)
+z [MANUAL_TESTING.md](MANUAL_TESTING.md) i zapisz: czy tłumaczenie HUD znika w ruchu, czy jedzie
+za napisem na ścianie, czy tło pod nim smuży, czy gra działa płynniej/gorzej niż bez tłumacza.
+Reszta checklisty dotyczy 0.5.0.
 
 Cel: potwierdzić w prawdziwej grze to, co w 0.5.0 sprawdzono tylko automatycznie (testy,
 powtórki sesji przez pipeline, SceneReplay, zapisane klatki 4K w OverlayPreview): znikanie

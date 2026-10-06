@@ -40,7 +40,10 @@ korpusu gry, nie są w paczce — uruchamia się je ze źródeł (.NET 10 SDK).
 | Kontrola użycia | lokalne wyniki, deduplikacja i rezerwacje znaków przed API |
 | Prywatność | lokalny OCR, Cache-only i prywatny cache w pamięci |
 
-Ostatnie wydanie to 0.5.0 ([historia zmian](../CHANGELOG.md)): stary napis znika razem
+Ostatnie wydanie to 0.6.0 ([historia zmian](../CHANGELOG.md)): tłumaczenie trzyma się napisu
+w ruchu kamery (śledzenie liter między odczytami OCR, odświeżanie łatki z Windows Graphics Capture,
+także w grze na pełnym ekranie bez PrintWindow); zmierzone na nagraniach gry w MotionLab, w grze na
+żywo jeszcze nie oglądane. Wydanie 0.5.0: stary napis znika razem
 z oryginałem, korpus gry z osobnym narzędziem offline (dopasowanie odczytów OCR, tłumaczenie
 z wyprzedzeniem), napis w stylu gry w trybie zakrywania i wstrzymanie kwestii pisanej literami.
 Wydanie 0.4.0 dało szybszy live, komunikaty w grze, skrót live, pamięć dialogu i postać gracza

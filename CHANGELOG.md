@@ -4,7 +4,11 @@ Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
 ## [Niewydane]
 
-Runda „działanie w ruchu”: tłumaczenie trzyma się napisu, gdy kamera się rusza. Przeszło 1732 testy
+Brak zmian po wydaniu 0.6.0.
+
+## [0.6.0] — 2026-10-06
+
+Wydanie „działanie w ruchu”: tłumaczenie trzyma się napisu, gdy kamera się rusza. Przeszło 1732 testy
 xUnit na Windows (1286 Core + 280 Infrastructure + 166 CorpusTool), build bez ostrzeżeń. Liczby
 poniżej pochodzą z nowego narzędzia MotionLab: trzy nagrania Escape Academy (4K, 10 kl./s,
 2026-10-06) odtwarzane przez prawdziwą sesję live i prawdziwą nakładkę, z Mockiem zamiast

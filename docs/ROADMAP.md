@@ -2,7 +2,13 @@
 
 ## Obecny stan — 6 października 2026
 
-Ostatnie wydanie to **0.5.0** (6 października 2026): stary napis znika razem z oryginałem (sonda
+Ostatnie wydanie to **0.6.0** (6 października 2026, runda 2026-10-06 (7)): działanie w ruchu
+kamery — śledzenie napisów między odczytami OCR, odświeżanie łatek z Windows Graphics Capture
+(w ruchu i zamiast zrzutu ekranu, gdy gra nie wspiera PrintWindow), ponowny OCR pustego odczytu
+w pasach, stabilny krój; zmierzone na nagraniach Escape Academy w narzędziu MotionLab, w grze na
+żywo jeszcze nie oglądane (scenariusze M41–M42 w [MANUAL_TESTING.md](MANUAL_TESTING.md)).
+
+Wcześniej **0.5.0** (6 października 2026): stary napis znika razem z oryginałem (sonda
 pikseli `KnownTextAbsenceProbe` także na teksturze, pełny skan co 4 s niezależnie od wycinków,
 śmieciowy odczyt nie podtrzymuje ani nie przywraca napisu, a tłumaczenie napisu, który wróci
 w ciągu 10 s, wraca też na pasek napisów); korpus tekstów gry według ADR-014 — osobne narzędzie
@@ -18,11 +24,6 @@ z korpusu pisana literami czeka w nim na koniec pisania. Dla deweloperów: Overl
 (prawdziwa nakładka na zapisanych klatkach gry), CorpusEval, scenariusze SceneReplay `stale-*`
 i `typing`, projekt testów CorpusTool. Linia 0.4 dała szybszy tryb live, komunikaty w nakładce,
 pamięć dialogu i glosariusze DeepL.
-
-Po wydaniu 0.5.0 (niewydane, gałąź `claude/ruch`): runda „działanie w ruchu” — śledzenie napisów
-między odczytami OCR, odświeżanie łatek w ruchu z Windows Graphics Capture, ponowny OCR pustego
-odczytu w pasach, stabilny krój; zmierzona na nagraniach Escape Academy w nowym narzędziu
-MotionLab (runda 2026-10-06 (7)), w grze na żywo jeszcze nie oglądana.
 
 Przeszło **1732 testy** (1286 Core + 280 Infrastructure + 166 CorpusTool) na Windows; build
 całego rozwiązania bez ostrzeżeń. Zachowanie sesji live zmierzono w SceneReplay (callbacki sesji,
@@ -187,7 +188,7 @@ Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po naz
 
 **Kryterium ukończenia:** aplikacja wykrywa uruchomione PoE2 i proponuje profil; profil ustawia parametry i słownik; usunięcie profilu nie zmienia działania aplikacji dla innych gier.
 
-### Etap 12 — Dystrybucja portable (wydanie 0.5.0; pełna ocena ręczna według checklisty nadal osobna)
+### Etap 12 — Dystrybucja portable (wydanie 0.6.0; pełna ocena ręczna według checklisty nadal osobna)
 
 Release: `dotnet publish` win-x64, aplikacja portable. Instrukcje użytkownika, `MANUAL_TESTING.md` (testy wymagające pulpitu Windows: OCR na żywo, nakładka, skróty — wyłącznie ręczne), licencje zależności, polityka prywatności, disclaimer. Artefakt Release z CI na tag lub manualnie.
 

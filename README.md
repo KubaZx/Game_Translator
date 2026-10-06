@@ -11,7 +11,7 @@ gry, bez żadnej zmiany w plikach gry.
 [Instrukcja](docs/USER_GUIDE.md) · [Zmiany](CHANGELOG.md) ·
 [CI](https://github.com/KubaZx/Game_Translator/actions/workflows/ci.yml)
 
-**Wersja: 0.5.0** · Windows 10 2004+ / 11 · portable, bez instalacji
+**Wersja: 0.6.0** · Windows 10 2004+ / 11 · portable, bez instalacji
 
 ## Funkcje
 
