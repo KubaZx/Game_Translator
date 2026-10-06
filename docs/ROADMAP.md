@@ -101,6 +101,10 @@ wizualnych na kolejnych grach.
     śledzenia: ok. 2,5 ms na odświeżenie) — runda 2026-10-06 (7).
 28. MotionLab: fałszywe „miganie”/„zgubione”, gdy offline OCR (prawda) skleja dwa wiersze HUD
     w jeden blok albo czyta ikonę klawisza raz z napisem, raz osobno — runda 2026-10-06 (7).
+29. Śledzenie napisów także poza trybem zakrywania (pod oryginałem, obok): wzorzec liter bez
+    łatki, żeby tłumaczenie jechało za napisem w ruchu we wszystkich układach — runda (7).
+30. Łatka na animowanym tle bez ruchu kamery (woda, ogień, migające światło pod napisem):
+    odświeżanie łatki z wycinków WGC, gdy zmienia się tylko tło wokół liter — runda (7).
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
