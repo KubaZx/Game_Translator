@@ -1031,7 +1031,7 @@ public sealed class LiveTranslationSession(
                 _pendingTextGone = true;
                 _refreshAfterBusyChanges = true;
             }
-            RemoveLocalBlocks(lost, cancellationToken, sampledAt, status: "Live: napis zniknął albo odjechał — usuwam.");
+            RemoveLocalBlocks(lost, cancellationToken, status: "Live: napis zniknął albo odjechał — usuwam.");
             return;
         }
         if (!changed) return;

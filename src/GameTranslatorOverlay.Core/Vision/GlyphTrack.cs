@@ -44,7 +44,7 @@ public readonly record struct GlyphMatch(
 {
     public bool IsStatic => WorkDx == 0 && WorkDy == 0;
 
-    public double AcceptLimit => Math.Max(9.0, Contrast * 0.28);
+    public double AcceptLimit => Math.Max(8.0, Contrast * 0.14);
 
     public bool KeepsContrast => LocalContrast is not { } local || Math.Abs(TemplateContrast) < 12
         || (Math.Sign(local) == Math.Sign(TemplateContrast) && Math.Abs(local) >= Math.Abs(TemplateContrast) * 0.5);
