@@ -22,5 +22,6 @@
     <Project Path="tools/GameTranslatorOverlay.ProviderEval/GameTranslatorOverlay.ProviderEval.csproj" />
     <Project Path="tools/GameTranslatorOverlay.SceneReplay/GameTranslatorOverlay.SceneReplay.csproj" />
     <Project Path="tools/GameTranslatorOverlay.SmokeTest/GameTranslatorOverlay.SmokeTest.csproj" />
+    <Project Path="tools/GameTranslatorOverlay.UiPreview/GameTranslatorOverlay.UiPreview.csproj" />
   </Folder>
 </Solution>

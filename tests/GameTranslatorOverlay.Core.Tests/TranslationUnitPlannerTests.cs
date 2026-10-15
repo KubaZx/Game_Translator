@@ -208,4 +208,29 @@ public class TranslationUnitPlannerTests
         var composed = TranslationUnitPlanner.Compose(plan, [null, "Zbadaj", "Przedmioty"]);
         Assert.Equal("E Zbadaj\nPrzedmioty", composed);
     }
+
+    [Fact]
+    public void Znacznik_grafiki_spoza_korpusu_nie_psuje_trafienia_w_korpus()
+    {
+        var plan = TranslationUnitPlanner.Plan("The Old Lighthouse [X]", Snapper(), splitParagraphs: true);
+
+        Assert.NotNull(plan);
+        var unit = Assert.Single(plan.Units);
+        Assert.True(unit.FromCorpus);
+        Assert.Equal("The Old Lighthouse", unit.Key);
+    }
+
+    [Fact]
+    public void Znacznik_ikony_na_koncu_przelamanej_kwestii_zostaje_w_tlumaczeniu()
+    {
+        var snapper = new CorpusSnapper(CorpusIndex.Build([E("I hereby assume all risks of walking with [X]")]));
+        var plan = TranslationUnitPlanner.Plan("I hereby assume all risks of walking\nwith [X]", snapper, splitParagraphs: true);
+
+        var translation = "Niniejszym przyjmuję na siebie wszelkie ryzyko związane z chodzeniem z [X]";
+        var composed = plan is null
+            ? translation
+            : TranslationUnitPlanner.Compose(plan, plan.Units.Select(u => u.Literal ? null : translation).ToList());
+
+        Assert.Equal("Niniejszym przyjmuję na siebie wszelkie\nryzyko związane z chodzeniem z [X]", composed);
+    }
 }

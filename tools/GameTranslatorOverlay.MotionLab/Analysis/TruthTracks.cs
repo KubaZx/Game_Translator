@@ -1,4 +1,5 @@
 using GameTranslatorOverlay.Core.Text;
+using GameTranslatorOverlay.Core.Vision;
 
 internal sealed record TruthRow(Box Box, string Norm, string BlockKeyHash, string? Identity, bool Live);
 
@@ -52,7 +53,7 @@ internal static class TextTools
         return Math.Abs(a.Length - b.Length) <= 0.4 * longest;
     }
 
-    public static string Flat(string text) => text.Replace('\n', ' ');
+    public static string Flat(string text) => InlineIcons.Replace(text, string.Empty).Replace('\n', ' ');
 
     private static readonly HashSet<string> KeyTokens = new(StringComparer.OrdinalIgnoreCase)
     {

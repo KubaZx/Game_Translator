@@ -148,4 +148,22 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern bool DestroyIcon(IntPtr hIcon);
+
+    public const int DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19;
+    public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    public const int DWMWA_BORDER_COLOR = 34;
+    public const int DWMWA_CAPTION_COLOR = 35;
+    public const int DWMWA_TEXT_COLOR = 36;
+    public const int DWMWCP_ROUND = 2;
+
+    public const int SM_CXSIZEFRAME = 32;
+    public const int SM_CXSMICON = 49;
+    public const int SM_CXPADDEDBORDER = 92;
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetricsForDpi(int nIndex, uint dpi);
 }

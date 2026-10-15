@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Profiles;
 using GameTranslatorOverlay.Core.Vision;
 using GameTranslatorOverlay.Infrastructure.Settings;
 
@@ -15,15 +16,18 @@ public static class OverlayFonts
     public const string DefaultFamily = "Segoe UI";
     private const double ReferenceEm = 64;
 
-    private static readonly string[] BundledFamilies = ["Lexend Deca"];
+    private static readonly string[] BundledFamilies = ["Lexend Deca", "Zilla Slab"];
     private static readonly Lock Gate = new();
     private static readonly Dictionary<string, FontFamily> Families = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, IReadOnlyList<Typeface>> Weights = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<(Typeface, string), InkMetrics> Metrics = [];
+    private static readonly Dictionary<string, bool> Availability = new(StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> Bundled => BundledFamilies;
 
     public static string? ProfileFont { get; set; }
+
+    public static IReadOnlyList<OverlayFontRule> ProfileRules { get; set; } = [];
 
     public static FontFamily Resolve(AppSettings settings) => Family(ResolveFamilyName(settings, ProfileFont));
 
@@ -34,6 +38,54 @@ public static class OverlayFonts
     {
         if (!IsAuto(settings.OverlayFontFamily)) return settings.OverlayFontFamily;
         return string.IsNullOrWhiteSpace(profileFont) ? DefaultFamily : profileFont.Trim();
+    }
+
+    public static string CoverFamilyName(AppSettings settings, string? profileFont, GlyphCover cover, double screenHeightPx)
+    {
+        var family = ResolveFamilyName(settings, profileFont);
+        var rules = ProfileRules;
+        if (rules.Count == 0 || !IsAuto(settings.OverlayFontFamily)) return family;
+        return OverlayFontRuleSet.Resolve(family, rules, StyleSample(cover, screenHeightPx));
+    }
+
+    public static TextStyleSample StyleSample(GlyphCover cover, double screenHeightPx) =>
+        new(cover.TextRgb, cover.OutlinePx > 0 && cover.OutlineRgb >= 0, screenHeightPx > 0 ? cover.Ascent / screenHeightPx : 0);
+
+    public static IReadOnlyList<string> ProfileFamilies(AppSettings settings)
+    {
+        var families = new List<string> { ResolveFamilyName(settings, ProfileFont) };
+        if (!IsAuto(settings.OverlayFontFamily)) return families;
+        foreach (var rule in ProfileRules)
+        {
+            if (rule.FontFamily?.Trim() is { Length: > 0 } name && !families.Contains(name, StringComparer.OrdinalIgnoreCase)) families.Add(name);
+        }
+        return families;
+    }
+
+    public static void WarmUpProfile(AppSettings settings)
+    {
+        foreach (var family in ProfileFamilies(settings)) WarmUp(family);
+    }
+
+    public static bool IsAvailable(string name)
+    {
+        var trimmed = name.Trim();
+        if (trimmed.Length == 0) return false;
+        if (BundledFamilies.Any(f => f.Equals(trimmed, StringComparison.OrdinalIgnoreCase))) return true;
+        lock (Gate)
+        {
+            if (Availability.TryGetValue(trimmed, out var known)) return known;
+        }
+        var typeface = new Typeface(new FontFamily(trimmed), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        var available = typeface.TryGetGlyphTypeface(out var glyphs)
+            && glyphs.FamilyNames.Values.Concat(glyphs.Win32FamilyNames.Values).Any(n => n.StartsWith(trimmed, StringComparison.OrdinalIgnoreCase))
+            && (trimmed.Equals(DefaultFamily, StringComparison.OrdinalIgnoreCase)
+                || !ReferenceEquals(AvailableWeights(trimmed), AvailableWeights(DefaultFamily)));
+        lock (Gate)
+        {
+            Availability[trimmed] = available;
+        }
+        return available;
     }
 
     public static FontFamily Family(string name)

@@ -23,10 +23,12 @@ znajdują się na stronach projektów.
 | Czcionka | Licencja | Zastosowanie |
 |---|---|---|
 | Lexend Deca (Regular, Medium, SemiBold, Bold; wersja 1.007) — Copyright 2019 The Lexend Project Authors (https://github.com/googlefonts/lexend) | SIL Open Font License 1.1 | krój napisów nakładki w profilu Escape Academy (`overlay.fontFamily`) |
+| Zilla Slab (Bold; wersja 1.1) — Copyright 2017, The Mozilla Foundation (https://github.com/mozilla/zilla-slab, plik z https://github.com/google/fonts) | SIL Open Font License 1.1 | szeryfowy krój żółtego napisu z obrysem (imię mówiącego) w profilu Escape Academy (`overlay.fontRules`) |
 
-Pliki czcionki są zasobami aplikacji (`src/GameTranslatorOverlay.App/Fonts`), niezmienione.
-Pełny tekst licencji: `licenses/LexendDeca-OFL.txt` obok programu
-(`src/GameTranslatorOverlay.App/Fonts/OFL.txt` w repozytorium). Czcionki nie są sprzedawane
+Pliki czcionek są zasobami aplikacji (`src/GameTranslatorOverlay.App/Fonts`), niezmienione.
+Pełne teksty licencji obok programu: `licenses/LexendDeca-OFL.txt`
+(`src/GameTranslatorOverlay.App/Fonts/OFL.txt` w repozytorium) i `licenses/ZillaSlab-OFL.txt`
+(`src/GameTranslatorOverlay.App/Fonts/ZillaSlab-OFL.txt`). Czcionki nie są sprzedawane
 osobno, zgodnie z warunkiem 1 licencji OFL.
 
 ## Wyłącznie do budowania i testów (nie są dystrybuowane z aplikacją)

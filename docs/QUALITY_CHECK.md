@@ -1,4 +1,10 @@
-# Sprawdzenie wydań 0.5.0–0.6.0 w grze — checklista (~55 min)
+# Sprawdzenie wydań 0.5.0–0.7.0 w grze — checklista (~75 min)
+
+**0.7.0 (nowe okno, ikony, imię mówiącego, ~20 min):** przejdź scenariusze M45 (nowe okno: mysz,
+Tab, maksymalizacja, zasobnik, przełączanie profilu), M44 (ikony w polskim zdaniu na kartce
+zrzeczenia), M46 (imię mówiącego w Zilla Slab), M43 (dymki „Pod oryginałem” w ruchu) i M47
+(napis na ścianie przy podchodzeniu) z [MANUAL_TESTING.md](MANUAL_TESTING.md). Nazwy przycisków
+poniżej odnoszą się do nowego okna (sekcje po lewej — [USER_GUIDE.md → Okno aplikacji](USER_GUIDE.md#okno-aplikacji)).
 
 **0.6.0 (ruch kamery, ~10 min):** w trybie „Na oryginale (zakrywa)” przejdź scenariusze M41
 (panorama, obrót, chodzenie przy HUD i napisie na ścianie) i M42 (gra na pełnym ekranie)
@@ -19,7 +25,7 @@ Wynik wystarczy zapisać w tabelach poniżej (✔ / ✘ / uwaga) i odesłać —
 
 ## 0. Przygotowanie (10 min)
 
-- [ ] Zainstalowane 0.5.0 z [Releases](https://github.com/KubaZx/Game_Translator/releases);
+- [ ] Zainstalowane 0.7.0 z [Releases](https://github.com/KubaZx/Game_Translator/releases);
       stare ustawienia i klucz są na miejscu (status „Klucz …: zapisany ✔”).
 - [ ] **Krój czcionki** pokazuje „Jak w grze (krój z profilu)” (ustawiony Segoe UI, dawny domyślny,
       przechodzi na niego raz; inny wybrany krój zostaje).
@@ -27,7 +33,7 @@ Wynik wystarczy zapisać w tabelach poniżej (✔ / ✘ / uwaga) i odesłać —
       potem `translate` (najpierw `--dry-run`) —
       [USER_GUIDE.md → Spolszczenie z wyprzedzeniem](USER_GUIDE.md#spolszczenie-z-wyprzedzeniem-korpus-gry).
 - [ ] Escape Academy w oknie bez ramki; **Profil gry: Escape Academy** (przy „— brak profilu
-      (tryb uniwersalny) —” włącza się sam po wybraniu okna gry z listy). Po ręcznym wyborze
+      (tryb uniwersalny) —” włącza się sam po wybraniu okna gry w sekcji **Gra**). Po ręcznym wyborze
       profilu pasek stanu pokazuje „Ustawienia zapisane (…, korpus: … tekstów).”; przy
       automatycznym wykryciu liczbę tekstów korpusu podaje log w `logs\`.
 - [ ] Opcjonalnie do porównania: gra bez korpusu (np. PoE2) — tam teksty mają być tłumaczone jak
@@ -35,7 +41,7 @@ Wynik wystarczy zapisać w tabelach poniżej (✔ / ✘ / uwaga) i odesłać —
 
 ## 1. Stary napis znika (5 min)
 
-Ustawienia: **Wyświetlanie: Przy oryginale**, dowolne położenie dymków.
+Ustawienia: **Wyświetlanie w trybie live: Przy oryginale**, dowolne położenie dymków.
 
 | Sprawdzenie | Wynik |
 |---|---|
@@ -59,7 +65,7 @@ Ustawienia: **Wyświetlanie: Przy oryginale**, dowolne położenie dymków.
 
 ## 3. Napis w stylu gry (10 min)
 
-Ustawienia: **Wyświetlanie: Przy oryginale**, **Położenie dymków: Na oryginale (zakrywa)**,
+Ustawienia: **Wyświetlanie w trybie live: Przy oryginale**, **Położenie dymków: Na oryginale (zakrywa)**,
 **Krój czcionki: Jak w grze (krój z profilu)**.
 
 | Sprawdzenie | Wynik |

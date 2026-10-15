@@ -40,6 +40,37 @@ public sealed class TextBlockSplitterTests
     }
 
     [Fact]
+    public void Imie_w_innym_kolorze_nad_kwestia_staje_sie_osobnym_blokiem()
+    {
+        var block = TextBlockGrouper.Group([
+            Line("Keeper", 768, 1298, 531, 119),
+            Line("Hello there, traveler.", 793, 1495, 948, 97),
+        ]);
+        Assert.Single(block);
+
+        var split = TextBlockSplitter.SplitLabels(block, static box => box.Y < 1400 ? 0xFBFA86 : 0xF5F5F5);
+
+        Assert.Equal(["Keeper", "Hello there, traveler."], split.Select(static b => b.Text));
+    }
+
+    [Fact]
+    public void Podobny_kolor_albo_dluga_pierwsza_linia_nie_dziela_bloku()
+    {
+        var block = TextBlockGrouper.Group([
+            Line("Keeper", 768, 1298, 531, 119),
+            Line("Hello there, traveler.", 793, 1495, 948, 97),
+        ]);
+        var words = new[] { "The", "old", "lighthouse", "keeper" }.Select((w, i) => new OcrWord(w, new RectPx(100 + i * 120, 100, 110, 40))).ToList();
+        var paragraph = TextBlockGrouper.Group([
+            new OcrLine("The old lighthouse keeper", new RectPx(100, 100, 470, 40), words),
+            Line("left a note.", 100, 150, 300, 40),
+        ]);
+
+        Assert.Same(block, TextBlockSplitter.SplitLabels(block, static box => box.Y < 1400 ? 0xF0F0F0 : 0xF5F5F5));
+        Assert.Same(paragraph, TextBlockSplitter.SplitLabels(paragraph, static box => box.Y < 120 ? 0xFBFA86 : 0xF5F5F5));
+    }
+
+    [Fact]
     public void Jeden_potwierdzony_napis_nie_dzieli_akapitu()
     {
         var block = TextBlockGrouper.Group([

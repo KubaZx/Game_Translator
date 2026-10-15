@@ -3,13 +3,16 @@
   "name": "Escape Academy",
   "profileVersion": 1,
   "author": "GameTranslatorOverlay",
-  "description": "Profil gry Escape Academy (Coin Crew Games). Dopasowuje okno gry po nazwie procesu; parametry OCR i wykrywania zmian zostają z ustawień aplikacji. Sekcja corpus to recepta dla narzędzia offline CorpusTool (ADR-014): które TextAssety z data.unity3d są tekstem dla gracza — tabele GameplayStrings (klucz, tekst EN, kontekst), angielskie tabele dialogów Yarn (sufiks en-US) i angielskie napisy SRT z mówcą. Aplikacja tej sekcji nie czyta i sama nie otwiera plików gry.",
+  "description": "Profil gry Escape Academy (Coin Crew Games). Dopasowuje okno gry po nazwie procesu; parametry OCR i wykrywania zmian zostają z ustawień aplikacji. Sekcja corpus to recepta dla narzędzia offline CorpusTool (ADR-014): które TextAssety z data.unity3d są tekstem dla gracza — tabele GameplayStrings (klucz, tekst EN, kontekst), angielskie tabele dialogów Yarn (sufiks en-US) i angielskie napisy SRT z mówcą. Aplikacja tej sekcji nie czyta i sama nie otwiera plików gry. Krój nakładki: Lexend Deca, a żółty napis z obrysem (imię mówiącego nad oknem dialogu, tytuły w tym samym stylu) — szeryfowy Zilla Slab (overlay.fontRules).",
   "processNames": ["Escape Academy.exe"],
   "windowTitles": ["Escape Academy"],
   "sourceLanguage": "en",
   "online": false,
   "overlay": {
-    "fontFamily": "Lexend Deca"
+    "fontFamily": "Lexend Deca",
+    "fontRules": [
+      { "fontFamily": "Zilla Slab", "textColor": "#FBFA86", "colorTolerance": 40, "outlined": true }
+    ]
   },
   "live": {
     "ignoreRegions": [

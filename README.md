@@ -11,19 +11,20 @@ gry, bez żadnej zmiany w plikach gry.
 [Instrukcja](docs/USER_GUIDE.md) · [Zmiany](CHANGELOG.md) ·
 [CI](https://github.com/KubaZx/Game_Translator/actions/workflows/ci.yml)
 
-**Wersja: 0.6.0** · Windows 10 2004+ / 11 · portable, bez instalacji
+**Wersja: 0.7.0** · Windows 10 2004+ / 11 · portable, bez instalacji
 
 ## Funkcje
 
 | Funkcja | Jak |
 |---|---|
 | Tłumaczenie fragmentu | `Ctrl+Shift+T` → zaznacz obszar |
-| Tryb live | `Ctrl+Shift+L` w grze (start/stop) albo wybierz okno gry → **▶ Start live** |
+| Okno aplikacji | ciemne okno z sekcjami Pulpit, Gra, Tłumaczenie, Wygląd nakładki, Dane i słownik, O programie; minimalizacja do zasobnika, okno wykluczone z przechwytywania obrazu |
+| Tryb live | `Ctrl+Shift+L` w grze (start/stop) albo okno gry w sekcji **Gra** → **Start live** na **Pulpicie** |
 | Ukrycie nakładki | `Ctrl+Shift+H` |
 | Komunikaty w grze | brak klucza, limit, brak sieci, Cache-only, start/stop live, gra na pełnym ekranie — krótki pasek u góry okna gry |
 | Wygląd | bloki przy oryginale (pod tekstem albo zakrywające go) albo napisy na dole |
-| Wygląd jak w grze | **Na oryginale (zakrywa)** w trybie live: z obrazu znikają same litery oryginału (ich piksele są wypełniane tłem z otoczenia, reszta obrazu gry zostaje nietknięta), a polski tekst dostaje kolor, kontur, cień, wysokość liter i linię bazową napisu gry; ikony klawiszy zostają; krój **Jak w grze (krój z profilu)** — w profilu Escape Academy dołączony Lexend Deca |
-| Ruch kamery | tłumaczenie jedzie razem z napisem (śledzenie kształtu liter między odczytami OCR) we wszystkich trybach, a w trybie zakrywania tło pod nim jest odświeżane do ~30 razy na sekundę z Windows Graphics Capture; HUD przy obrotach i panoramach zwykle zostaje (na nagraniach Escape Academy tłumaczenie przez ok. 75–80% czasu ruchu kamery, wcześniej ok. 4%) |
+| Wygląd jak w grze | **Na oryginale (zakrywa)** w trybie live: z obrazu znikają same litery oryginału (ich piksele są wypełniane tłem z otoczenia, reszta obrazu gry zostaje nietknięta), a polski tekst dostaje kolor, kontur, cień, wysokość liter i linię bazową napisu gry; ikony klawiszy ze środka zdania stoją w polskim zdaniu (obraz ikony z gry), a imię mówiącego nad dialogiem jest osobnym napisem; krój **Jak w grze (krój z profilu)** — w profilu Escape Academy dołączony Lexend Deca, a dla imion i tytułów Zilla Slab |
+| Ruch kamery | tłumaczenie jedzie razem z napisem (śledzenie kształtu liter między odczytami OCR) we wszystkich trybach, a w trybie zakrywania tło pod nim jest odświeżane do ~30 razy na sekundę z Windows Graphics Capture; HUD przy obrotach i panoramach zwykle zostaje (na nagraniach Escape Academy tłumaczenie przez ok. 75–80% czasu ruchu kamery, wcześniej ok. 4%); napis na ścianie jest śledzony także, gdy rośnie albo maleje |
 | Aktualność napisów | tłumaczenie znika razem z napisem w grze, także na teksturowanym tle (porównanie pikseli pola z ostatnim odczytem); przygaszony napis, który OCR nadal czyta, zostaje |
 | Korpus gry | osobne narzędzie offline `CorpusTool` czyta teksty z plików gry (dziś Escape Academy; gra wyłączona, bez anti-cheatu i gier online) i może je przetłumaczyć z wyprzedzeniem do lokalnej bazy; sama aplikacja plików gry nie czyta |
 | Dopasowanie do korpusu | odczyt OCR z błędami („Ihspect”, „11m”), innym zawinięciem albo WIELKIMI LITERAMI trafia w znany tekst gry i jego tłumaczenie; początek kwestii dialogu dostaje tłumaczenie całej kwestii; śmieci OCR z ikon i tekstur nie idą do dostawcy |
@@ -91,9 +92,9 @@ na żywo.
 
 1. Pobierz zip z [Releases](https://github.com/KubaZx/Game_Translator/releases), rozpakuj,
    uruchom `GameTranslatorOverlay.exe`.
-2. Wybierz dostawcę, wklej klucz API → **Zapisz klucz** → **Testuj**.
-3. Uruchom grę w oknie bez ramki (borderless) albo w oknie i wybierz ją z listy.
-4. **▶ Start live** (albo `Ctrl+Shift+L` w grze).
+2. W sekcji **Tłumaczenie** wybierz dostawcę, wklej klucz API → **Zapisz klucz** → **Testuj**.
+3. Uruchom grę w oknie bez ramki (borderless) albo w oknie i kliknij jej okno w sekcji **Gra**.
+4. **Start live** na **Pulpicie** (albo `Ctrl+Shift+L` w grze).
 5. Opcjonalnie, dla napisów w stylu gry: **Położenie dymków → Na oryginale (zakrywa)**
    (krój **Jak w grze (krój z profilu)** jest domyślny) —
    [Instrukcja → Tryb „Na oryginale (zakrywa)”](docs/USER_GUIDE.md#tryb-na-oryginale-zakrywa--napis-jak-w-grze).
@@ -147,7 +148,7 @@ Więcej: [PRIVACY.md](docs/PRIVACY.md), [SECURITY.md](docs/SECURITY.md).
 - Zaznaczanie regionu działa na monitorze z kursorem.
 - `Ctrl+Shift+L` uruchamia live na **dowolnym** aktywnym oknie (także przeglądarce) — to jawna
   akcja użytkownika. Gry UWP / Microsoft Store / Game Pass nie są wybierane jako aktywne okno:
-  wybierz je raz na liście i kliknij **▶ Start live**.
+  wybierz je raz w sekcji **Gra** i kliknij **Start live**.
 - Ostrzeżenie kontroli jakości nie jest jeszcze pokazywane w oknie ani nakładce.
 - Wygląd **Na oryginale (zakrywa)** sprawdzono na zapisanych klatkach Escape Academy
   (OverlayPreview), w SceneReplay i na nagraniach (MotionLab), nie w grze na żywo. Przy szybkim
@@ -188,6 +189,8 @@ w paczce aplikacji. Tam, gdzie zaznaczono Windows, potrzebny jest systemowy OCR 
 | [CorpusTool](tools/GameTranslatorOverlay.CorpusTool/README.md) | `extract` — korpus tekstów gry z jej plików według recepty w profilu (ADR-014: gra wyłączona, tylko odczyt, bez sieci); `translate` — tłumaczenie korpusu z wyprzedzeniem do lokalnej bazy (`--dry-run`: liczby i szacunek kosztu) |
 | [CorpusEval](tools/GameTranslatorOverlay.CorpusEval/README.md) | precyzja i czas dopasowania OCR do korpusu: `render`, `evaluate`, `bench`, `replay`, `session`, `prefixes`, `typing` (Windows) |
 | [OverlayPreview](tools/GameTranslatorOverlay.OverlayPreview/README.md) | prawdziwa nakładka „Na oryginale (zakrywa)” na zapisanych klatkach gry → PNG i galeria do porównań przed/po, bez sieci (Windows) |
+| [MotionLab](tools/GameTranslatorOverlay.MotionLab/README.md) | nagrania gry (klatki) odtwarzane przez prawdziwą sesję live i nakładkę z Mockiem; pokrycie, dziury, opóźnienia i położenie napisów w ruchu kamery względem offline OCR każdej klatki (Windows) |
+| [UiPreview](tools/GameTranslatorOverlay.UiPreview/README.md) | prawdziwe okno aplikacji renderowane poza ekranem (tymczasowe dane, Mock, bez sieci) → PNG sekcji i wariantów oraz kontrole uciętych napisów i klikalności (Windows) |
 | [SceneReplay](tools/GameTranslatorOverlay.SceneReplay/README.md) | powtarzalne sceny trybu live we własnym oknie (m.in. `stale-*`, `typing`) z Mockiem; czasy callbacków sesji (Windows) |
 | [LiveDiag](tools/GameTranslatorOverlay.LiveDiag/README.md) | diagnostyka sesji live na scenie testowej albo oknie gry: capture, Windows OCR, Mock (Windows) |
 | [ProviderEval](tools/GameTranslatorOverlay.ProviderEval/README.md) | porównanie dostawców i promptów: chrF, czasy, kontrole EN→PL, opcje serwera LLM |
@@ -202,10 +205,10 @@ w paczce aplikacji. Tam, gdzie zaznaczono Windows, potrzebny jest systemowy OCR 
 | `src/GameTranslatorOverlay.Infrastructure` | dostawcy API, SQLite, DPAPI, wczytywanie korpusu |
 | `src/GameTranslatorOverlay.App` | WPF, przechwytywanie, OCR, nakładka, dołączone kroje (`Fonts`) |
 | `tests/` | testy xUnit: Core, Infrastructure, CorpusTool |
-| `tools/` | CorpusTool, CorpusEval, OverlayPreview, SceneReplay, LiveDiag, ProviderEval, OcrLab, SmokeTest |
+| `tools/` | CorpusTool, CorpusEval, OverlayPreview, MotionLab, UiPreview, SceneReplay, LiveDiag, ProviderEval, OcrLab, SmokeTest |
 | `benchmarks/` | benchmarki BenchmarkDotNet (poza `dotnet test`) |
 | `eval/` | korpus EN→PL do ProviderEval |
-| `profiles/`, `glossaries/` | profile gier (ogólny, PoE2, Escape Academy z receptą korpusu i krojem napisów) i słowniki |
+| `profiles/`, `glossaries/` | profile gier (ogólny, PoE2, Escape Academy z receptą korpusu i krojami napisów; własne — w folderze danych `profiles\`) i słowniki |
 
 Dokumenty: [Instrukcja](docs/USER_GUIDE.md) · [Dostawcy API](docs/API_PROVIDERS.md) ·
 [Architektura](docs/ARCHITECTURE.md) · [Decyzje](docs/TECHNOLOGY_DECISIONS.md) ·

@@ -73,7 +73,7 @@ internal sealed record UpdateDto(
     int Seq, double EmitMs, double AppliedMs, string Status, bool Clear, bool Hide, bool Stopped,
     bool ClearSubtitle, string? Subtitle, string? Notice, Box Bounds, DiagDto? Diag, IReadOnlyList<BlockDto>? Blocks);
 
-internal sealed record ElementDto(string? Key, Box Box, double Opacity, int Element, bool Native, int? Weight = null, double? Em = null);
+internal sealed record ElementDto(string? Key, Box Box, double Opacity, int Element, bool Native, int? Weight = null, double? Em = null, string? Family = null);
 
 internal sealed record ShownDto(
     int I, double DueMs, double SetMs, double RenderMs, double DecodeWaitMs, double SnapMs,

@@ -9,6 +9,21 @@ public class GlyphCoverTests
     private const int Height = 160;
 
     [Fact]
+    public void Napis_z_ikony_klawisza_jest_nizszy_od_slow_obok_a_zwykle_slowo_nie()
+    {
+        OcrWord W(string text, int x, int height) => new(text, new RectPx(x, 100 - height, text.Length * 20, height));
+
+        IReadOnlyList<OcrWord> hud = [W("Tab", 0, 18), W("Items", 80, 52)];
+        IReadOnlyList<OcrWord> sentence = [W("Hold", 0, 50), W("Shift", 100, 50), W("to", 220, 38), W("sprint", 280, 62)];
+        IReadOnlyList<OcrWord> alone = [W("Tab", 0, 30)];
+
+        Assert.True(GlyphCoverBuilder.IsIconLabel(hud[0], hud));
+        Assert.False(GlyphCoverBuilder.IsIconLabel(sentence[1], sentence));
+        Assert.True(GlyphCoverBuilder.IsIconLabel(alone[0], alone));
+        Assert.False(GlyphCoverBuilder.IsIconLabel(hud[1], hud));
+    }
+
+    [Fact]
     public void Jasny_napis_z_konturem_i_cieniem_daje_kolor_kontur_i_cien()
     {
         var frame = Solid(Width, Height, 0x1A111B);
@@ -374,6 +389,56 @@ public class GlyphCoverTests
         Assert.Equal(box.Offset(7, -3), moved.Anchor);
         Assert.Equal(cover.Track!.OriginX + 7, moved.Track!.OriginX, 6);
         Assert.Equal(cover.Track.OriginY - 3, moved.Track.OriginY, 6);
+    }
+
+    [Fact]
+    public void Ikona_ze_znacznikiem_trafia_do_lapki_z_przezroczystym_tlem_a_oryginal_jest_zakryty()
+    {
+        var frame = Solid(Width, Height, 0xE6E1D8);
+        Paint(frame, Word(40, 50, capHeight: 40, stroke: 6, letters: 2), 0x202020);
+        foreach (var (x, y) in Rect(134, 50, 52, 42))
+        {
+            var edge = x < 137 || x >= 183 || y < 53 || y >= 89;
+            Set(frame, x, y, edge ? 0x2A2830 : 0x8A86A0);
+        }
+        var text = new OcrWord("Hi", new RectPx(36, 46, 80, 50));
+        var icon = new OcrWord(InlineIcons.Marker, new RectPx(130, 46, 60, 50));
+        var line = new OcrLine("Hi [X]", new RectPx(36, 46, 154, 50), [text, icon]);
+        var block = new GameTranslatorOverlay.Core.Text.TextBlock("Hi [X]", line.Box, [line]);
+
+        var cover = GlyphCoverBuilder.BuildForBlock(frame, block, default, 1.0)!;
+
+        var glyphIcon = Assert.Single(cover.Icons);
+        Assert.Equal(60, glyphIcon.PixelWidth);
+        Assert.Equal(50, glyphIcon.PixelHeight);
+        Assert.Equal(130 - block.Box.X, glyphIcon.X);
+        Assert.Equal(0, glyphIcon.Pbgra[3]);
+        Assert.Equal(255, glyphIcon.Pbgra[((25 * 60) + 30) * 4 + 3]);
+        var patchOrigin = (X: block.Box.X + (int)cover.PatchX, Y: block.Box.Y + (int)cover.PatchY);
+        var o = ((70 - patchOrigin.Y) * cover.PatchPixelWidth + (160 - patchOrigin.X)) * 4;
+        Assert.Equal(255, cover.PatchPbgra[o + 3]);
+        Assert.InRange(cover.PatchPbgra[o + 2], 0xE6 - 12, 0xE6 + 12);
+    }
+
+    [Fact]
+    public void Pochylona_linia_ma_wysokosc_liter_jak_prosta()
+    {
+        double Ascent(int slant)
+        {
+            var frame = Solid(Width, Height, 0x2B3A4C);
+            for (var i = 0; i < 12; i++)
+                Paint(frame, Word(10 + i * 28, 40 + i * slant, capHeight: 24, stroke: 4, letters: 1), 0xF5F5F5);
+            var box = new RectPx(6, 36, 340, 32 + 11 * slant);
+            var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"])!;
+            var measured = Assert.Single(cover.Lines);
+            return measured.Baseline - measured.InkTop;
+        }
+
+        var straight = Ascent(0);
+        var slanted = Ascent(2);
+
+        Assert.InRange(straight, 22, 27);
+        Assert.InRange(slanted, straight * 0.85, straight * 1.15);
     }
 
     private static (bool[] Fill, RectPx Area) RuleCanvas() => (new bool[200 * 40], new RectPx(0, 0, 200, 40));

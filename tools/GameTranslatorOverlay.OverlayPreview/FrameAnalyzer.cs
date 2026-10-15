@@ -62,7 +62,10 @@ internal static class FrameAnalyzer
                 .ToList();
         }
 
-        var grouped = TextBlockGrouper.Group(lines);
+        lines = InlineIcons.Annotate(ocrFrame, lines, default, scaleBack);
+        var grouped = TextBlockSplitter.SplitLabels(TextBlockGrouper.Group(lines),
+            box => BlockColorSampler.SampleColors(ocrFrame.PixelsBgra32, ocrFrame.Width, ocrFrame.Height, ocrFrame.Stride,
+                GlyphCoverBuilder.ToSampleBox(box, default, scaleBack)).TextRgb);
         var accepted = grouped.Where(block => orchestrator.ShouldTranslateLive(block.Text)).ToList();
         var rejected = grouped.Except(accepted).Select(static b => new RejectedBlock(b.Text, b.Box)).ToList();
         var keyed = LiveBlockKeyer.AssignKeys(accepted, orchestrator.CorpusIdentity);

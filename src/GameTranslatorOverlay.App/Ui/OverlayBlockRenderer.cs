@@ -127,7 +127,7 @@ public static class OverlayBlockRenderer
 
         var textBlock = new TextBlock
         {
-            Text = text,
+            Text = InlineIcons.Replace(text, InlineIcons.SymbolReplacement),
             Foreground = foreground,
             FontSize = fontSize,
             TextWrapping = TextWrapping.Wrap,
@@ -166,6 +166,8 @@ public static class OverlayBlockRenderer
     public static bool UsesNativeCover(AppSettings settings, GlyphCover? cover) => cover is { HasPatch: true } && IsCoverPlacement(settings);
 
     public static bool HidesIdenticalText(AppSettings settings) => IsCoverPlacement(settings);
+
+    public static string BoxText(string text, GlyphCover? cover) => cover is null ? text : StripIconToken(text, cover);
 
     public static string StripIconToken(string text, GlyphCover cover)
     {
@@ -227,8 +229,54 @@ public static class OverlayBlockRenderer
             cover.OutlinePx / scale,
             new Vector(cover.ShadowDx / scale, cover.ShadowDy / scale));
         native.Tag = cover;
-        if (native.RawText.Length > 0) native.Text = StripIconToken(native.RawText, cover);
+        if (native.RawText.Length > 0)
+        {
+            native.LogicalText = StripIconToken(native.RawText, cover);
+            native.Text = InlineIcons.Replace(native.LogicalText, string.Empty);
+        }
     }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], BitmapSource> IconImages = new();
+
+    private static BitmapSource IconImage(GlyphIcon icon) => IconImages.GetValue(icon.Pbgra, _ =>
+    {
+        var bitmap = BitmapSource.Create(icon.PixelWidth, icon.PixelHeight, 96, 96, PixelFormats.Pbgra32, null, icon.Pbgra, icon.PixelWidth * 4);
+        bitmap.Freeze();
+        return bitmap;
+    });
+
+    private static string PrepareIcons(GameTextElement native, GlyphCover cover, Typeface typeface, double em, double scale)
+    {
+        var logical = native.LogicalText.Length > 0 || native.RawText.Length == 0 ? native.LogicalText : native.Text;
+        if (cover.Icons.Count == 0 || InlineIcons.CountMarkers(logical) == 0)
+        {
+            var plain = InlineIcons.Replace(logical, string.Empty);
+            native.SetIcons([], em, cover.Icons.Select(i => (Image: (ImageSource)IconImage(i), Rect: OrphanRect(i, cover, scale))).ToList());
+            return plain;
+        }
+        var reserve = GameTextElement.Format(InlineIcons.Reserve.ToString(), typeface, em, Brushes.Black, 1.0).WidthIncludingTrailingWhitespace;
+        if (reserve <= 0.01) reserve = em * 0.25;
+        var space = GameTextElement.Format(" ", typeface, em, Brushes.Black, 1.0).WidthIncludingTrailingWhitespace;
+        if (space <= 0.01) space = reserve;
+        var (display, slots) = InlineIcons.Layout(logical, cover.Icons.Count,
+            (index, spaced) => Math.Max(1, (int)Math.Round(((spaced ? space : 0) + cover.Icons[index].Width / scale + em * 0.05) / reserve)));
+        var placed = new List<IconSlot>(slots.Count);
+        foreach (var slot in slots)
+        {
+            var icon = cover.Icons[slot.Icon];
+            var center = icon.Y + icon.Height / 2;
+            var line = cover.Lines.Count == 0 ? null : cover.Lines.MinBy(l => Math.Abs((l.InkTop + l.Baseline) / 2 - center));
+            var fromBaseline = line is null ? -0.35 : (center - line.Baseline) / scale / Math.Max(1, em);
+            placed.Add(new IconSlot(slot.Start, slot.Length, IconImage(icon), new Size(icon.Width / scale, icon.Height / scale), fromBaseline,
+                slot.Spaced ? space / Math.Max(1, em) : 0));
+        }
+        var orphans = cover.Icons.Skip(slots.Count).Select(i => (Image: (ImageSource)IconImage(i), Rect: OrphanRect(i, cover, scale))).ToList();
+        native.SetIcons(placed, em, orphans);
+        return display;
+    }
+
+    private static Rect OrphanRect(GlyphIcon icon, GlyphCover cover, double scale) =>
+        new((icon.X - cover.PatchX) / scale, (icon.Y - cover.PatchY) / scale, icon.Width / scale, icon.Height / scale);
 
     private static Color ToColor(int rgb) => Color.FromRgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 
@@ -247,7 +295,7 @@ public static class OverlayBlockRenderer
     {
         if (element.Child is not GameTextElement { Tag: GlyphCover cover } native) return;
         var scale = monitor.Scale;
-        var family = OverlayFonts.ResolveFamilyName(settings, profileFont);
+        var family = OverlayFonts.CoverFamilyName(settings, profileFont, cover, monitor.Bounds.Height);
         var text = native.Text;
         var lines = cover.Lines;
 
@@ -263,6 +311,8 @@ public static class OverlayBlockRenderer
         {
             typeface = OverlayFonts.ChooseWeight(family, string.Empty, 0);
             em = Math.Max(6, box.Height / scale * 0.75);
+            text = PrepareIcons(native, cover, typeface, em, scale);
+            native.Text = text;
             baseline = (box.Height * 0.8 - cover.PatchY) / scale;
             anchor = (cover.IconSkipPx - cover.PatchX) / scale;
             available = (box.Width - cover.IconSkipPx) / scale;
@@ -288,6 +338,8 @@ public static class OverlayBlockRenderer
             }
             var metrics = OverlayFonts.Measure(typeface, referenceText);
             em = metrics.Ascent > 0.05 ? ascent / metrics.Ascent : ascent / 0.7;
+            text = PrepareIcons(native, cover, typeface, Math.Clamp(em, 6, Math.Max(6, box.Height / scale * 1.6)), scale);
+            native.Text = text;
             em = Math.Clamp(em, 6, Math.Max(6, box.Height / scale * 1.6));
             baseline = (lines[0].Baseline - cover.PatchY) / scale + metrics.BaselineShift * em;
             var left = lines.Min(static l => l.InkLeft);
@@ -339,12 +391,12 @@ public static class OverlayBlockRenderer
         double wrap = 0;
         if (lines.Count > 1 && WidestLine(text, typeface, fitted) > limit)
         {
-            wrap = Math.Max(Math.Max(1, available) * 1.04, WidestWord(text, typeface, fitted) + 1);
+            wrap = Math.Max(Math.Max(1, available) * 1.04, WidestWord(text, typeface, fitted) + 3);
             var smallest = em * 0.7;
-            while (fitted > smallest && WrappedLines(text, typeface, fitted, wrap, lineAdvance) > lines.Count)
+            while (fitted > smallest && WrappedLines(text, typeface, fitted, wrap - 2, lineAdvance) > lines.Count)
             {
                 fitted = Math.Max(smallest, fitted * 0.94);
-                wrap = Math.Max(Math.Max(1, available) * 1.04, WidestWord(text, typeface, fitted) + 1);
+                wrap = Math.Max(Math.Max(1, available) * 1.04, WidestWord(text, typeface, fitted) + 3);
             }
         }
 
@@ -390,17 +442,17 @@ public static class OverlayBlockRenderer
     {
         if (cover.Lines.Count == 0) return null;
         var reference = cover.Lines.OrderByDescending(static l => l.Baseline - l.InkTop).First();
-        var referenceText = StripIconToken(reference.Text, cover).Trim();
+        var referenceText = InlineIcons.Replace(StripIconToken(reference.Text, cover), string.Empty).Trim();
         if (referenceText.Length == 0) referenceText = FirstLine(text);
         return (reference, referenceText);
     }
 
-    public static void VoteNativeWeight(GlyphCover cover, string text, AppSettings settings, string? profileFont, double scale)
+    public static void VoteNativeWeight(GlyphCover cover, string text, AppSettings settings, string? profileFont, MonitorArea monitor)
     {
         if (!UsesNativeCover(settings, cover) || WeightReference(cover, StripIconToken(text, cover)) is not { } reference) return;
         OverlayFonts.VoteWeight(
-            OverlayFonts.ResolveFamilyName(settings, profileFont), reference.Text, reference.Line.Density,
-            (reference.Line.Baseline - reference.Line.InkTop) / scale, cover.TextRgb, cover.OutlinePx > 0);
+            OverlayFonts.CoverFamilyName(settings, profileFont, cover, monitor.Bounds.Height), reference.Text, reference.Line.Density,
+            (reference.Line.Baseline - reference.Line.InkTop) / monitor.Scale, cover.TextRgb, cover.OutlinePx > 0);
     }
 
     private static bool IsScreenCentered(GlyphCover cover, RectPx box, MonitorArea monitor, double left, double right)
@@ -468,11 +520,12 @@ public static class OverlayBlockRenderer
     {
         switch (Inner(element))
         {
-            case OutlinedTextBlock outlined: outlined.Text = value; break;
-            case TextBlock text: text.Text = value; break;
+            case OutlinedTextBlock outlined: outlined.Text = InlineIcons.Replace(value, InlineIcons.SymbolReplacement); break;
+            case TextBlock text: text.Text = InlineIcons.Replace(value, InlineIcons.SymbolReplacement); break;
             case GameTextElement native:
                 native.RawText = value;
-                native.Text = native.Tag is GlyphCover cover ? StripIconToken(value, cover) : value;
+                native.LogicalText = native.Tag is GlyphCover cover ? StripIconToken(value, cover) : value;
+                native.Text = InlineIcons.Replace(native.LogicalText, string.Empty);
                 break;
         }
     }

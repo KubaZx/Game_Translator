@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using GameTranslatorOverlay.Core.Corpus;
 using GameTranslatorOverlay.Core.Text;
+using GameTranslatorOverlay.Core.Vision;
 
 namespace GameTranslatorOverlay.Core.Translation;
 
@@ -34,16 +35,30 @@ internal static partial class TranslationUnitPlanner
     public static UnitPlan? Plan(string normalized, CorpusSnapper? corpus, bool splitParagraphs)
     {
         if (normalized.Length == 0) return null;
-        var lines = normalized.Split('\n');
-        var builder = new Builder(lines, splitParagraphs, corpus is { Index.IsEmpty: false } ? corpus : null);
-        if (corpus is { Index.IsEmpty: false }) builder.AddCorpus(corpus, corpus.SnapBlock(normalized));
-        else builder.AddRun(0, lines.Length);
-        var units = builder.Build();
+        var units = Units(normalized, corpus, splitParagraphs);
+        if (corpus is { Index.IsEmpty: false } && normalized.Contains(InlineIcons.Marker, StringComparison.Ordinal)
+            && InlineIcons.Replace(normalized, string.Empty) is { Length: > 0 } bare
+            && Units(bare, corpus, splitParagraphs) is { } bareUnits && CorpusLength(bareUnits) > CorpusLength(units))
+        {
+            units = bareUnits;
+        }
         if (units.Count == 0) return null;
         return units is [{ Literal: false } single] && string.Equals(single.Key, normalized, StringComparison.Ordinal)
             ? null
             : new UnitPlan(units);
     }
+
+    private static List<TranslationUnit> Units(string normalized, CorpusSnapper? corpus, bool splitParagraphs)
+    {
+        var lines = normalized.Split('\n');
+        var builder = new Builder(lines, splitParagraphs, corpus is { Index.IsEmpty: false } ? corpus : null);
+        if (corpus is { Index.IsEmpty: false }) builder.AddCorpus(corpus, corpus.SnapBlock(normalized));
+        else builder.AddRun(0, lines.Length);
+        return builder.Build();
+    }
+
+    private static int CorpusLength(IReadOnlyList<TranslationUnit> units) =>
+        units.Where(static u => u.FromCorpus).Sum(static u => u.ScreenText.Length);
 
     public static string Compose(UnitPlan plan, IReadOnlyList<string?> translations)
     {

@@ -84,8 +84,8 @@ per-monitor DPI (manifest PerMonitorV2). W praktyce oznacza to:
   W trybie „Na oryginale (zakrywa)” rysuje też łatkę zakrywającą oryginalny napis — wycinek
   przechwyconej klatki z literami wypełnionymi kolorami tła, policzony w pamięci procesu
   GameTranslatorOverlay. Obraz gry nie jest zmieniany: łatka i tłumaczenie leżą we własnym
-  oknie nakładki. Dołączony krój Lexend Deca jest zasobem aplikacji (pozostałe to kroje
-  zainstalowane w Windows) — nakładka niczego nie pobiera i nie korzysta z plików gry.
+  oknie nakładki. Dołączone kroje Lexend Deca i Zilla Slab są zasobami aplikacji (pozostałe to
+  kroje zainstalowane w Windows) — nakładka niczego nie pobiera i nie korzysta z plików gry.
 
 Ograniczenie: exclusive fullscreen nie jest obsługiwany (nakładka nie jest wtedy widoczna);
 obsługiwane są okna i borderless fullscreen. To ograniczenie jest udokumentowane celowo —

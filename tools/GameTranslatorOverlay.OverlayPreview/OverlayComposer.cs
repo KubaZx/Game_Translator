@@ -35,7 +35,7 @@ internal static class OverlayComposer
         foreach (var block in analysis.Blocks)
         {
             if (block.Translation is { } voted && block.Cover is { } voteCover)
-                OverlayBlockRenderer.VoteNativeWeight(voteCover, voted, settings, profileFont, scale);
+                OverlayBlockRenderer.VoteNativeWeight(voteCover, voted, settings, profileFont, monitor);
         }
         foreach (var block in analysis.Blocks)
         {
@@ -54,7 +54,7 @@ internal static class OverlayComposer
             {
                 var colors = block.Colors;
                 element = OverlayBlockRenderer.CreateBlockElement(
-                    translation, settings, scale, block.LineHeight,
+                    OverlayBlockRenderer.BoxText(translation, block.Cover), settings, scale, block.LineHeight,
                     colors.TextRgb, colors.BackgroundRgb, colors.OutlineRgb, colors.Texture);
                 element.Tag = block.LineHeight;
                 canvas.Children.Add(element);

@@ -219,7 +219,7 @@ Usunięcie folderu `%LOCALAPPDATA%\GameTranslatorOverlay` usuwa wszystkie dane p
 - Nie zbiera telemetrii ani statystyk użycia i niczego nie wysyła „do producenta"
   (jedyny ruch sieciowy to zapytania do wybranego przez użytkownika API tłumaczeniowego;
   to samo dotyczy narzędzia korpusu z ADR-014, które tłumaczy korpus tylko na wyraźne polecenie).
-  Krój nakładki Lexend Deca jest dołączony do aplikacji — nic nie jest pobierane z sieci.
+  Kroje nakładki Lexend Deca i Zilla Slab są dołączone do aplikacji — nic nie jest pobierane z sieci.
 - Nie zapisuje ani nie wysyła screenshotów.
 - Aplikacja (nakładka) nie czyta danych innych aplikacji, plików gry ani pamięci procesów.
   Wyjątek opisuje ADR-014: osobne narzędzie offline, uruchamiane przez użytkownika przy

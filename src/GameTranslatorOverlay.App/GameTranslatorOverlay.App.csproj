@@ -6,6 +6,7 @@
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>GameTranslatorOverlay</AssemblyName>
     <RootNamespace>GameTranslatorOverlay.App</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -26,6 +27,7 @@
   <ItemGroup>
     <Resource Include="Fonts\*.ttf" />
     <None Include="Fonts\OFL.txt" Link="licenses\LexendDeca-OFL.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fonts\ZillaSlab-OFL.txt" Link="licenses\ZillaSlab-OFL.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

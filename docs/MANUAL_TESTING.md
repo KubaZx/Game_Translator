@@ -43,7 +43,7 @@ Dotyczy od: Etap 2.
 **Warunki wstępne:** uruchomione min. 3 okna innych aplikacji (w tym jedno zminimalizowane).
 
 **Kroki:**
-1. Uruchom aplikację i otwórz listę okien do przechwytywania.
+1. Uruchom aplikację i otwórz sekcję **Gra** (lista **Uruchomione okna**).
 2. Przejrzyj listę.
 3. Zminimalizuj jedno z widocznych okien, odśwież listę.
 4. Wybierz okno testowe (np. Notatnik).
@@ -382,10 +382,10 @@ Dotyczy od: Etap 8.
 LiveDiag: `dotnet run --project tools/GameTranslatorOverlay.LiveDiag -- 36`).
 
 **Kroki:**
-1. Wybierz okno gry z listy i kliknij „▶ Start live".
+1. Wybierz okno gry w sekcji **Gra** i kliknij „Start live” na Pulpicie.
 2. Poczekaj, aż na ekranie pojawią się dymki tłumaczeń nad tekstem gry.
 3. Wywołaj w grze nowy tekst (dialog, tooltip przedmiotu).
-4. Kliknij „⏹ Stop".
+4. Kliknij „Stop live”.
 
 **Oczekiwany wynik:** pierwsze tłumaczenia w ~1 s od startu; nowy tekst tłumaczy się
 w poniżej sekundy; bloki NIE migają przy statycznej scenie (okres łaski maskuje czknięcia
@@ -408,7 +408,7 @@ Dotyczy od: Etap 8 (regresja audytu #3 — cicha śmierć pętli).
 kontynuuje z nowymi ustawieniami (najwyżej jedna klatka pominięta ze statusem
 „ustawienia zmienione w trakcie klatki"); przyciski Start/Stop odzwierciedlają stan.
 
-**Logi i zgłoszenie:** zamarcie nakładki przy aktywnym „⏹ Stop" = błąd HIGH (regresja).
+**Logi i zgłoszenie:** zamarcie nakładki przy aktywnym „Stop live” = błąd HIGH (regresja).
 
 ## M19 — Tryb live: ukrycie nakładki skrótem (Ctrl+Shift+H)
 
@@ -700,7 +700,7 @@ użyć często widzianej etykiety rośnie o 1 na klatkę, a nie o 2, gdy obok po
 3. Z kluczem DeepL odłącz sieć i uruchom live (także przy nakładce schowanej skrótem).
 4. Włącz Cache-only, uruchom live na nieznanym tekście.
 5. Zablokuj plik bazy cache (np. otwórz go na wyłączność w innym programie) i uruchom live.
-6. Kliknij „⏹ Stop” albo zamknij okno gry (także przy zminimalizowanej grze).
+6. Kliknij „Stop live” albo zamknij okno gry (także przy zminimalizowanej grze).
 7. Tryb wyświetlania „Nakładka na ekranie”, bez klucza: Ctrl+Shift+T na tekście; potem na
    obszarze bez tekstu; potem przy nakładce schowanej Ctrl+Shift+H i odłączonej sieci, tak aby
    część bloków była w cache.
@@ -788,7 +788,7 @@ Ctrl+Shift+L. Gra UWP nie jest wybierana skrótem (znane ograniczenie), z listy 
 2. Przetłumacz przycisk „Save” (sam napis) i zdanie „We must save the village.”.
 3. W edytorze słownika dodaj termin z zaznaczoną kolumną **Etykieta**, zapisz, wyeksportuj i
    zaimportuj słownik.
-4. Włącz tryb prywatny, dodaj „+ Słownik” termin, wyłącz tryb prywatny i przetłumacz tekst
+4. Włącz tryb prywatny, dodaj termin przyciskiem „Słownik” w panelu wyniku, wyłącz tryb prywatny i przetłumacz tekst
    z tym terminem i z „Waystone”. Sprawdź glosariusze na koncie DeepL.
 5. Zmień słownik i od razu przetłumacz tekst z terminem.
 
@@ -839,7 +839,7 @@ wystarczy dowolna gra z etykietami, które pojawiają się i znikają lokalnie.
 3. Powtórz krok 2, gdy w innym miejscu ekranu coś ciągle się rusza (postać, animowane tło).
 4. Najedź na pozycję menu, która przy najechaniu zmienia kolor; zostaw na ekranie napis, który
    pulsuje albo przygasa.
-5. Spraw, żeby etykieta zniknęła i wróciła w ciągu 10 s; powtórz przy „Wyświetlanie: Napisy na
+5. Spraw, żeby etykieta zniknęła i wróciła w ciągu 10 s; powtórz przy „Wyświetlanie w trybie live: Napisy na
    dole”, także gdy na pasku jest jeszcze inna linia.
 6. Spraw, żeby w miejscu zniknętego napisu pojawił się inny, z wielokropkiem, cyfrą albo
    znakiem (np. „Loading…”).
@@ -908,7 +908,7 @@ trzeba uruchomić aplikację ponownie.
 Sprawdzone dotąd tylko na klatkach 4K przez OverlayPreview i w SceneReplay — nie w oknie gry.
 
 **Kroki:**
-1. Ustaw „Położenie dymków: Na oryginale (zakrywa)”, „Wyświetlanie: Przy oryginale”, „Krój
+1. Ustaw „Położenie dymków: Na oryginale (zakrywa)”, „Wyświetlanie w trybie live: Przy oryginale”, „Krój
    czcionki: Jak w grze (krój z profilu)”, profil Escape Academy; uruchom live.
 2. Menu główne: kilka pozycji menu, wyśrodkowany baner, wybór języka z ikonką ✓, podpowiedź
    z ikoną klawisza („X Hint”).
@@ -921,7 +921,7 @@ Sprawdzone dotąd tylko na klatkach 4K przez OverlayPreview i w SceneReplay — 
 6. Uruchom aplikację ze starym `settings.json`, w którym `overlayFontFamily` ma wartość
    `"Segoe UI"`, a pola `overlayFontRevision` nie ma.
 7. Ustaw „Położenie dymków: Pod oryginałem”, potem z powrotem „Na oryginale (zakrywa)”
-   i „Wyświetlanie: Napisy na dole”.
+   i „Wyświetlanie w trybie live: Napisy na dole”.
 8. Powtórz kroki 2–3 przy innej skali DPI albo na innym monitorze.
 
 **Oczekiwany wynik:** z obrazu znikają same litery oryginału — tło wokół nich zostaje żywe,
@@ -996,7 +996,7 @@ gdy WGC też zawiedzie (po 6 kolejnych zrzutach ekranu albo przy braku WGC).
 
 **Kroki:**
 1. Escape Academy (albo inna gra z HUD i napisami w świecie), okno bez ramki, **Położenie dymków:
-   Na oryginale (zakrywa)**, **Wyświetlanie: Przy oryginale**; uruchom live w pokoju z HUD
+   Na oryginale (zakrywa)**, **Wyświetlanie w trybie live: Przy oryginale**; uruchom live w pokoju z HUD
    („X Hint”, „Tab Items”) i napisem na ścianie albo kartce.
 2. Wolna panorama w lewo i w prawo (ok. 5 s), potem szybki obrót o 90°.
 3. Chodzenie przodem i bokiem przez kilka sekund, potem zatrzymanie.
@@ -1012,7 +1012,7 @@ jedzie razem z nim albo znika; często wraca dopiero po zatrzymaniu kamery (w po
 ruchomy w ruchu kamery miał tłumaczenie przez 0–16% czasu, opóźnienie ok. 2 s) — to znane
 ograniczenie (ROADMAP, kierunek 25). Po zatrzymaniu napisy są na właściwych miejscach.
 Znane ograniczenia: w kroku 4 napis rosnący przy podchodzeniu może znikać i wracać po kolejnym
-odczycie OCR; w kroku 5 (od wersji po 0.6.0 — scenariusz M43) dymki pod oryginałem też jadą za
+odczycie OCR; w kroku 5 (od 0.7.0 — scenariusz M43) dymki pod oryginałem też jadą za
 napisami. Zapisz też, czy gra działała płynnie (bez nowych przycięć) i czy log
 (`logs\app-*.log`) ma wpis „w ruchu kamery przechwytywanie okna przez Windows Graphics Capture”.
 
@@ -1035,12 +1035,12 @@ wystąpił. Na Windows 10 (ramki WGC nie da się ukryć, więc sesja WGC nie sta
 ekranu z dotychczasowym ostrzeżeniem i komunikatem jak w M40; zapisz, czy mignęła żółta ramka. Jeśli nakładki nad grą nie
 widać w ogóle, zapisz to razem z trybem pełnego ekranu gry.
 
-## M43 — Śledzenie „Pod oryginałem” i przy pasku napisów (po 0.6.0)
+## M43 — Śledzenie „Pod oryginałem” i przy pasku napisów (0.7.0)
 
 **Kroki:**
 1. Jak M41, krok 1, ale **Położenie dymków: Pod oryginałem**.
 2. Kroki 2–3 z M41.
-3. **Wyświetlanie: Napisy na dole**; w pokoju z HUD powtórz krok 2 z M41.
+3. **Wyświetlanie w trybie live: Napisy na dole**; w pokoju z HUD powtórz krok 2 z M41.
 4. Wróć do **Na oryginale (zakrywa)** bez zatrzymywania live i poruszaj kamerą.
 
 **Oczekiwany wynik:** w kroku 2 dymki pod HUD-em przez większość ruchu zostają pod swoimi napisami
@@ -1050,7 +1050,7 @@ dopóki napisy są na ekranie. W kroku 4 natywne napisy pojawiają się po najbl
 (do tego czasu mogą być dymki z rozmytym tłem) — bez pustych prostokątów. Zapisz, jak często
 dymek znika i na jak długo, oraz czy gra działała płynnie.
 
-## M44 — Łatka z bliska: ogonki, podkreślenia, ikony (po 0.6.0)
+## M44 — Łatka z bliska: ogonki, podkreślenia, ikony (0.7.0)
 
 **Kroki:**
 1. Escape Academy, tryb zakrywania; prolog z imieniem mówiącego nad oknem dialogu („Employee”)
@@ -1060,5 +1060,53 @@ dymek znika i na jak długo, oraz czy gra działała płynnie.
 **Oczekiwany wynik:** pod polskim imieniem nie widać żółtych ogonków „p”, „y” ani czarnych
 kleksów po ich cieniu (najwyżej słaba smuga); ciemny pasek okna dialogu jest nietknięty. Tytuł kartki mieści się na kartce,
 czerwone podkreślenie zostaje całe, bez czerwonej kropki nad nim. Akapity nie zajmują więcej
-wierszy niż oryginał. Ikony zostają widoczne; znane ograniczenie: polski tekst może na nie
-nachodzić (ROADMAP, kierunek 31). Zapisz zrzut z lupą, jeśli coś odstaje.
+wierszy niż oryginał. Ikony (WASD, mysz, Tab, Shift) stoją w polskich zdaniach w miejscu
+„z …” („Bieganie z [Shift] jest niedozwolone.”), bez jasnego prostokąta wokół, a w miejscu
+oryginalnych ikon nie zostaje ich ślad. Zapisz zrzut z lupą, jeśli coś odstaje.
+
+## M45 — Nowe okno aplikacji (0.7.0)
+
+**Kroki:**
+1. Uruchom aplikację; przejdź myszą po wszystkich sekcjach (Pulpit, Gra, Tłumaczenie, Wygląd
+   nakładki, Dane i słownik, O programie), najeżdżając na przyciski, karty i pola.
+2. Przejdź okno samym klawiszem Tab (i Shift+Tab), zmieniając po drodze kilka kart (położenie
+   dymków, tło, dostawca) strzałkami albo spacją.
+3. Zmień kilka ustawień, zamknij aplikację i uruchom ją ponownie.
+4. Zmaksymalizuj okno (dwuklik w belkę), przywróć, przeciągnij do krawędzi ekranu (przyciąganie),
+   zmniejsz do minimum; zminimalizuj (okno chowa się do zasobnika) i przywróć z ikony „PL”.
+5. Z profilem Escape Academy wybierz w sekcji **Gra** okno innej gry z profilem (np. Path of Exile 2
+   albo gra z własnym profilem z folderu danych `profiles\`), a potem okno programu bez profilu.
+6. Jeśli to możliwe: monitor 100% DPI i Windows 10.
+
+**Oczekiwany wynik:** w każdej sekcji widać stan najechania i fokusu (obwódka), nic nie jest
+ucięte ani zasłonięte; zmiany zapisują się i wracają po restarcie; maksymalizacja nie wychodzi
+poza monitor; minimalizacja chowa okno do zasobnika jak dotąd. W kroku 5 profil przełącza się na
+drugą grę (status „Wykryto grę … — profil włączony automatycznie.”), a przy oknie bez profilu
+zostaje poprzedni. Zrzut ekranu okna nie pokazuje go (okno jest wykluczone z przechwytywania) —
+opisz problem słowami albo zrób zdjęcie ekranu telefonem.
+
+## M46 — Imię mówiącego i krój Zilla Slab (0.7.0)
+
+**Kroki:**
+1. Escape Academy, tryb zakrywania, krój **Jak w grze (krój z profilu)**; prolog z dialogiem
+   (imię nad oknem dialogu, np. „Employee”, i kwestia pod nim).
+2. Poczekaj, aż kwestia dopisze się do końca; przejdź kilka kwestii różnych postaci.
+3. Zmień krój na Segoe UI i wróć do „Jak w grze”.
+
+**Oczekiwany wynik:** imię i kwestia są osobnymi napisami: imię żółte z czarnym obrysem
+w kroju szeryfowym (Zilla Slab), kwestia biała w Lexend Deca, bez żółtawego odcienia. Krój imienia
+nie przełącza się w trakcie pisania kwestii. Po wyborze Segoe UI imię też jest w Segoe UI. Zapisz
+postaci, których imię zostało w Lexend Deca (inny kolor imienia nie jest objęty regułą).
+
+## M47 — Napis na ścianie przy podchodzeniu (0.7.0)
+
+**Kroki:**
+1. Escape Academy, tryb zakrywania; pokój z tabliczką albo znakiem na ścianie (np. tabliczka na
+   drzwiach).
+2. Stań tak, by napis był przetłumaczony, i powoli podejdź do niego, potem się cofnij.
+3. Zrób wolną panoramę, w której napis przejeżdża przez ekran.
+
+**Oczekiwany wynik:** polski napis rośnie i maleje razem z oryginałem i jedzie za nim przez
+panoramę, zamiast znikać po pierwszym ruchu; przy mocnej perspektywie (napis ukosem) może zniknąć
+— to znane ograniczenie. Rozmiar może rosnąć skokami co kilka procent. Zapisz, jak długo napis
+trzyma się w ruchu i czy nie zostaje w starym miejscu.

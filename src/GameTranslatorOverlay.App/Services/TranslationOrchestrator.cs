@@ -73,6 +73,8 @@ public sealed class TranslationOrchestrator(
     public IReadOnlyList<string> ContentWarnings { get; private set; } = [];
     public GameProfile? ActiveProfile { get; private set; }
 
+    public IReadOnlyList<OverlayFontRule> ActiveFontRules { get; private set; } = [];
+
     public CorpusLoadResult ActiveCorpus { get; private set; } = CorpusLoadResult.None;
 
     /// <summary>Dostawca wybrany w ustawieniach; nieznana nazwa oznacza DeepL (domyślny).</summary>
@@ -116,6 +118,9 @@ public sealed class TranslationOrchestrator(
         ActiveProfile = Profiles.FirstOrDefault(p => p.Id.Equals(settings.ActiveProfileId, StringComparison.OrdinalIgnoreCase));
 
         var warnings = new List<string>();
+        var fonts = OverlayFontRuleSet.Validate(ActiveProfile?.Overlay, Ui.OverlayFonts.IsAvailable);
+        ActiveFontRules = fonts.Rules;
+        warnings.AddRange(fonts.Warnings.Select(w => $"Profil „{ActiveProfile?.Id}”: {w}"));
         glossaryService.Clear();
         LoadGlossary("global", warnings);
         if (ActiveProfile?.Glossary is { Length: > 0 } profileGlossary)

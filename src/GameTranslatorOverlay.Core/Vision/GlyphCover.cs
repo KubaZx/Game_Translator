@@ -13,6 +13,8 @@ public enum TextAlignHint
 
 public sealed record GlyphCoverLine(double InkLeft, double InkRight, double InkTop, double Baseline, string Text, double Density = 0);
 
+public sealed record GlyphIcon(byte[] Pbgra, int PixelWidth, int PixelHeight, double X, double Y, double Width, double Height, int Line);
+
 public sealed record GlyphCover
 {
     public required byte[] PatchPbgra { get; init; }
@@ -40,9 +42,11 @@ public sealed record GlyphCover
     public double TailSkipPx { get; init; }
     public string TailToken { get; init; } = string.Empty;
     public RectPx Anchor { get; init; }
+    public (double X, double Y, double Width, double Height)? AnchorExact { get; init; }
     public GlyphTrack? Track { get; init; }
     public double ContainerLeftPx { get; init; } = double.PositiveInfinity;
     public double ContainerRightPx { get; init; } = double.PositiveInfinity;
+    public IReadOnlyList<GlyphIcon> Icons { get; init; } = [];
 
     public GlyphCover AnchorTo(RectPx box) =>
         Relocate(Anchor.X - box.X, Anchor.Y - box.Y) with { Anchor = box };
@@ -75,8 +79,58 @@ public sealed record GlyphCover
                 InkTop = l.InkTop + dy,
                 Baseline = l.Baseline + dy,
             }).ToList(),
+            Icons = Icons.Count == 0 ? Icons : Icons.Select(i => i with { X = i.X + dx, Y = i.Y + dy }).ToList(),
         };
     }
+
+    public GlyphCover Rescaled(double scale)
+    {
+        if (scale == 1 || Track is not { } track) return this;
+        var pivotX = track.CenterX;
+        var pivotY = track.CenterY;
+        var exact = AnchorExact is { } e && Rounded(e) == Anchor ? e : (Anchor.X, Anchor.Y, Anchor.Width, Anchor.Height);
+        var scaledExact = (X: pivotX + (exact.X - pivotX) * scale, Y: pivotY + (exact.Y - pivotY) * scale,
+            Width: exact.Width * scale, Height: exact.Height * scale);
+        var anchor = Rounded(scaledExact);
+        var restX = pivotX + (Anchor.X - pivotX) * scale - anchor.X;
+        var restY = pivotY + (Anchor.Y - pivotY) * scale - anchor.Y;
+        return this with
+        {
+            PatchX = PatchX * scale + restX,
+            PatchY = PatchY * scale + restY,
+            PatchWidth = PatchWidth * scale,
+            PatchHeight = PatchHeight * scale,
+            OutlinePx = OutlinePx * scale,
+            ShadowDx = ShadowDx * scale,
+            ShadowDy = ShadowDy * scale,
+            StrokePx = StrokePx * scale,
+            IconSkipPx = IconSkipPx * scale,
+            TailSkipPx = TailSkipPx * scale,
+            ContainerLeftPx = ContainerLeftPx * scale,
+            ContainerRightPx = ContainerRightPx * scale,
+            Lines = Lines.Select(l => l with
+            {
+                InkLeft = l.InkLeft * scale + restX,
+                InkRight = l.InkRight * scale + restX,
+                InkTop = l.InkTop * scale + restY,
+                Baseline = l.Baseline * scale + restY,
+            }).ToList(),
+            Icons = Icons.Count == 0 ? Icons : Icons.Select(i => i with
+            {
+                X = i.X * scale + restX,
+                Y = i.Y * scale + restY,
+                Width = i.Width * scale,
+                Height = i.Height * scale,
+            }).ToList(),
+            Anchor = anchor,
+            AnchorExact = scaledExact,
+            Track = track.Rescaled(scale),
+        };
+    }
+
+    private static RectPx Rounded((double X, double Y, double Width, double Height) box) =>
+        new((int)Math.Round(box.X), (int)Math.Round(box.Y),
+            Math.Max(1, (int)Math.Round(box.Width)), Math.Max(1, (int)Math.Round(box.Height)));
 
     public static double SignatureDifference(float[]? a, float[]? b)
     {
@@ -134,18 +188,20 @@ public static class GlyphCoverBuilder
     public static GlyphCover? Build(
         OcrBitmap frame, RectPx box, IReadOnlyList<RectPx>? lineBoxes = null, IReadOnlyList<string>? lineTexts = null,
         double nativeScale = 1.0, bool soft = false, IReadOnlyList<OcrWord>? firstLineWords = null, GlyphTrackMap? map = null,
-        IReadOnlyList<RectPx>? wordBoxes = null, bool patch = true) =>
+        IReadOnlyList<RectPx>? wordBoxes = null, bool patch = true, IReadOnlyList<RectPx>? iconBoxes = null) =>
         BuildCore(frame, box, lineBoxes, lineTexts, nativeScale, soft, firstLineWords, Stopwatch.StartNew(), allowScale: true,
-            map ?? new GlyphTrackMap(0, 0, nativeScale), wordBoxes, patch);
+            map ?? new GlyphTrackMap(0, 0, nativeScale), wordBoxes, patch, iconBoxes);
 
     private static GlyphCover? BuildScaled(
         OcrBitmap frame, RectPx box, IReadOnlyList<RectPx> lines, IReadOnlyList<string> lineTexts, double nativeScale, bool soft,
         IReadOnlyList<OcrWord>? firstLineWords, double lineHeight, int workScale, Stopwatch watch, GlyphTrackMap map,
-        IReadOnlyList<RectPx>? wordBoxes, bool patch)
+        IReadOnlyList<RectPx>? wordBoxes, bool patch, IReadOnlyList<RectPx>? iconBoxes)
     {
         var frameRect = new RectPx(0, 0, frame.Width, frame.Height);
         var reach = Math.Clamp(Math.Round(lineHeight * 0.16), 3, 24) + Math.Clamp(Math.Round(lineHeight * 0.08), 2, 10);
-        var pad = (int)Math.Ceiling(reach / workScale + 2) * workScale;
+        var workLine = lineHeight / workScale;
+        var workReach = Math.Clamp(Math.Round(workLine * 0.16), 3, 24) + Math.Clamp(Math.Round(workLine * 0.08), 2, 10);
+        var pad = (int)Math.Ceiling(Math.Max(reach / workScale, workReach) + 2) * workScale;
         var crop = box.Inflate(pad).Intersect(frameRect);
         var dx = box.X - crop.X;
         var dy = box.Y - crop.Y;
@@ -186,13 +242,13 @@ public static class GlyphCoverBuilder
         var words = firstLineWords?.Select(w => w with { Box = Map(w.Box) }).ToList();
         var smallMap = new GlyphTrackMap(map.OriginX + crop.X * map.Scale, map.OriginY + crop.Y * map.Scale, map.Scale * workScale);
         return BuildCore(small, Map(box), lines.Select(Map).ToList(), lineTexts, nativeScale * workScale, soft, words, watch, allowScale: false, smallMap,
-            wordBoxes?.Select(Map).ToList(), patch);
+            wordBoxes?.Select(Map).ToList(), patch, iconBoxes?.Select(Map).ToList());
     }
 
     private static GlyphCover? BuildCore(
         OcrBitmap frame, RectPx box, IReadOnlyList<RectPx>? lineBoxes, IReadOnlyList<string>? lineTexts,
         double nativeScale, bool soft, IReadOnlyList<OcrWord>? firstLineWords, Stopwatch watch, bool allowScale, GlyphTrackMap map,
-        IReadOnlyList<RectPx>? wordBoxes = null, bool patch = true)
+        IReadOnlyList<RectPx>? wordBoxes = null, bool patch = true, IReadOnlyList<RectPx>? iconBoxes = null)
     {
         if (frame.PixelsBgra32 is null || frame.Width <= 0 || frame.Height <= 0) return null;
         var frameRect = new RectPx(0, 0, frame.Width, frame.Height);
@@ -211,7 +267,7 @@ public static class GlyphCoverBuilder
         double lineHeight = heights[heights.Count / 2];
         var workScale = lineHeight >= 150 ? 3 : lineHeight >= 90 ? 2 : 1;
         if (allowScale && workScale > 1)
-            return BuildScaled(frame, box, lines, lineTexts, nativeScale, soft, firstLineWords, lineHeight, workScale, watch, map, wordBoxes, patch);
+            return BuildScaled(frame, box, lines, lineTexts, nativeScale, soft, firstLineWords, lineHeight, workScale, watch, map, wordBoxes, patch, iconBoxes);
 
         var margin = (int)Math.Clamp(Math.Round(lineHeight * 0.16), 3, 24);
         var ringWidth = (int)Math.Clamp(Math.Round(lineHeight * 0.08), 2, 10);
@@ -273,11 +329,25 @@ public static class GlyphCoverBuilder
 
         var inText = RectMask(textLocal, work.Width, work.Height);
         var inRegion = RectMask(regionLocal, work.Width, work.Height);
+        bool[]? iconZone = null;
+        if (iconBoxes is { Count: > 0 })
+        {
+            iconZone = new bool[work.Count];
+            var iconPad = Math.Max(1, (int)Math.Round(lineHeight * 0.06));
+            foreach (var icon in iconBoxes)
+            {
+                var local = new RectPx(icon.X - outer.X - iconPad, icon.Y - outer.Y - iconPad, icon.Width + 2 * iconPad, icon.Height + 2 * iconPad)
+                    .Intersect(new RectPx(0, 0, work.Width, work.Height));
+                for (var y = local.Y; y < local.Bottom; y++)
+                    for (var x = local.X; x < local.Right; x++)
+                        iconZone[y * work.Width + x] = true;
+            }
+        }
         var refined = new bool[work.Count];
         var fillCount = 0;
         for (var i = 0; i < work.Count; i++)
         {
-            if (!widened[i] || !inText[i]) continue;
+            if (!widened[i] || !inText[i] || (iconZone is not null && iconZone[i])) continue;
             if (contrast[i] > textContrast * 0.5f)
             {
                 refined[i] = true;
@@ -318,7 +388,7 @@ public static class GlyphCoverBuilder
                 var x = i % work.Width;
                 foreach (var j in new[] { x > 0 ? i - 1 : -1, x + 1 < work.Width ? i + 1 : -1, i - work.Width, i + work.Width })
                 {
-                    if (j < 0 || j >= work.Count || reached[j] || !allowed[j] || !inRegion[j]) continue;
+                    if (j < 0 || j >= work.Count || reached[j] || !allowed[j] || !inRegion[j] || (iconZone is not null && iconZone[j])) continue;
                     if (!refined[j] && ColorDistance(work, background, j) <= connectThreshold) continue;
                     reached[j] = true;
                     queue.Enqueue(j);
@@ -409,6 +479,18 @@ public static class GlyphCoverBuilder
             var glyphCore = Morphology.Dilate(refined, work.Width, work.Height, 1);
             for (var i = 0; i < work.Count; i++)
                 if (ruleZone[i] && (rule[i] || !glyphCore[i])) mask[i] = false;
+        }
+        if (iconBoxes is { Count: > 0 })
+        {
+            var pad = lineHeight >= 36 ? 3 : 2;
+            foreach (var icon in iconBoxes)
+            {
+                var local = new RectPx(icon.X - outer.X - pad, icon.Y - outer.Y - pad, icon.Width + 2 * pad, icon.Height + 2 * pad)
+                    .Intersect(regionLocal);
+                for (var y = local.Y; y < local.Bottom; y++)
+                    for (var x = local.X; x < local.Right; x++)
+                        mask[y * work.Width + x] = true;
+            }
         }
         var maskCount = 0;
         var regionCount = regionLocal.Width * regionLocal.Height;
@@ -625,6 +707,7 @@ public static class GlyphCoverBuilder
             Soft = useSoft,
             Track = moved,
             Anchor = dx == 0 && dy == 0 ? cover.Anchor : cover.Anchor.Offset(dx, dy),
+            AnchorExact = cover.AnchorExact is { } exact ? (exact.X + dx, exact.Y + dy, exact.Width, exact.Height) : null,
         };
     }
 
@@ -639,6 +722,7 @@ public static class GlyphCoverBuilder
             PatchPbgra = [],
             Track = moved,
             Anchor = dx == 0 && dy == 0 ? cover.Anchor : cover.Anchor.Offset(dx, dy),
+            AnchorExact = cover.AnchorExact is { } exact ? (exact.X + dx, exact.Y + dy, exact.Width, exact.Height) : null,
         };
     }
 
@@ -679,22 +763,96 @@ public static class GlyphCoverBuilder
     {
         var rows = Rows(block.Lines);
         var lines = rows.Select(r => ToSampleBox(r.Box, ocrRegion, scaleBack)).ToList();
-        var texts = rows.Count > 0 ? rows.Select(static r => r.Text).ToList() : [block.Text];
+        var texts = (rows.Count > 0 ? rows.Select(static r => r.Text).ToList() : [block.Text])
+            .Select(static t => InlineIcons.Replace(t, string.Empty)).ToList();
         var words = rows.Count > 0
             ? rows[0].Words.Select(w => w with { Box = ToSampleBox(w.Box, ocrRegion, scaleBack) }).ToList()
             : null;
         var wordBoxes = block.Lines
-            .SelectMany(static l => l.Words.Where(static w => !IsInlineIconWord(w.Text))
+            .SelectMany(static l => l.Words.Where(w => !IsIconLabel(w, l.Words) && !InlineIcons.IsMarker(w.Text))
                 .Select(w => new RectPx(w.Box.X, Math.Min(l.Box.Y, w.Box.Y), w.Box.Width,
                     Math.Max(l.Box.Bottom, w.Box.Bottom) - Math.Min(l.Box.Y, w.Box.Y))))
             .Select(w => ToSampleBox(w, ocrRegion, scaleBack))
             .ToList();
         var sampleBox = ToSampleBox(block.Box, ocrRegion, scaleBack);
-        var built = Build(frame, sampleBox, lines, texts, scaleBack, soft, words,
-            new GlyphTrackMap(ocrRegion.X, ocrRegion.Y, scaleBack), wordBoxes.Count > 0 ? wordBoxes : null, patch);
+        var coverBox = CoverWindowBox(block);
+        var iconWords = rows
+            .SelectMany(static (r, line) => r.Words.Where(static w => InlineIcons.IsMarker(w.Text)).Select(w => (Word: w, Line: line)))
+            .ToList();
+        var iconBoxes = iconWords.Select(i => ToSampleBox(i.Word.Box, ocrRegion, scaleBack)).ToList();
+        var built = Build(frame, ToSampleBox(coverBox, ocrRegion, scaleBack), lines, texts, scaleBack, soft, words,
+            new GlyphTrackMap(ocrRegion.X, ocrRegion.Y, scaleBack), wordBoxes.Count > 0 ? wordBoxes : null, patch,
+            iconBoxes.Count > 0 ? iconBoxes : null);
         if (built is null) return null;
+        built = built.Relocate(coverBox.X - block.Box.X, coverBox.Y - block.Box.Y);
         var (left, right) = ContainerExtent(frame, sampleBox);
-        return built with { ContainerLeftPx = left * scaleBack, ContainerRightPx = right * scaleBack };
+        var icons = new List<GlyphIcon>(iconWords.Count);
+        for (var i = 0; i < iconWords.Count; i++)
+        {
+            if (CropIcon(frame, iconBoxes[i]) is not { } pixels) continue;
+            var window = iconWords[i].Word.Box;
+            icons.Add(new GlyphIcon(pixels, iconBoxes[i].Width, iconBoxes[i].Height,
+                window.X - block.Box.X, window.Y - block.Box.Y, window.Width, window.Height, iconWords[i].Line));
+        }
+        return built with { ContainerLeftPx = left * scaleBack, ContainerRightPx = right * scaleBack, Icons = icons };
+    }
+
+    public static RectPx CoverWindowBox(GameTranslatorOverlay.Core.Text.TextBlock block) =>
+        block.Lines.SelectMany(static l => l.Words).Where(static w => InlineIcons.IsMarker(w.Text))
+            .Aggregate(block.Box, static (acc, w) => acc.Union(w.Box));
+
+    private static byte[]? CropIcon(OcrBitmap frame, RectPx box)
+    {
+        var area = box.Intersect(new RectPx(0, 0, frame.Width, frame.Height));
+        if (area.Width < 2 || area.Height < 2 || area.Width != box.Width || area.Height != box.Height) return null;
+        var pixels = new byte[area.Width * area.Height * 4];
+        for (var y = 0; y < area.Height; y++)
+        {
+            Buffer.BlockCopy(frame.PixelsBgra32, (area.Y + y) * frame.Stride + area.X * 4, pixels, y * area.Width * 4, area.Width * 4);
+            for (var x = 0; x < area.Width; x++) pixels[(y * area.Width + x) * 4 + 3] = 255;
+        }
+        if (RingColor(frame, area) is not { } ring) return pixels;
+        const int clear = 14;
+        const int solid = 42;
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            var distance = Math.Max(Math.Abs(pixels[i] - ring.B), Math.Max(Math.Abs(pixels[i + 1] - ring.G), Math.Abs(pixels[i + 2] - ring.R)));
+            if (distance >= solid) continue;
+            var alpha = distance <= clear ? 0 : (distance - clear) * 255 / (solid - clear);
+            pixels[i] = (byte)(pixels[i] * alpha / 255);
+            pixels[i + 1] = (byte)(pixels[i + 1] * alpha / 255);
+            pixels[i + 2] = (byte)(pixels[i + 2] * alpha / 255);
+            pixels[i + 3] = (byte)alpha;
+        }
+        return pixels;
+    }
+
+    private static (int B, int G, int R)? RingColor(OcrBitmap frame, RectPx box)
+    {
+        var ring = box.Inflate(3).Intersect(new RectPx(0, 0, frame.Width, frame.Height));
+        var inner = box.Inflate(1);
+        var blue = new List<int>();
+        var green = new List<int>();
+        var red = new List<int>();
+        for (var y = ring.Y; y < ring.Bottom; y++)
+        {
+            for (var x = ring.X; x < ring.Right; x++)
+            {
+                if (x >= inner.X && x < inner.Right && y >= inner.Y && y < inner.Bottom) continue;
+                var o = y * frame.Stride + x * 4;
+                blue.Add(frame.PixelsBgra32[o]);
+                green.Add(frame.PixelsBgra32[o + 1]);
+                red.Add(frame.PixelsBgra32[o + 2]);
+            }
+        }
+        if (blue.Count < 16) return null;
+        blue.Sort();
+        green.Sort();
+        red.Sort();
+        var spread = Math.Max(blue[blue.Count * 9 / 10] - blue[blue.Count / 10],
+            Math.Max(green[green.Count * 9 / 10] - green[green.Count / 10], red[red.Count * 9 / 10] - red[red.Count / 10]));
+        if (spread > 36) return null;
+        return (blue[blue.Count / 2], green[green.Count / 2], red[red.Count / 2]);
     }
 
     public static (double Left, double Right) ContainerExtent(OcrBitmap frame, RectPx box)
@@ -826,6 +984,14 @@ public static class GlyphCoverBuilder
     };
 
     internal static bool IsInlineIconWord(string token) => InlineIconWords.Contains(token.Trim());
+
+    internal static bool IsIconLabel(OcrWord word, IReadOnlyList<OcrWord> line)
+    {
+        if (!IsInlineIconWord(word.Text)) return false;
+        var others = line.Where(o => !ReferenceEquals(o, word) && !InlineIcons.IsMarker(o.Text))
+            .Select(static o => o.Box.Height).OrderBy(static h => h).ToList();
+        return others.Count == 0 || word.Box.Height < others[others.Count / 2] * 0.7;
+    }
 
     internal static bool IsIconToken(string token)
     {
@@ -1260,9 +1426,55 @@ public static class GlyphCoverBuilder
             var profile = InkProfile.Measure(fill, width, new RectPx(left, top, right - left, bottom - top));
             if (profile is null) continue;
             var text = texts is not null && li < texts.Count ? texts[li] : string.Empty;
-            result.Add(new LineMeasure(profile.Left, profile.Right, profile.Top, profile.Baseline, text, profile.Density));
+            var (inkTop, baseline) = Deskewed(fill, width, profile, top, bottom - top);
+            var density = profile.Pixels / (double)(Math.Max(1, profile.Right - profile.Left) * Math.Max(1, baseline - inkTop));
+            result.Add(new LineMeasure(profile.Left, profile.Right, inkTop, baseline, text, density));
         }
         return result;
+    }
+
+    private static (int Top, int Baseline) Deskewed(bool[] fill, int width, InkProfile profile, int top, int height)
+    {
+        const int segments = 4;
+        var span = profile.Right - profile.Left;
+        if (profile.Ascent <= 0 || span < profile.Ascent * 6) return (profile.Top, profile.Baseline);
+        var centers = new List<double>(segments);
+        var baselines = new List<double>(segments);
+        var ascents = new List<int>(segments);
+        for (var k = 0; k < segments; k++)
+        {
+            var x0 = profile.Left + span * k / segments;
+            var x1 = profile.Left + span * (k + 1) / segments;
+            if (InkProfile.Measure(fill, width, new RectPx(x0, top, Math.Max(1, x1 - x0), height)) is not { Pixels: > 8 } part) continue;
+            centers.Add((x0 + x1) / 2.0);
+            baselines.Add(part.Baseline);
+            ascents.Add(part.Ascent);
+        }
+        if (baselines.Count < 3) return (profile.Top, profile.Baseline);
+        var meanX = centers.Average();
+        var meanY = baselines.Average();
+        var covariance = 0.0;
+        var variance = 0.0;
+        for (var k = 0; k < centers.Count; k++)
+        {
+            covariance += (centers[k] - meanX) * (baselines[k] - meanY);
+            variance += (centers[k] - meanX) * (centers[k] - meanX);
+        }
+        var slope = variance > 0 ? covariance / variance : 0;
+        if (Math.Abs(slope * span) <= profile.Ascent * 0.12) return (profile.Top, profile.Baseline);
+        var worst = 0.0;
+        var increasing = true;
+        var decreasing = true;
+        for (var k = 0; k < centers.Count; k++)
+        {
+            worst = Math.Max(worst, Math.Abs(baselines[k] - (meanY + slope * (centers[k] - meanX))));
+            if (k == 0) continue;
+            increasing &= baselines[k] >= baselines[k - 1];
+            decreasing &= baselines[k] <= baselines[k - 1];
+        }
+        if (worst > profile.Ascent * 0.08 || !(increasing || decreasing)) return (profile.Top, profile.Baseline);
+        var baseline = (int)Math.Round(meanY + slope * ((profile.Left + profile.Right) / 2.0 - meanX));
+        return (baseline - ascents.Max(), baseline);
     }
 
     private static double MeasureStroke(bool[] fill, int width, LineMeasure? line)

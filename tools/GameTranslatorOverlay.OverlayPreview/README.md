@@ -68,7 +68,9 @@ Dla każdej klatki katalog `<rodzic>-<nazwa>`:
 - `bloki/blok-NN.png` — powiększony wycinek bloku: oryginał, nakładka, nakładka z obrysami
   (turkus — box OCR, żółty — łatka, różowy — zasięg polskiego tekstu) i metryki
   (czcionka, wysokość linii oryginału, kolory, stosunek tekst/łatka),
-- `bloki.json` — dane bloków i wyrenderowanych elementów.
+- `bloki.json` — dane bloków i wyrenderowanych elementów; `cover` to dane łatki z maski liter
+  (kolor tekstu i obrysu, grubość obrysu, cień, wysokość liter w px), na których działają
+  reguły `overlay.fontRules` profilu, a `style` podaje użyty krój i grubość.
 
 W katalogu głównym `galeria.md` zbiera wszystkie klatki w tabelach.
 

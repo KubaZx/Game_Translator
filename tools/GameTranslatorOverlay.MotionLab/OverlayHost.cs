@@ -98,6 +98,7 @@ internal sealed class OverlayHost
             else
             {
                 _overlay.ProfileFontFamily = _orchestrator.ActiveProfile?.Overlay?.FontFamily;
+                _overlay.ProfileFontRules = _orchestrator.ActiveFontRules;
                 _overlay.UpdateLiveBlocks(blocks, _settings);
             }
         }
@@ -215,7 +216,7 @@ internal sealed class OverlayHost
             var native = element.Child as GameTextElement;
             result.Add(new ElementDto(key, box, Math.Round(element.Opacity, 3), RuntimeHelpers.GetHashCode(element),
                 OverlayBlockRenderer.IsNative(element), native?.Typeface?.Weight.ToOpenTypeWeight(),
-                native is null ? null : Math.Round(native.EmSize, 2)));
+                native is null ? null : Math.Round(native.EmSize, 2), native?.Typeface?.FontFamily.Source.Split('#').Last()));
         }
         return result;
     }

@@ -10,6 +10,7 @@ using GameTranslatorOverlay.App.Ocr;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.App.Ui;
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Profiles;
 using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Infrastructure.Caching;
 using GameTranslatorOverlay.Infrastructure.Content;
@@ -62,6 +63,8 @@ public partial class MainWindow : Window
 
     private MenuItem? _trayLiveItem;
     private bool _liveHotkeyRegistered;
+    private bool _translateHotkeyRegistered;
+    private bool _overlayHotkeyRegistered;
     private bool _liveHotkeyBusy;
 
     // Programowe zaznaczenie zapamiętanej gry po odświeżeniu listy NIE jest wyborem użytkownika:
@@ -98,6 +101,7 @@ public partial class MainWindow : Window
         _logger = logger;
 
         InitializeComponent();
+        Icon = AppLogo.CreateWindowIcon();
         Loaded += OnLoaded;
         Closed += OnClosedHandler;
         _statusTimer.Tick += OnStatusTimerTick;
@@ -124,7 +128,6 @@ public partial class MainWindow : Window
         CmbTargetLang.SelectedItem = _settings.TargetLanguage;
         if (CmbTargetLang.SelectedItem is null) CmbTargetLang.SelectedIndex = 0;
 
-        CmbProvider.DisplayMemberPath = nameof(TranslationProviderInfo.DisplayName);
         CmbProvider.ItemsSource = TranslationProviderCatalog.All;
         CmbProvider.SelectedItem = TranslationProviderCatalog.Resolve(_settings.Provider);
 
@@ -135,7 +138,7 @@ public partial class MainWindow : Window
         CmbClaudeModel.Text = _settings.ClaudeModel;
         foreach (var llmPreset in TranslationProviderCatalog.LlmPresets)
         {
-            var preset = new Button { Content = llmPreset.Name, Tag = llmPreset, Margin = new Thickness(4, 0, 0, 0), Padding = new Thickness(8, 4, 8, 4) };
+            var preset = new Button { Content = llmPreset.Name, Tag = llmPreset, Style = (Style)FindResource("Btn.Chip") };
             preset.Click += OnLlmPresetClick;
             PnlLlmPresets.Children.Add(preset);
         }
@@ -176,6 +179,10 @@ public partial class MainWindow : Window
         ChkPrivate.IsChecked = _settings.PrivateMode;
         ChkOverlayNotices.IsChecked = _settings.ShowOverlayNotices;
 
+        TxtVersion.Text = "Wersja " + AppVersion();
+        TxtDataFolder.Text = _paths.RootDirectory;
+        UpdateHotkeyLabels();
+
         _loadingUi = false;
 
         UpdateOcrStatus();
@@ -183,11 +190,13 @@ public partial class MainWindow : Window
         _ = RefreshWindowsAsync();
 
         _hotkeys.Attach(this);
-        if (!_hotkeys.TryRegister(_settings.TranslateHotkey, () => _ = TranslateRegionInteractiveAsync(), out var hotkeyError))
+        _translateHotkeyRegistered = _hotkeys.TryRegister(_settings.TranslateHotkey, () => _ = TranslateRegionInteractiveAsync(), out var hotkeyError);
+        if (!_translateHotkeyRegistered)
         {
             SetStatus(hotkeyError);
         }
-        if (!_hotkeys.TryRegister(_settings.ToggleOverlayHotkey, () => _overlay.ToggleVisibility(), out var overlayHotkeyError))
+        _overlayHotkeyRegistered = _hotkeys.TryRegister(_settings.ToggleOverlayHotkey, () => _overlay.ToggleVisibility(), out var overlayHotkeyError);
+        if (!_overlayHotkeyRegistered)
         {
             SetStatus(overlayHotkeyError);
         }
@@ -251,6 +260,39 @@ public partial class MainWindow : Window
 
     private void OnDisclaimerClick(object sender, RoutedEventArgs e) => ShowDisclaimer();
 
+    private static string AppVersion()
+    {
+        var assembly = typeof(MainWindow).Assembly;
+        var informational = System.Reflection.CustomAttributeExtensions
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(assembly)?.InformationalVersion;
+        var version = informational ?? assembly.GetName().Version?.ToString(3) ?? "?";
+        var metadata = version.IndexOf('+');
+        return metadata > 0 ? version[..metadata] : version;
+    }
+
+    private void UpdateHotkeyLabels()
+    {
+        TxtHotkeyTranslate.Text = _settings.TranslateHotkey;
+        TxtHotkeyResult.Text = _settings.TranslateHotkey;
+        TxtTimingHint.Text = $"Brak — przetłumacz region ({_settings.TranslateHotkey}), żeby zobaczyć rozkład czasu.";
+        TxtHotkeyOverlay.Text = _settings.ToggleOverlayHotkey;
+        TxtHotkeyLive.Text = _settings.LiveToggleHotkey;
+        Visuals.SetCaption(BtnTranslateRegion, _settings.TranslateHotkey);
+        Visuals.SetCaption(BtnToggleOverlay, _settings.ToggleOverlayHotkey);
+    }
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
+    }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
+
+    private void OnGoToGamePageClick(object sender, RoutedEventArgs e) => NavGame.IsChecked = true;
+
     private void InitializeTrayIcon()
     {
         try
@@ -259,8 +301,8 @@ public partial class MainWindow : Window
             menu.Items.Add(CreateMenuItem("Pokaż okno", RestoreFromTray));
             _trayLiveItem = CreateMenuItem(LiveMenuHeader(), () => _ = ToggleLiveFromHotkeyAsync());
             menu.Items.Add(_trayLiveItem);
-            menu.Items.Add(CreateMenuItem("Przetłumacz region  (Ctrl+Shift+T)", () => _ = TranslateRegionInteractiveAsync()));
-            menu.Items.Add(CreateMenuItem("Ukryj / pokaż nakładkę  (Ctrl+Shift+H)", _overlay.ToggleVisibility));
+            menu.Items.Add(CreateMenuItem($"Przetłumacz region{(_translateHotkeyRegistered ? $"  ({_settings.TranslateHotkey})" : string.Empty)}", () => _ = TranslateRegionInteractiveAsync()));
+            menu.Items.Add(CreateMenuItem($"Ukryj / pokaż nakładkę{(_overlayHotkeyRegistered ? $"  ({_settings.ToggleOverlayHotkey})" : string.Empty)}", _overlay.ToggleVisibility));
             menu.Items.Add(new Separator());
             menu.Items.Add(CreateMenuItem("Zakończ", Close));
 
@@ -296,24 +338,8 @@ public partial class MainWindow : Window
 
     private System.Drawing.Icon CreateTrayIconImage()
     {
-        using var bitmap = new System.Drawing.Bitmap(32, 32);
-        using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
-        {
-            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            graphics.Clear(System.Drawing.Color.Transparent);
-            using var background = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(30, 136, 229));
-            graphics.FillEllipse(background, 1, 1, 30, 30);
-            using var font = new System.Drawing.Font("Segoe UI", 14, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Pixel);
-            var format = new System.Drawing.StringFormat
-            {
-                Alignment = System.Drawing.StringAlignment.Center,
-                LineAlignment = System.Drawing.StringAlignment.Center,
-            };
-            graphics.DrawString("GT", font, System.Drawing.Brushes.White, new System.Drawing.RectangleF(0, 1, 32, 30), format);
-        }
-
         // Icon.FromHandle nie przejmuje uchwytu — trzymamy go i niszczymy przy zamknięciu.
-        _trayIconHandle = bitmap.GetHicon();
+        _trayIconHandle = AppLogo.CreateIconHandle(WindowTheme.SmallIconPixels(this));
         return System.Drawing.Icon.FromHandle(_trayIconHandle);
     }
 
@@ -327,6 +353,7 @@ public partial class MainWindow : Window
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
+        RootGrid.Margin = WindowState == WindowState.Maximized ? WindowTheme.MaximizedInset(this) : new Thickness(0);
         if (WindowState == WindowState.Minimized && _trayIcon is not null)
         {
             // Minimalizacja chowa okno do zasobnika — tłumacz dalej działa w tle.
@@ -419,7 +446,7 @@ public partial class MainWindow : Window
         if (_previewBusy) return;
         if (WindowsList.SelectedItem is not TargetWindow window)
         {
-            SetStatus("Najpierw wybierz okno z listy po lewej.");
+            SetStatus("Najpierw wybierz okno w sekcji „Gra”.");
             return;
         }
 
@@ -458,7 +485,7 @@ public partial class MainWindow : Window
         var bitmap = _previewBitmap;
         if (bitmap is null)
         {
-            SetStatus("Najpierw przechwyć podgląd okna (📷).");
+            SetStatus("Najpierw przechwyć podgląd okna (przycisk „Podgląd okna”).");
             return;
         }
 
@@ -609,7 +636,7 @@ public partial class MainWindow : Window
                 .ToList();
             if (translated.Count > 0)
             {
-                _overlay.ProfileFontFamily = _orchestrator.ActiveProfile?.Overlay?.FontFamily;
+                ApplyProfileFonts();
                 _overlay.ShowBlocks(translated, _settings);
             }
             ShowOverlayNotice(notice, result.Region);
@@ -893,9 +920,7 @@ public partial class MainWindow : Window
 
     private async void OnStatusTimerTick(object? sender, EventArgs e)
     {
-        TxtCounters.Text =
-            $"API: {_usage.ApiRequests} zapytań / {_usage.ApiCharacters:N0} znaków  •  " +
-            $"Cache: {_usage.CacheHits}  •  Słownik: {_usage.GlossaryHits}  •  Błędy: {_usage.FailedRequests}";
+        UpdateCounters();
 
         var latency = _usage.Latency.Describe(_orchestrator.ActiveProvider.Name);
         TxtLatency.Text = latency.Length > 0 ? latency : "Brak pomiarów — przetłumacz coś albo uruchom live.";
@@ -921,6 +946,36 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateCounters()
+    {
+        var culture = CultureInfo.GetCultureInfo("pl-PL");
+        var requests = _usage.ApiRequests.ToString("N0", culture);
+        var characters = _usage.ApiCharacters.ToString("N0", culture);
+        var cache = _usage.CacheHits.ToString("N0", culture);
+        var glossary = _usage.GlossaryHits.ToString("N0", culture);
+        var failed = _usage.FailedRequests;
+
+        TxtCounters.Text = $"API {requests} · {characters} zn.";
+        TxtChipCache.Text = $"Cache {cache}";
+        TxtChipGlossary.Text = $"Słownik {glossary}";
+        TxtChipErrors.Text = $"Błędy {failed}";
+
+        TxtStatApiRequests.Text = requests;
+        TxtStatApiChars.Text = characters;
+        TxtStatCache.Text = cache;
+        TxtStatGlossary.Text = glossary;
+        TxtStatErrors.Text = failed.ToString(culture);
+
+        var errorBrush = (System.Windows.Media.Brush)FindResource(failed > 0 ? "Brush.Danger" : "Brush.TextMuted");
+        TxtChipErrors.Foreground = errorBrush;
+        TxtStatErrors.Foreground = failed > 0 ? errorBrush : (System.Windows.Media.Brush)FindResource("Brush.Text");
+
+        var change = _usage.Latency.Summarize(LatencyStage.ChangeToText);
+        var latency = change ?? _usage.Latency.Summarize(LatencyStage.NewText);
+        TxtStatLatencyLabel.Text = change is null && latency is not null ? "Nowy tekst" : "Zmiana → napis";
+        TxtStatLatency.Text = latency is { } summary ? LatencyMonitor.FormatMs(summary.MedianMs) : "—";
+    }
+
     private void OnCopyLatencyReportClick(object sender, RoutedEventArgs e)
     {
         var report = _usage.Latency.Report(_orchestrator.ActiveProvider.Name);
@@ -944,6 +999,7 @@ public partial class MainWindow : Window
     {
         _usage.Latency.Reset();
         TxtLatency.Text = "Brak pomiarów — przetłumacz coś albo uruchom live.";
+        UpdateCounters();
         SetStatus("Pomiary czasu wyzerowane.");
     }
 
@@ -961,19 +1017,19 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Autodetekcja profilu po nazwie procesu — tylko gdy użytkownik nie wybrał żadnego
-    /// profilu ręcznie (nie nadpisujemy jego decyzji). Zmiana profilu przebudowuje pipeline,
+    /// Autodetekcja profilu po nazwie procesu — gdy nie wybrano profilu albo wybrany jest profil
+    /// innej gry; profil bez nazw procesów zostaje (decyzja użytkownika). Zmiana profilu przebudowuje pipeline,
     /// więc przy działającej sesji live nic nie robimy: przebudowa anulowałaby jej tłumaczenia.
     /// Skrót live wywołuje to PRZED startem sesji.
     /// </summary>
     private void ApplyProfileAutoSelection(TargetWindow window)
     {
         if (_liveSession is not null) return;
-        if (CmbProfile.SelectedItem as string != NoProfileLabel) return;
+        var selected = CmbProfile.SelectedItem as string;
+        var current = _orchestrator.Profiles.FirstOrDefault(p => p.Name == selected);
+        if (current is null && selected != NoProfileLabel) return;
 
-        var match = _orchestrator.Profiles.FirstOrDefault(p =>
-            p.ProcessNames.Any(name => LiveTargetResolver.SameProcess(name, window.ProcessName)));
-        if (match is not null)
+        if (ProfileProcessMatcher.AutoSelect(_orchestrator.Profiles, current, window.ProcessName) is { } match)
         {
             CmbProfile.SelectedItem = match.Name;
             SetStatus($"Wykryto grę „{match.Name}” — profil włączony automatycznie.");
@@ -1126,7 +1182,7 @@ public partial class MainWindow : Window
         if (_liveSession is not null) return;
         if (WindowsList.SelectedItem is not TargetWindow window)
         {
-            SetStatus("Najpierw wybierz okno gry z listy po lewej.");
+            SetStatus("Najpierw wybierz okno gry w sekcji „Gra”.");
             return;
         }
         StartLive(window);
@@ -1156,10 +1212,10 @@ public partial class MainWindow : Window
 
         // Wczesne utworzenie HWND nakładki, żeby wiedzieć, czy wykluczenie z capture działa.
         _overlay.EnsureHandleCreated();
-        _overlay.ProfileFontFamily = profile?.Overlay?.FontFamily;
+        ApplyProfileFonts();
         if (_settings.OverlayPlacement == "cover")
         {
-            Ui.OverlayFonts.WarmUp(Ui.OverlayFonts.ResolveFamilyName(_settings, _overlay.ProfileFontFamily));
+            Ui.OverlayFonts.WarmUpProfile(_settings);
             _ = Task.Run(GameTranslatorOverlay.Core.Vision.GlyphCoverBuilder.WarmUp);
         }
         if (!_overlay.IsCaptureExclusionActive)
@@ -1200,9 +1256,17 @@ public partial class MainWindow : Window
     private void UpdateLiveControls()
     {
         var running = _liveSession is not null;
+        var handOver = BtnStartLive.IsKeyboardFocusWithin || BtnStopLive.IsKeyboardFocusWithin;
         BtnStartLive.IsEnabled = !running;
         BtnStopLive.IsEnabled = running;
-        BtnStartLive.Content = $"▶ Start live{HotkeySuffix()}";
+        if (handOver)
+        {
+            var target = running ? BtnStopLive : BtnStartLive;
+            Dispatcher.BeginInvoke(() => target.Focus(), DispatcherPriority.Input);
+        }
+        TxtLiveHotkeyHint.Text = _liveHotkeyRegistered ? $"albo {_settings.LiveToggleHotkey} w grze" : string.Empty;
+        TxtNavLiveHotkey.Text = _settings.LiveToggleHotkey;
+        NavLiveHotkeyCard.Visibility = _liveHotkeyRegistered ? Visibility.Visible : Visibility.Collapsed;
         if (_trayLiveItem is not null) _trayLiveItem.Header = LiveMenuHeader();
         if (_trayIcon is not null)
         {
@@ -1217,10 +1281,18 @@ public partial class MainWindow : Window
     {
         LiveIndicator.Fill = new System.Windows.Media.SolidColorBrush(state switch
         {
-            LiveIndicatorState.Active => System.Windows.Media.Color.FromRgb(0x43, 0xA0, 0x47),
-            LiveIndicatorState.Paused => System.Windows.Media.Color.FromRgb(0xFF, 0xB3, 0x00),
-            _ => System.Windows.Media.Color.FromRgb(0x54, 0x6E, 0x7A),
+            LiveIndicatorState.Active => System.Windows.Media.Color.FromRgb(0x34, 0xD3, 0x99),
+            LiveIndicatorState.Paused => System.Windows.Media.Color.FromRgb(0xFB, 0xBF, 0x24),
+            _ => System.Windows.Media.Color.FromRgb(0x5F, 0x68, 0x80),
         });
+        LiveIndicator.Tag = state.ToString();
+        LivePill.Tag = state.ToString();
+        TxtLivePill.Text = state switch
+        {
+            LiveIndicatorState.Active => "Live działa",
+            LiveIndicatorState.Paused => "Live wstrzymany",
+            _ => "Live wyłączony",
+        };
     }
 
     private void HandleLiveUpdate(LiveUpdate update)
@@ -1271,10 +1343,16 @@ public partial class MainWindow : Window
             }
             else
             {
-                _overlay.ProfileFontFamily = _orchestrator.ActiveProfile?.Overlay?.FontFamily;
+                ApplyProfileFonts();
                 _overlay.UpdateLiveBlocks(blocks, _settings);
             }
         }
+    }
+
+    private void ApplyProfileFonts()
+    {
+        _overlay.ProfileFontFamily = _orchestrator.ActiveProfile?.Overlay?.FontFamily;
+        _overlay.ProfileFontRules = _orchestrator.ActiveFontRules;
     }
 
     private void StopLiveSession()

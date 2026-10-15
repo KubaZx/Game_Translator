@@ -2,14 +2,67 @@
 
 Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
-## [Niewydane]
+## [0.7.0] — 2026-10-15
 
-Dopracowanie po 0.6.0: śledzenie we wszystkich trybach, czystsza łatka z bliska, szersze szukanie
-napisu w szybkim obrocie, publikacja dwufazowa i animowane tło. Testy: 1741 xUnit (1295 Core + 280
-Infrastructure + 166 CorpusTool), build bez ostrzeżeń. Liczby z MotionLab (te same nagrania co
-w 0.6.0, Mock 500 ms); metryki ruchu jednego nagrania różnią się między przebiegami nawet
-o kilkanaście punktów (prolog-intro, pokrycie HUD w ruchu kamery: 69–90% w trzech przebiegach
-tego samego kodu). **W grze na żywo nikt jeszcze tego nie oglądał.**
+Wydanie „nowe okno i napisy jak w grze”: przebudowane od zera okno aplikacji, ikony klawiszy
+w polskim zdaniu, imię mówiącego w kroju gry, śledzenie napisu na ścianie ze skalą i przełączanie
+profilu po wyborze okna innej gry — razem z dopracowaniem po 0.6.0 (śledzenie we wszystkich układach nakładki, czystsza
+łatka z bliska). Testy: 1845 xUnit (1384 Core + 295 Infrastructure + 166 CorpusTool), build bez ostrzeżeń. Liczby z MotionLab (te same nagrania
+Escape Academy co w 0.6.0, Mock 500 ms); metryki ruchu jednego nagrania różnią się między
+przebiegami nawet o kilkanaście punktów. **W grze na żywo nikt jeszcze tego nie oglądał** —
+nakładka sprawdzona na klatkach 4K i nagraniach, okno aplikacji na renderach (UiPreview).
+
+### Nowe w 0.7.0
+
+- **Nowe okno aplikacji.** Ciemny wygląd z własną belką (stan trybu live: wyłączony / działa /
+  wstrzymany), sekcje po lewej — Pulpit, Gra, Tłumaczenie, Wygląd nakładki, Dane i słownik,
+  O programie — i karty zamiast list rozwijanych dla dostawcy, położenia dymków, układu live,
+  tła i wyświetlania wyniku. Na Pulpicie: wybrana gra, duży Start / Stop live, przełączniki
+  Cache-only / Prywatny / Komunikaty w nakładce, kafelki skrótów i liczniki sesji. Nowy znak
+  (dymek „PL”) w oknie, w zasobniku i w pliku programu; ciemne okno słownika i panel wyniku.
+  Logika ustawień, live, OCR i tłumaczenia bez zmian; okno nadal wykluczone z przechwytywania.
+  Gry na liście mają awatar z pierwszą literą tytułu — aplikacja nie czyta ikony z pliku programu
+  gry. Sprawdzone narzędziem UiPreview (prawdziwe okno renderowane poza ekranem):
+  0 uciętych napisów w 27 wariantach rozmiaru i DPI (stary wygląd: 34), 0 zasłoniętych kontrolek
+  w 268 sprawdzeniach, zapis ustawień przez nowe kontrolki zgodny z oczekiwanym w 14 zmianach.
+  Stany najechania i fokusu oraz Windows 10 nie były oglądane.
+- **Ikony klawiszy w polskim zdaniu** (tryb zakrywania). Windows OCR pomija ikony w środku
+  zdania; aplikacja szuka ich w przerwach między słowami (i za ostatnim słowem), wstawia znacznik
+  `[X]` — tak, jak ikony zapisuje korpus gry, więc kwestie z ikonami trafiają w tłumaczenia
+  z wyprzedzeniem — a w polskim zdaniu rysuje w miejscu znacznika ikonę skopiowaną z obrazu gry
+  (bez tła wokół niej). Kartka zrzeczenia w Escape Academy: wszystkie 4 zdania z ikonami WASD,
+  myszy, Tab i Shift tłumaczone z korpusu, z ikonami w środku („Bieganie z [Shift] jest
+  niedozwolone.”). Przegląd ok. 480 klatek nagrań: 32 prawdziwe ikony, 2 fałszywe trafienia bez
+  widocznego skutku. Gdy dostawca zgubi znacznik, ikona zostaje w miejscu oryginału; pod oryginałem
+  i na pasku napisów w miejscu ikony stoi znak ▢. Przekrzywiony napis (perspektywa) ma wysokość
+  linii mierzoną po skosie, więc ikona i polski tekst nie rosną.
+- **Imię mówiącego osobno i w kroju gry.** Krótka pierwsza linia bloku w innym kolorze niż reszta
+  (imię nad kwestią) jest osobnym napisem z własną łatką i kolorem, zamiast barwić kwestię na
+  żółto. Profil może dać osobny krój rodzajowi tekstu rozpoznanemu po kolorze liter, obrysie
+  i wysokości (`overlay.fontRules`); w Escape Academy żółte imiona i tytuły z czarnym obrysem
+  dostają dołączony szeryfowy krój **Zilla Slab Bold** (SIL OFL 1.1) — wybrany z 30 krojów
+  porównaniem kształtu z napisem gry, jako najbliższy z kompletem polskich liter. Dotyczy trybu
+  zakrywania; ręczny wybór kroju wyłącza reguły, a zła reguła odpada z ostrzeżeniem, bez
+  odrzucania profilu.
+- **Napis na ścianie przy podchodzeniu.** Śledzenie dopasowuje wzorzec liter także w innej skali
+  (napis rośnie albo maleje) i skaluje razem z blokiem ramkę, łatkę i rozmiar polskiego tekstu.
+  Przy okazji naprawiony błąd: dla tekstu o wysokości linii powyżej ok. 160 px (4K) łatka — a więc
+  i wzorzec śledzenia — zwykle się nie budowała (tabliczka na drzwiach w nagraniu pokoju: łatka
+  w 5 z 27 klatek → 25 z 27). Na klatkach nagrania tabliczka jest śledzona przez 9–19 klatek
+  zamiast 0–11; w MotionLab tekst ruchomy w ruchu kamery 15,8% → ok. 19% (pokój, mocno
+  zaszumione: 15,5–25,4%) — głównym ograniczeniem zostaje rzadki odczyt OCR w ruchu.
+- **Wybór okna innej gry przełącza profil.** Dotąd profil włączał się sam tylko przy „brak
+  profilu”; teraz także wtedy, gdy wybrany jest profil innej gry z nazwami procesów (np. po Escape
+  Academy okno Path of Exile 2). Własny profil bez nazw procesów zostaje. Instrukcja opisuje
+  dodawanie własnych profili w folderze danych (`%LOCALAPPDATA%\GameTranslatorOverlay\profiles\`).
+- Poprawki z recenzji przed wydaniem: znane napisy pokazane od razu (publikacja dwufazowa) trafiają
+  też na pasek napisów i dziedziczą wygląd dymka, który zastępują; zwykłe słowo „Shift”, „Tab” itp.
+  w zdaniu jest wycierane w trybie zakrywania (wyjątek tylko dla napisu z ikony klawisza — wyraźnie
+  niższego od słów obok); ramka napisu rośnie płynnie przy powolnym podchodzeniu; ślad przeskalowany
+  poza 0,5–2× jest odbudowywany z OCR; menu zasobnika pokazuje skróty z ustawień.
+- Zależności: `xunit.runner.visualstudio` 4.0.1 (Dependabot).
+
+### Dopracowanie po 0.6.0
 
 - **Tłumaczenie jedzie za napisem także „Pod oryginałem” i przy pasku napisów.** Śledzenie liter
   działało dotąd tylko w trybie „Na oryginale (zakrywa)”. Teraz w pozostałych układach sesja buduje
@@ -29,7 +82,8 @@ tego samego kodu). **W grze na żywo nikt jeszcze tego nie oglądał.**
   - podkreślenie pod tytułem zostaje (cienka kreska w kolorze liter z tłem nad i pod nią; pasek
     interfejsu przy krawędzi łatki nim nie jest), także przekrzywione, a koniec litery nad nim
     znika;
-  - ikony w środku zdania (klawisze, mysz) zostają widoczne (polski tekst może na nie nachodzić);
+  - ikony w środku zdania (klawisze, mysz) nie są wycierane razem z literami (od 0.7.0 stoją
+    w polskim zdaniu — punkt wyżej);
   - wyśrodkowany tytuł nie wychodzi poza kartkę albo ramkę, a akapit zmniejsza się (do 70%), żeby
     zmieścić się w liczbie wierszy oryginału.
 - **Napis w szybkim obrocie**: gdy napis jechał już w poprzedniej klatce, a zwykłe szukanie
@@ -45,13 +99,27 @@ tego samego kodu). **W grze na żywo nikt jeszcze tego nie oglądał.**
   bo zmienia się tło, sesja przez 1 s próbkuje szybciej (jak w ruchu kamery), a nowa łatka jest
   ostra zamiast miękkiej. Nagrania nie mają takiej sceny — niezmierzone.
 
-Regresje: SceneReplay (displayed/inflight/noisy/aba/churn/stop — stary napis usunięty po 33–35 ms,
+### Pomiary i regresje
+
+MotionLab, tryb zakrywania (jeden przebieg na nagranie, w nawiasie zakres przebiegów z dopracowania
+po 0.6.0): pokój — tłumaczenie przez 75,8% czasu ruchu kamery (74,4–77,3%), HUD 79,7% (78,4–81,6%),
+tekst ruchomy 18,6% (15,5–15,6%), dziury 3,5 s (3,7–4,1 s); prolog z dialogiem — pokrycie całości
+86,1% (79,3–80,4%), dziury w tłumaczeniu 2,8 s (7,9–11,6 s), utraty HUD 3 (6–10). „Pod oryginałem”:
+pokój 72,7% ruchu kamery (75,3%), prolog — pokrycie 86,7% (79,9%), dziury 2,7 s (7,6 s). Czas
+nieaktualnego tłumaczenia w prologu rośnie (16,5 s wobec 13,4–15,5 s; „Pod oryginałem” 18,3 s wobec
+15,3 s), bo imię i kwestia to teraz dwa bloki i każda zmiana kwestii daje dwa krótkie zdarzenia
+(ok. 0,3 s każde). Błąd położenia przy kwestiach (ok. 99 px) to artefakt pomiaru: prawda MotionLab
+łączy imię z kwestią w jeden blok. Po poprawkach z recenzji: pasek napisów w prologu — pokrycie 87,4%
+(84,4%), dziury 2,5 s (5,2 s); pozostałe wyniki w tym samym zakresie.
+
+Regresje: SceneReplay (displayed/inflight/noisy/aba/churn/stop — stary napis usunięty po 35–36 ms,
 local-occlusion* — 0 strat menu, moving-text/position-jitter — błąd 0 px, hud-motion* — 0 strat
-HUD, stale-* — usunięcie po 204–446 ms, stale-dim i stale-present-junk bez zniknięcia, jak
-oczekiwano). `typing-nohold` (bez wstrzymywania kwestii pisanej literami, jak „Pod oryginałem”): 2 zapytania
-do dostawcy w 2 z 4 przebiegów, w 2 pozostałych 3 — gdy OCR dwa razy z rzędu przeczyta sam początek
-kwestii będący pełnym zdaniem („Careful now!”), idzie on do tłumaczenia jako nowy tekst (reguła
-dwóch zgodnych odczytów z 0.6.0; zależy od rytmu odczytów).
+HUD, stale-* — usunięcie po 235–374 ms, z prawdziwą etykietą z gry 209–390 ms, stale-dim
+i stale-present-junk bez zniknięcia, jak oczekiwano; typing i typing-nohold — po 2 zapytania do
+dostawcy). W dopracowaniu po 0.6.0 `typing-nohold` (bez wstrzymywania kwestii pisanej literami,
+jak „Pod oryginałem”) dawał 2 zapytania w 2 z 4 przebiegów, w pozostałych 3 — gdy OCR dwa razy
+z rzędu przeczyta sam początek kwestii będący pełnym zdaniem („Careful now!”), idzie on do
+tłumaczenia jako nowy tekst (reguła dwóch zgodnych odczytów z 0.6.0; zależy od rytmu odczytów).
 
 ## [0.6.0] — 2026-10-06
 

@@ -159,11 +159,12 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
             };
             _host.Window.EnsureHandleCreated();
             _host.Window.ProfileFontFamily = profile?.Overlay?.FontFamily;
+            _host.Window.ProfileFontRules = orchestrator.ActiveFontRules;
 
             var coverMode = settings.OverlayPlacement == "cover";
             if (coverMode)
             {
-                OverlayFonts.WarmUp(OverlayFonts.ResolveFamilyName(settings, _host.Window.ProfileFontFamily));
+                OverlayFonts.WarmUpProfile(settings);
                 await Task.Run(GlyphCoverBuilder.WarmUp);
             }
             orchestrator.WarmUpActiveProvider();

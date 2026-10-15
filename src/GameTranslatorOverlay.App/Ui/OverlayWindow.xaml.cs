@@ -6,6 +6,7 @@ using System.Windows.Threading;
 using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Profiles;
 using GameTranslatorOverlay.Core.Usage;
 using GameTranslatorOverlay.Core.Vision;
 using GameTranslatorOverlay.Infrastructure.Settings;
@@ -49,6 +50,12 @@ public partial class OverlayWindow : Window
     {
         get => OverlayFonts.ProfileFont;
         set => OverlayFonts.ProfileFont = value;
+    }
+
+    public IReadOnlyList<OverlayFontRule> ProfileFontRules
+    {
+        get => OverlayFonts.ProfileRules;
+        set => OverlayFonts.ProfileRules = value;
     }
 
     public OverlayWindow()
@@ -208,7 +215,7 @@ public partial class OverlayWindow : Window
         foreach (var block in blocks)
         {
             if (incomingKeys.Contains(block.Key) && block.Cover is { } voteCover)
-                VoteNativeWeight(voteCover, block.TranslatedText, settings, ProfileFontFamily, monitor.Scale);
+                VoteNativeWeight(voteCover, block.TranslatedText, settings, ProfileFontFamily, monitor);
         }
 
         foreach (var block in blocks)
@@ -222,7 +229,7 @@ public partial class OverlayWindow : Window
             if (_liveElements.TryGetValue(block.Key, out var existing) && IsNative(existing))
             {
                 ReplaceLiveElement(block.Key, CreateBlockElement(
-                    block.TranslatedText, settings, monitor.Scale, block.LineHeight,
+                    BoxText(block), settings, monitor.Scale, block.LineHeight,
                     block.ColorRgb, block.BackgroundRgb, block.OutlineRgb, block.Texture, fadeIn: false));
                 _liveElements[block.Key].Tag = block.LineHeight;
                 if (block.Texture is not null) _liveTextures[block.Key] = block.Texture;
@@ -237,9 +244,9 @@ public partial class OverlayWindow : Window
             if (_liveElements.TryGetValue(block.Key, out var element))
             {
                 element.Tag = block.LineHeight;
-                if (GetText(element) != block.TranslatedText)
+                if (GetText(element) != BoxText(block))
                 {
-                    SetText(element, block.TranslatedText);
+                    SetText(element, BoxText(block));
                 }
 
                 // Grafika pod napisem mogła się przewinąć — podmieniamy samą teksturę tła
@@ -263,7 +270,7 @@ public partial class OverlayWindow : Window
             else
             {
                 element = CreateBlockElement(
-                    block.TranslatedText, settings, monitor.Scale, block.LineHeight,
+                    BoxText(block), settings, monitor.Scale, block.LineHeight,
                     block.ColorRgb, block.BackgroundRgb, block.OutlineRgb, block.Texture);
                 element.Tag = block.LineHeight;
                 _liveElements[block.Key] = element;
@@ -278,6 +285,8 @@ public partial class OverlayWindow : Window
         CoverMonitor(monitor);
         ShowIfAllowed();
     }
+
+    private static string BoxText(LiveDisplayBlock block) => OverlayBlockRenderer.BoxText(block.TranslatedText, block.Cover);
 
     private void UpdateNativeBlock(LiveDisplayBlock block, AppSettings settings, MonitorArea monitor)
     {
@@ -355,6 +364,7 @@ public partial class OverlayWindow : Window
     /// <summary>Pasek napisów na dole okna gry (tryb Subtitle) — pokazuje najnowszy tekst.</summary>
     public void ShowSubtitle(string text, RectPx gameWindowBounds, AppSettings settings, bool preserveLifetime = false)
     {
+        text = GameTranslatorOverlay.Core.Vision.InlineIcons.Replace(text, GameTranslatorOverlay.Core.Vision.InlineIcons.SymbolReplacement);
         // Removing one source from an existing subtitle must neither restart its
         // timer nor bring an already expired subtitle back onto the screen.
         if (preserveLifetime && _subtitleElement is null) return;

@@ -4,8 +4,15 @@ using System.Windows.Media;
 
 namespace GameTranslatorOverlay.App.Ui;
 
+public sealed record IconSlot(int Start, int Length, ImageSource Image, Size Size, double CenterFromBaseline, double LeadEm);
+
 public sealed class GameTextElement : FrameworkElement
 {
+    private IReadOnlyList<IconSlot> _icons = [];
+    private double _iconEm;
+    private IReadOnlyList<(ImageSource Image, Rect Rect)> _orphans = [];
+    private readonly List<Rect> _iconRects = [];
+
     private string _text = string.Empty;
     private Typeface _typeface = new("Segoe UI");
     private double _emSize = 15;
@@ -31,6 +38,10 @@ public sealed class GameTextElement : FrameworkElement
     }
 
     public string RawText { get; set; } = string.Empty;
+
+    public string LogicalText { get; set; } = string.Empty;
+
+    public int IconCount => _icons.Count;
 
     public string? StyleReference { get; set; }
 
@@ -105,11 +116,23 @@ public sealed class GameTextElement : FrameworkElement
         get
         {
             EnsureGeometry();
-            if (_baseBounds.IsEmpty) return Rect.Empty;
             var bounds = _baseBounds;
+            foreach (var rect in _iconRects)
+                if (!rect.IsEmpty) bounds.Union(rect);
+            if (bounds.IsEmpty) return Rect.Empty;
             bounds.Offset(_anchorX, _baselineY);
             return bounds;
         }
+    }
+
+    public void SetIcons(IReadOnlyList<IconSlot> icons, double em, IReadOnlyList<(ImageSource Image, Rect Rect)> orphans)
+    {
+        if (Math.Abs(_iconEm - em) < 0.001 && _icons.SequenceEqual(icons) && _orphans.SequenceEqual(orphans)) return;
+        if (_icons.Count == 0 && icons.Count == 0 && _orphans.Count == 0 && orphans.Count == 0) return;
+        _icons = icons;
+        _iconEm = em;
+        _orphans = orphans;
+        Invalidate();
     }
 
     public void SetOutline(Color? color, double thickness, Vector shadow)
@@ -182,6 +205,7 @@ public sealed class GameTextElement : FrameworkElement
     {
         _geometry = null;
         _baseBounds = Rect.Empty;
+        _iconRects.Clear();
         InvalidateMeasure();
         InvalidateVisual();
     }
@@ -189,6 +213,7 @@ public sealed class GameTextElement : FrameworkElement
     private void EnsureGeometry()
     {
         if (_geometry is not null) return;
+        _iconRects.Clear();
         if (_text.Length == 0)
         {
             _geometry = Geometry.Empty;
@@ -213,6 +238,26 @@ public sealed class GameTextElement : FrameworkElement
         geometry.Freeze();
         _geometry = geometry;
         _baseBounds = geometry.Bounds;
+        var grow = _iconEm > 0 ? _emSize / _iconEm : 1;
+        foreach (var icon in _icons)
+        {
+            if (icon.Start < 0 || icon.Start + icon.Length > _text.Length)
+            {
+                _iconRects.Add(Rect.Empty);
+                continue;
+            }
+            var run = formatted.BuildHighlightGeometry(new Point(0, -formatted.Baseline), icon.Start, icon.Length);
+            if (run is null || run.Bounds.IsEmpty)
+            {
+                _iconRects.Add(Rect.Empty);
+                continue;
+            }
+            var bounds = run.Bounds;
+            var size = new Size(icon.Size.Width * grow, icon.Size.Height * grow);
+            var startX = left + (bounds.Left + icon.LeadEm * _emSize) * _stretchX;
+            var centerY = bounds.Top + formatted.Baseline + icon.CenterFromBaseline * _emSize;
+            _iconRects.Add(new Rect(startX, centerY - size.Height / 2, size.Width, size.Height));
+        }
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -231,6 +276,11 @@ public sealed class GameTextElement : FrameworkElement
             right = Math.Max(right, _patchRect.Right);
             bottom = Math.Max(bottom, _patchRect.Bottom);
         }
+        foreach (var (_, rect) in _orphans)
+        {
+            right = Math.Max(right, rect.Right);
+            bottom = Math.Max(bottom, rect.Bottom);
+        }
         return new Size(Math.Max(0, right), Math.Max(0, bottom));
     }
 
@@ -240,6 +290,7 @@ public sealed class GameTextElement : FrameworkElement
         {
             drawingContext.DrawImage(_patch, _patchRect);
         }
+        foreach (var (image, rect) in _orphans) drawingContext.DrawImage(image, rect);
 
         EnsureGeometry();
         if (_geometry is null || _geometry.IsEmpty()) return;
@@ -267,6 +318,8 @@ public sealed class GameTextElement : FrameworkElement
             if (pen is not null) drawingContext.DrawGeometry(_outlineBrush, pen, _geometry);
         }
         drawingContext.DrawGeometry(_fill, null, _geometry);
+        for (var i = 0; i < _iconRects.Count && i < _icons.Count; i++)
+            if (!_iconRects[i].IsEmpty) drawingContext.DrawImage(_icons[i].Image, _iconRects[i]);
         drawingContext.Pop();
     }
 }

@@ -29,6 +29,8 @@ tools/
   GameTranslatorOverlay.CorpusEval            (Windows: pomiary przyciągania OCR do korpusu — render, evaluate,
                                                replay, bench, session, prefixes, typing)
   GameTranslatorOverlay.OverlayPreview        (Windows: render nakładki na zapisanych klatkach — galeria wyglądu)
+  GameTranslatorOverlay.MotionLab             (Windows: nagrania gry przez prawdziwą sesję live i nakładkę — metryki ruchu)
+  GameTranslatorOverlay.UiPreview             (Windows: okno aplikacji renderowane poza ekranem — PNG i kontrole układu)
 benchmarks/
   GameTranslatorOverlay.Benchmarks            (BenchmarkDotNet, poza dotnet test; docs/BENCHMARKS.md)
 ```
@@ -96,7 +98,8 @@ Zawartość:
   z wypełnionymi literami (`GlyphCoverBuilder`, `GlyphCover`, `InkProfile`; rozdz. 8).
 - **Profile gier** (`Profiles/`): `GameProfile` z opcjonalnymi sekcjami `ocr`, `changeDetection`,
   `overlay` (krój napisów) i `corpus` (recepta dla `CorpusTool`, `CorpusRecipe`) oraz polem `online`;
-  `ProfileValidator` sprawdza też receptę (`CorpusRecipeValidator`), ale aplikacja jej nie wykonuje.
+  `ProfileValidator` sprawdza też receptę (`CorpusRecipeValidator`), ale aplikacja jej nie wykonuje;
+  `ProfileProcessMatcher` wybiera profil po nazwie procesu okna (autodetekcja przy wyborze okna).
 - **Słownik** (`Glossary/`): `GlossaryPrecedence` — jedna reguła pierwszeństwa dla tłumaczenia
   lokalnego i glosariusza DeepL; `PersistableTerms` — terminy, które mogą trafić do trwałego
   glosariusza (bez terminów prywatnych i `scope: label`).
@@ -163,9 +166,12 @@ Celowo **nie ma** osobnego assembly `Providers.DeepL` — DeepL siedzi w Infrast
   `GlyphCover` jako `GameTextElement` (tekst z geometrii, kontur piórem, cień, łatka jako obraz),
   bez łatki dawną ścieżką (`CoverPatchHost` z rozmytą kopią tła i `OutlinedTextBlock`).
   `OverlayFonts` wybiera krój (ustawienie albo — przy „Jak w grze (krój z profilu)”, wartość
-  `auto` — `overlay.fontFamily` profilu, bez profilu Segoe UI) i jego grubość. Dołączony krój
-  Lexend Deca (Regular, Medium, SemiBold, Bold; SIL OFL 1.1) to zasoby WPF z `App/Fonts`,
-  bez instalacji w systemie; licencja trafia obok programu jako `licenses/LexendDeca-OFL.txt`
+  `auto` — `overlay.fontFamily` profilu, bez profilu Segoe UI) i jego grubość. W trybie
+  zakrywania z łatką krój bazowy może zastąpić pierwsza pasująca reguła `overlay.fontRules`
+  (kolor tekstu i obrys z `GlyphCover`, opcjonalnie wysokość liter; `OverlayFontRuleSet` w Core).
+  Dołączone kroje Lexend Deca (Regular, Medium, SemiBold, Bold) i Zilla Slab (Bold), oba SIL
+  OFL 1.1, to zasoby WPF z `App/Fonts`, bez instalacji w systemie; licencje trafiają obok
+  programu jako `licenses/LexendDeca-OFL.txt` i `licenses/ZillaSlab-OFL.txt`
   (`THIRD-PARTY-NOTICES.md`, ADR-016).
 - **Skróty globalne** (Ctrl+Shift+T, Ctrl+Shift+H, Ctrl+Shift+L dla start/stop live) — sterują
   wyłącznie tłumaczem, nigdy grą. Okno dla Ctrl+Shift+L wybiera `LiveTargetResolver` (Core).
@@ -318,6 +324,8 @@ zadanie dostaje `CancellationToken.Cancel()` i jego wynik nigdzie nie trafia.
 | `LiveBlockKeyer` | klucz bloku nakładki z treści odczytu albo z tożsamości korpusu | Core |
 | `TextPresenceProbe` | konserwatywna ocena całego jednolitego pola starego tekstu | Core |
 | `KnownTextAbsenceProbe`, `KnownTextReference` | dowód zniknięcia znanego tekstu także na teksturze; wzorzec kolorów i liczba pikseli rdzenia liter z ostatniego potwierdzającego odczytu | Core |
+| `MainWindow`, `Ui/Theme.xaml` | okno aplikacji: sekcje (Pulpit, Gra, Tłumaczenie, Wygląd nakładki, Dane i słownik, O programie), karty ustawień (`ListBox` z API `Selector`), własna belka `WindowChrome`; motyw i szablony kontrolek bez niejawnych stylów `TextBlock`/`Border`, więc nakładka nie dziedziczy wyglądu okna | App |
+| `AppLogo`, `WindowTheme`, `WindowAvatars` | znak „PL” (okno, zasobnik, `app.ico`), ciemna ramka DWM i wcięcie przy maksymalizacji, awatar okna gry z pierwszej litery tytułu (bez odczytu ikony z pliku programu gry) | App (`Ui/`) |
 | `OverlayWindow` | prezentacja bloków/paska, click-through, DPI i ręczne ukrywanie | App |
 | `OverlayBlockRenderer` | wygląd i pozycja bloku (łatka, kontur, dopasowanie czcionki, wyrównanie, pominięcie tłumaczeń identycznych z oryginałem w trybie zakrywania) — wspólny dla `OverlayWindow` i OverlayPreview | App |
 | `GlyphTracker` / `GlyphTrack` | śledzenie napisu z łatką między odczytami OCR: wzorzec punktów liter i obrysu, koszt SAD z przewidywaniem ruchu, kontrola kontrastu liter wobec obrysu/tła, odrzucanie dopasowań wieloznacznych, dowód zniknięcia liter | Core (`Vision/`) |
@@ -325,7 +333,8 @@ zadanie dostaje `CancellationToken.Cancel()` i jego wynik nigdzie nie trafia.
 | `OcrBands` | ponowny odczyt pustego wyniku Windows OCR dużego obrazu w 2, a potem 4 poziomych pasach z zakładką | Core (`Ocr/`) |
 | `TextBlockSplitter` | podział zlepionego bloku według napisów wyświetlanych i obecnych na swoich miejscach | Core (`Text/`) |
 | `GlyphCoverBuilder` / `GlyphCover` / `InkProfile` | łatka „natywna”: maska liter (odchylenie od tła z pierścienia + top-hat), wypełnienie pikseli liter z otoczenia (push-pull), kolor tekstu, kontur, cień, linia bazowa, wysokość, wyrównanie, ikony klawiszy; liczona w `LiveTranslationSession` równolegle z tłumaczeniem | Core (`Vision/`) |
-| `GameTextElement` / `OverlayFonts` | tekst z geometrii (kontur piórem, cień), łatka jako obraz; krój z ustawień albo profilu (dołączony Lexend Deca), rozmiar z wysokości liter nad linią bazową, grubość z gęstości tuszu oryginału — jedna dla bloków w tym samym stylu | App |
+| `GameTextElement` / `OverlayFonts` | tekst z geometrii (kontur piórem, cień), łatka jako obraz; krój z ustawień albo profilu (dołączony Lexend Deca, a dla stylu z reguły `overlay.fontRules` — np. Zilla Slab), rozmiar z wysokości liter nad linią bazową, grubość z gęstości tuszu oryginału — jedna dla bloków w tym samym stylu | App |
+| `OverlayFontRuleSet` / `OverlayFontRule` | reguły kroju z profilu: walidacja (zła reguła odpada z ostrzeżeniem, profil zostaje), dopasowanie po kolorze tekstu, obrysie i wysokości liter | Core (`Profiles/`) |
 
 Tryb ręczny, live w blokach i pasek napisów są zaimplementowane. Automatyczne
 wydzielanie tooltipów, History Mode i wyjaśnianie przez LLM pozostają poza obecną
@@ -382,6 +391,18 @@ rdzeń aplikacji jest uniwersalny. Konwencja pól: camelCase.
   OFL), potem wśród czcionek systemowych; krój nieznaleziony (bez żadnej grubości 300–800) zastępuje
   Segoe UI. Grubość (dla Lexend Deca: Regular/Medium/SemiBold/Bold) dobiera nakładka. Nazwa kroju,
   nie ścieżka (do 64 znaków). Starsze wersje aplikacji pole pomijają.
+- `overlay.fontRules` (opcjonalne): osobny krój dla rodzaju tekstu w trybie „Na oryginale
+  (zakrywa)”, gdy napis ma łatkę z kolorem liter (`GlyphCover`), np. w Escape Academy
+  `{ "fontFamily": "Zilla Slab", "textColor": "#FBFA86", "colorTolerance": 40, "outlined": true }`
+  — żółte imię mówiącego z czarnym obrysem dostaje szeryfowy Zilla Slab, reszta Lexend Deca.
+  Pola reguły: `fontFamily` (wymagane), `textColor` (`#RRGGBB`), `colorTolerance` (0–255,
+  domyślnie 40, największa różnica na każdym z kanałów R, G, B), `outlined` (`true` = napis
+  z obrysem, `false` = bez), `minLetterHeight` / `maxLetterHeight` (wysokość liter nad linią
+  bazową jako ułamek wysokości ekranu, 0–1). Reguła musi mieć co najmniej jeden warunek;
+  wygrywa pierwsza pasująca (najwyżej 16 reguł). Zła reguła (zły kolor, tolerancja, wysokość,
+  krój niedołączony i niezainstalowany) jest pomijana z ostrzeżeniem w `ContentWarnings`, profil
+  działa dalej. Krój wybrany ręcznie w ustawieniach wyłącza reguły; w pozostałych układach
+  (pod oryginałem, panel, napisy, zakrywanie bez łatki) reguły nie działają.
 - `live.ignoreRegions` (opcjonalne): lista prostokątów `{ "x", "y", "width", "height" }` w ułamkach
   okna gry (0–1); linie OCR ze środkiem w takim obszarze są pomijane w trybie live (np. zegar
   poziomu Escape Academy, który co sekundę dawał nowy „tekst”). Walidator odrzuca obszar poza
@@ -561,7 +582,26 @@ w trakcie sesji nie pokaże pustej łatki.
   (`BridgeRows`, także przy `Refill`), zamiast ciągnąć kolor innego obszaru spod napisu.
   `ContainerExtent` mierzy jednolite tło po bokach napisu (kartka, ramka): wyśrodkowany
   jednowierszowy napis nie wychodzi poza nie, a tekst wielowierszowy zmniejsza się (do 70%), aż
-  zmieści się w liczbie wierszy oryginału.
+  zmieści się w liczbie wierszy oryginału. Linia pochylona razem z tłem (kartka pod kątem) jest
+  mierzona w czterech odcinkach: gdy ich linie bazowe tworzą spójny trend, wysokość liter to
+  największa wysokość odcinka, a nie cała linia ze spadkiem (bez tego czcionka wychodziła ok. 20%
+  za duża).
+- **Ikony w środku zdania** (`InlineIcons`). Windows OCR pomija ikony: w ich miejscu jest
+  szeroki odstęp między słowami albo nic za ostatnim słowem linii. Przed grupowaniem linii sesja
+  szuka w takich miejscach zwartej ramki krawędzi (szerokość 0,9–4, wysokość 1,1–2,4 wysokości
+  linii, szerokość co najmniej 0,6 wysokości, krawędzie także we wnętrzu — rama przycisku czy
+  litery pominięte przez OCR odpadają; środek na wysokości linii, ikona za ostatnim słowem
+  najwyżej jedną wysokość linii od niego, nie na innym słowie OCR; linie HUD zaczynające się od
+  tokenu ikony pomija) i wstawia słowo `[X]` z ramką ikony — tak jak zapisuje ikony korpus gry,
+  więc kwestie z ikonami trafiają w tłumaczenia z wyprzedzeniem, a dostawca dostaje znacznik
+  w zdaniu. Ramka linii się nie zmienia (grupowanie bloków jak wcześniej). Gdy tekst bez
+  znacznika trafia w korpus szerzej niż ze znacznikiem (napis z ozdobnikiem), planer wybiera
+  wersję bez znacznika. Łatka
+  (`GlyphCover.Icons`) kopiuje piksele ikony z klatki (tło jednolitego pierścienia wokół ikony
+  staje się przezroczyste), wlicza ikonę do maski (oryginał znika) i wyłącza ją z pikseli liter.
+  Napis natywny zamienia znacznik na rezerwę twardych spacji doklejoną do poprzedniego słowa
+  (szerokość: spacja + ikona) i rysuje ikonę w jej miejscu; ikona bez znacznika w tłumaczeniu
+  zostaje w miejscu oryginału. Dymki i pasek napisów pokazują „▢”.
 - **Prezentacja.** `OverlayWindow` najpierw zbiera głosy grubości wszystkich bloków aktualizacji,
   potem `OverlayFonts.ChooseStyleWeight` daje jedną grubość blokom w tym samym stylu (krój,
   wysokość liter, kolor tekstu, obrys), a
@@ -659,7 +699,10 @@ bazy (HTTP zablokowane, brak w bazie = Mock), a
 (m.in. `replay` przez prawdziwy `TranslationPipeline` z Mockiem).
 [MotionLab](../tools/GameTranslatorOverlay.MotionLab/README.md) nagrywa okno gry i odtwarza
 nagranie w czasie rzeczywistym przez prawdziwą sesję live i prawdziwe `OverlayWindow` (Mock,
-kopia bazy), porównując nakładkę z offline OCR każdej klatki (metryki ruchu). Żadne z tych
+kopia bazy), porównując nakładkę z offline OCR każdej klatki (metryki ruchu).
+[UiPreview](../tools/GameTranslatorOverlay.UiPreview/README.md) tworzy prawdziwe `MainWindow` poza
+ekranem (tymczasowy folder danych, Mock, tryb prywatny, bez sieci) i renderuje je do PNG, bo okno
+jest wykluczone z przechwytywania i zwykły zrzut ekranu go nie pokazuje. Żadne z tych
 narzędzi nie pokazuje fizycznej nakładki nad działającą grą. Wyniki porównawcze oraz ich ograniczenia
 opisuje [ROADMAP.md](ROADMAP.md); testy integracji z rzeczywistym pulpitem należy
 odróżniać od czystej logiki [TESTING.md](TESTING.md).

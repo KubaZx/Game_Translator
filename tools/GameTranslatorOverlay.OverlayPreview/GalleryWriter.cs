@@ -140,6 +140,17 @@ internal static class GalleryWriter
                 backgroundRgb = Hex(block.Colors.BackgroundRgb),
                 outlineRgb = Hex(block.Colors.OutlineRgb),
                 texture = block.Colors.Texture is { } texture ? $"{texture.Columns}x{texture.Rows}" : null,
+                cover = block.Cover is { } cover
+                    ? new
+                    {
+                        textRgb = Hex(cover.TextRgb),
+                        outlineRgb = Hex(cover.OutlineRgb),
+                        outlinePx = Math.Round(cover.OutlinePx, 2),
+                        shadowDx = Math.Round(cover.ShadowDx, 2),
+                        shadowDy = Math.Round(cover.ShadowDy, 2),
+                        ascentPx = Math.Round(cover.Ascent, 2),
+                    }
+                    : null,
                 style = rendered?.Style,
                 fontSizePx = rendered is null ? (double?)null : Math.Round(rendered.FontSizePx, 2),
                 elementPx = rendered is null ? null : Rect(rendered.ElementPx),

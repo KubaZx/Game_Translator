@@ -27,6 +27,7 @@ public sealed class GameProfile
 public sealed class OverlayProfileSettings
 {
     public string? FontFamily { get; set; }
+    public List<OverlayFontRule>? FontRules { get; set; }
 }
 
 public sealed class LiveProfileSettings
@@ -123,8 +124,7 @@ public static class ProfileValidator
         {
             errors.Add("Wartość changeDetection.fps musi mieścić się w zakresie 0–30.");
         }
-        if (profile.Overlay?.FontFamily is { } fontFamily
-            && (fontFamily.Trim().Length is 0 or > 64 || fontFamily.IndexOfAny(['\\', '/', ':', '#', '*', '?', '"', '<', '>', '|']) >= 0))
+        if (profile.Overlay?.FontFamily is { } fontFamily && !OverlayFontRuleSet.IsValidFamilyName(fontFamily))
         {
             errors.Add("Pole overlay.fontFamily musi być nazwą kroju (do 64 znaków, bez ścieżki).");
         }

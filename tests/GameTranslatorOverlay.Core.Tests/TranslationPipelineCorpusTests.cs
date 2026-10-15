@@ -393,4 +393,36 @@ public class TranslationPipelineCorpusTests
         Assert.Equal(TranslationOrigin.Provider, outcome.Origin);
         Assert.Equal([Sentence], provider.Sent);
     }
+
+    [Fact]
+    public async Task Znacznik_ikony_z_odczytu_trafia_w_tlumaczenie_korpusu_ze_znacznikiem()
+    {
+        var setup = Create();
+        await StoreCorpus(setup.Cache, "Press [X] to open the old wooden chest.", "Naciśnij [X], aby otworzyć starą drewnianą skrzynię.");
+        await setup.Cache.StoreAsync(new NewCacheEntry("Press\nto open the old wooden chest.", "Press\nto open the old wooden chest.", "en", "pl",
+            "Naciśnij\nby otworzyć starą skrzynię.", "Recording", GameProfile: Profile));
+
+        var local = Assert.Single(await setup.Pipeline.TranslateLocalAsync(["Press [X] to open\nthe old wooden chest."], "en", "pl"));
+        var outcome = Assert.Single(await setup.Pipeline.TranslateAsync(["Press [X] to open\nthe old wooden chest."], "en", "pl"));
+
+        Assert.Empty(setup.Provider.Batches);
+        Assert.Equal("Naciśnij [X], aby otworzyć starą drewnianą skrzynię.", local!.TranslatedText!.Replace('\n', ' '));
+        Assert.Equal("Naciśnij [X], aby otworzyć starą drewnianą skrzynię.", outcome.TranslatedText!.Replace('\n', ' '));
+    }
+
+    [Fact]
+    public async Task Znacznik_ikony_na_koncu_wiersza_zostaje_przy_tlumaczeniu_lokalnym()
+    {
+        var cache = new InMemoryTranslationCache();
+        var corpus = new CorpusSnapper(CorpusIndex.Build([TranslationUnitPlannerTests.E("I hereby assume all risks of walking with [X]")]));
+        var pipeline = new TranslationPipeline(new GlossaryService(), cache, new RecordingProvider(), new UsageTracker(),
+            new TranslationPipelineOptions { GameProfile = Profile, Corpus = corpus, SplitParagraphs = true });
+        await StoreCorpus(cache, "I hereby assume all risks of walking with [X]", "Niniejszym przyjmuję na siebie wszelkie ryzyko związane z chodzeniem z [X]");
+        await cache.StoreAsync(new NewCacheEntry("I hereby assume all risks of walking\nwith", "I hereby assume all risks of walking\nwith", "en", "pl",
+            "Niniejszym przyjmuję na siebie wszelkie ryzyko związane z chodzeniem\nz", "Recording", GameProfile: Profile));
+
+        var local = Assert.Single(await pipeline.TranslateLocalAsync(["I hereby assume all risks of walking\nwith [X]"], "en", "pl"));
+
+        Assert.Equal("Niniejszym przyjmuję na siebie wszelkie\nryzyko związane z chodzeniem z [X]", local!.TranslatedText);
+    }
 }

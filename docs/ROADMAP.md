@@ -1,14 +1,20 @@
 # Roadmap — GameTranslatorOverlay
 
-## Obecny stan — 6 października 2026
+## Obecny stan — 15 października 2026
 
-Ostatnie wydanie to **0.6.0** (6 października 2026, runda 2026-10-06 (7)): działanie w ruchu
+Ostatnie wydanie to **0.7.0** (15 października 2026, rundy 2026-10-06 (8) i 2026-10-14 (9)):
+przebudowane okno aplikacji (sekcje, karty, nowy znak), ikony klawiszy w polskim zdaniu w trybie
+zakrywania, imię mówiącego jako osobny napis z krojem z profilu (Zilla Slab w Escape Academy),
+śledzenie napisu na ścianie ze skalą (z poprawką łatki dla dużego tekstu) i przełączanie profilu
+po wyborze okna innej gry, a z rundy (8) — śledzenie we wszystkich układach
+nakładki, czystsza łatka z bliska, publikacja dwufazowa i animowane tło. Zmierzone na nagraniach
+i klatkach Escape Academy (MotionLab, OverlayPreview), okno — na renderach (UiPreview); w grze na
+żywo jeszcze nie oglądane (scenariusze M43–M47 w [MANUAL_TESTING.md](MANUAL_TESTING.md)).
+
+Wcześniej **0.6.0** (6 października 2026, runda 2026-10-06 (7)): działanie w ruchu
 kamery — śledzenie napisów między odczytami OCR, odświeżanie łatek z Windows Graphics Capture
 (w ruchu i zamiast zrzutu ekranu, gdy gra nie wspiera PrintWindow), ponowny OCR pustego odczytu
-w pasach, stabilny krój; zmierzone na nagraniach Escape Academy w narzędziu MotionLab, w grze na
-żywo jeszcze nie oglądane (scenariusze M41–M42 w [MANUAL_TESTING.md](MANUAL_TESTING.md)).
-Po wydaniu (niewydane, runda 2026-10-06 (8)): śledzenie napisów we wszystkich układach nakładki,
-czystsza łatka z bliska, szersze szukanie w szybkim obrocie, publikacja dwufazowa i animowane tło.
+w pasach, stabilny krój (scenariusze M41–M42).
 
 Wcześniej **0.5.0** (6 października 2026): stary napis znika razem z oryginałem (sonda
 pikseli `KnownTextAbsenceProbe` także na teksturze, pełny skan co 4 s niezależnie od wycinków,
@@ -27,22 +33,23 @@ z korpusu pisana literami czeka w nim na koniec pisania. Dla deweloperów: Overl
 i `typing`, projekt testów CorpusTool. Linia 0.4 dała szybszy tryb live, komunikaty w nakładce,
 pamięć dialogu i glosariusze DeepL.
 
-Przeszło **1732 testy** (1286 Core + 280 Infrastructure + 166 CorpusTool) na Windows; build
-całego rozwiązania bez ostrzeżeń. Zachowanie sesji live zmierzono w SceneReplay (callbacki sesji,
-nie fizyczna nakładka), wygląd — na klatkach 4K z Escape Academy przez OverlayPreview, dopasowanie
+Przeszło **1845 testów** (1384 Core + 295 Infrastructure + 166 CorpusTool) na Windows; build całego rozwiązania bez ostrzeżeń. Zachowanie sesji
+live zmierzono w SceneReplay (callbacki sesji, nie fizyczna nakładka) i MotionLab (nagrania
+przez prawdziwą sesję i nakładkę), wygląd — na klatkach 4K z Escape Academy przez OverlayPreview, dopasowanie
 do korpusu — powtórkami bloków z kopii cache przez pipeline z Mockiem (CorpusEval).
 **W grze na żywo** była tylko krótka sesja Escape Academy rano 6 października na wersji
 z korpusem, przed rundami 2026-10-06 (4)–(6). Nie oglądano jeszcze w grze dopasowania etykiet
 i początków kwestii, odrzucania śmieci, nowego wyglądu napisów ani wstrzymywania kwestii pisanej
-literami; w innych grach nic z linii 0.5 nie było sprawdzane na żywo. Scenariusze ręczne
-wydania 0.5.0 to M36–M40 z [MANUAL_TESTING.md](MANUAL_TESTING.md); przejście scenariuszy
+literami ani niczego z linii 0.6–0.7 (ruch kamery, nowe okno, ikony, krój imion); w innych grach
+nic z linii 0.5–0.7 nie było sprawdzane na żywo. Scenariusze ręczne to M36–M40 (0.5.0), M41–M42
+(0.6.0) i M43–M47 (0.7.0) z [MANUAL_TESTING.md](MANUAL_TESTING.md); przejście scenariuszy
 M23–M35 z linii 0.3–0.4 nie jest nigdzie odnotowane.
 
 Produkt jest rozwijany dla różnych gier. Escape Academy (profil z receptą korpusu i krojem) służy
 do pomiarów; PoE2 jest jednym z obsługiwanych przypadków z dodatkowym profilem, bez korpusu
-(Path of Exile 1/2 są na liście wykluczeń ADR-014). Aktualny priorytet: sprawdzić 0.5.0 w grze
-na żywo — wygląd w trybie zakrywania, kwestie pisane literami, etykiety i odrzucanie śmieci przy
-korpusie — i dopiero na tej podstawie wybierać kolejne kierunki; dalej stabilność i czytelność
+(Path of Exile 1/2 są na liście wykluczeń ADR-014). Aktualny priorytet: sprawdzić 0.7.0 w grze
+na żywo — nowe okno, wygląd i ikony w trybie zakrywania, napisy w ruchu kamery, kwestie pisane
+literami, etykiety i odrzucanie śmieci przy korpusie — i dopiero na tej podstawie wybierać kolejne kierunki; dalej stabilność i czytelność
 w rozgrywce.
 Etapy poniżej zachowują historię powstawania produktu; status implementacji nie zastępuje testów
 wizualnych na kolejnych grach.
@@ -82,10 +89,10 @@ wizualnych na kolejnych grach.
     w ruchu kamery z WGC do ~30×/s, bez ruchu kamery z klatki PrintWindow przy każdym przechwyceniu
     (ok. 6×/s), gdy zmieni się podpis pola; łatka zbudowana jako miękka zostaje miękka do
     następnego odczytu — runda 2026-10-06 (7).
-19. Wierniejszy krój: kursywa, szerokość (np. Lexend zamiast Lexend Deca), osobny krój dla
-    rodzajów tekstu w profilu (etykiety szeryfowe — np. imię mówiącego w Escape Academy to
-    pogrubiony krój szeryfowy, rysowany dziś Lexend Deca; wymaga dołączenia kroju OFL), kerning —
-    runda 2026-10-06 (5).
+19. Wierniejszy krój: ✅ osobny krój dla rodzajów tekstu w profilu (`overlay.fontRules`; imię
+    mówiącego i tytuły w Escape Academy — Zilla Slab Bold) — runda 2026-10-14 (9). Otwarte:
+    kursywa, szerokość (np. Lexend zamiast Lexend Deca), kerning, reguły kroju także w dymkach
+    i na pasku napisów (kolor bloku z dawnego próbkowania bywa tam zły) — runda 2026-10-06 (5).
 20. Rama przycisku jako granica dopasowania jednoliniowego napisu — ✅ dla wyśrodkowanego napisu
     na jednolitym tle (kartka, ramka; `ContainerExtent`, runda (8)); napis wyrównany do lewej nadal
     liczy wolne miejsce do następnego bloku albo krawędzi monitora — runda 2026-10-06 (5).
@@ -101,15 +108,17 @@ wizualnych na kolejnych grach.
     tekstu (4 rendery) poza wątkiem UI — runda 2026-10-06 (5).
 24. Odróżnienie wyłącznego pełnego ekranu od okna bez ramki w komunikacie o pełnym ekranie
     (dziś liczy się tylko zajęcie całego monitora przy braku PrintWindow) — runda 2026-10-06 (5).
-25. Napis na ścianie przy podchodzeniu (rośnie, obraca się w perspektywie): śledzenie ze skalą
-    albo szybki lokalny OCR zgubionego bloku zamiast zdjęcia; tekst ruchomy przy ruchu kamery ma
-    dziś ok. 16% pokrycia (pokój) — runda 2026-10-06 (7). Szerokie szukanie i odświeżanie wzorca
-    z rundy (8) nie zmieniły tej liczby: napisy na ścianie są widoczne ok. 1 s, a OCR w ruchu idzie
-    co 0,9 s — bez wcześniejszego odczytu nie ma czego śledzić.
+25. Napis na ścianie przy podchodzeniu: ✅ śledzenie ze skalą i łatka dla linii powyżej ok. 160 px
+    — runda 2026-10-14 (9); tekst ruchomy przy ruchu kamery 15,8% → ok. 19% (pokój, rozrzut
+    15,5–25,4%). Otwarte: perspektywa (różna skala lewej i prawej strony), szybki lokalny OCR
+    zgubionego bloku zamiast zdjęcia, rzadki OCR w ruchu (co ok. 0,9 s przy napisie widocznym
+    ok. 1–2,4 s) — rundy 2026-10-06 (7)–(8).
 26. Windows Graphics Capture w grach na żywo: wpływ otwartej sesji na opóźnienie obrazu gry
     (składanie przez DWM), HDR, wyłączny pełny ekran, Windows 10 bez ukrywania ramki — runda (7).
 27. Koszt WPF przy odświeżaniu łatek do 30×/s przy wielu blokach (dziś zmierzony tylko czas
-    śledzenia: ok. 2,5 ms na odświeżenie) — runda 2026-10-06 (7).
+    śledzenia: ok. 2,5 ms na odświeżenie) — runda 2026-10-06 (7). Blok jadący kopiuje z przechwytywania
+    i zamienia na jasność obszar szerokiego szukania (ok. 3× promienia) w każdym kroku, choć szerokie
+    szukanie jest tylko awaryjne — najpierw zwykły obszar, szeroki dopiero po porażce — runda (9).
 28. MotionLab: fałszywe „miganie”/„zgubione”, gdy offline OCR (prawda) skleja dwa wiersze HUD
     w jeden blok albo czyta ikonę klawisza raz z napisem, raz osobno — runda 2026-10-06 (7).
 29. ✅ Śledzenie napisów także poza trybem zakrywania (pod oryginałem, pasek napisów): łatka
@@ -118,11 +127,19 @@ wizualnych na kolejnych grach.
     ✅ częstsze próbkowanie po odświeżeniu łatki (tempo ruchu przez 1 s) i ostra łatka zamiast
     miękkiej — runda (8), niezmierzone (brak takiej sceny w nagraniach); otwarte: odświeżanie
     z wycinków WGC bez ruchu kamery — runda (7).
-31. Ikony w środku zdania (klawisz, mysz, „Shift”): dziś zostają widoczne, ale polski tekst
-    przepływa przez nie. Potrzebny znacznik ikony w tekście do tłumaczenia (DeepL: obsługa
-    znaczników), przerwa w polskim tekście o szerokości ikony i przeniesienie jej pikseli
-    w nowe miejsce łatki — runda 2026-10-06 (8) (kartka zrzeczenia w prologu Escape Academy:
-    cztery ikony w czterech zdaniach).
+31. ✅ Ikony w środku zdania (klawisz, mysz, „Shift”): znacznik `[X]` z odczytu, miejsce
+    w polskim napisie i obraz ikony z gry — runda 2026-10-14 (9). Otwarte: ikona na początku
+    linii, której OCR nie przeczytał jako słowa (dziś działa tylko ikona odczytana jako litera,
+    np. „X Hint”), ikony w trybie ręcznym (Ctrl+Shift+T) i prawdziwy napis „[X]” w grze, który dziś
+    jest brany za znacznik ikony (w dymkach i na pasku staje się ▢).
+32. Biegunowość łatki dla ciemnego napisu na jasnej tabliczce z ciemną ramką: pierścień tła leży
+    na ramce, więc jasne tło tabliczki jest brane za tekst (wzorzec „odwrócony”, słabe śledzenie
+    i zakrycie; 45 z 61 łatek tabliczki w prologu) — runda 2026-10-14 (9).
+33. Cięcie sceny w szybkim ruchu czyści stan śledzenia (prędkość i flagę ruchu bloku), więc blok
+    bywa zgubiony w następnym kroku — runda 2026-10-14 (9).
+34. Okno aplikacji na żywo: stany najechania i fokusu klawiatury, monitor 100% DPI, Windows 10
+    (zapasowe czcionki i ikony), brak menu układów przyciągania przy `WindowChrome` na Windows 11 —
+    runda 2026-10-14 (9).
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -205,7 +222,7 @@ Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po naz
 
 **Kryterium ukończenia:** aplikacja wykrywa uruchomione PoE2 i proponuje profil; profil ustawia parametry i słownik; usunięcie profilu nie zmienia działania aplikacji dla innych gier.
 
-### Etap 12 — Dystrybucja portable (wydanie 0.6.0; pełna ocena ręczna według checklisty nadal osobna)
+### Etap 12 — Dystrybucja portable (wydanie 0.7.0; pełna ocena ręczna według checklisty nadal osobna)
 
 Release: `dotnet publish` win-x64, aplikacja portable. Instrukcje użytkownika, `MANUAL_TESTING.md` (testy wymagające pulpitu Windows: OCR na żywo, nakładka, skróty — wyłącznie ręczne), licencje zależności, polityka prywatności, disclaimer. Artefakt Release z CI na tag lub manualnie.
 
@@ -1669,3 +1686,108 @@ tłumaczenia — reguła dwóch zgodnych odczytów z rundy (7), zależna od rytm
 przy ruchu kamery 75,2% (pokój) i 51,4% (prolog-intro) — bez pomiaru „przed”. W trybie „Pod
 oryginałem” litera ikony klawisza zostaje w tłumaczeniu („x Podpowiedź”); w trybie zakrywania jest
 usuwana.
+
+### Runda 2026-10-14 (9) — okno aplikacji, ikony w zdaniu, krój imion, napis na ścianie, profile
+
+**Cel.** Wydanie 0.7.0 bez udziału użytkownika w grze: przebudowa okna aplikacji „nie do
+poznania”, ikony w środku zdania (kierunek 31), osobny krój dla rodzajów tekstu (kierunek 19),
+napis na ścianie przy podchodzeniu (kierunek 25), przełączanie profili i drobiazgi z listy po
+rundzie (8) (litera ikony w tłumaczeniu „x Podpowiedź”). Pięć gałęzi roboczych (`claude/r9-*`)
+scalonych w `claude/r9` bez konfliktów, razem z aktualizacją Dependabota.
+
+**Metoda.** Bez uruchamiania gier i aplikacji: OverlayPreview na klatkach 4K i klatkach nagrań,
+MotionLab na nagraniach z rundy (7) (Mock 500 ms), SceneReplay, przegląd ok. 480 klatek nagrań pod
+kątem ikon, UiPreview (nowe narzędzie: prawdziwe `MainWindow` renderowane przez
+`RenderTargetBitmap`, bo okno jest wykluczone z przechwytywania), porównanie 30 krojów OFL z napisem
+gry (maski lica liter, IoU, szerokość, gęstość, grubość kreski).
+
+**Zmiany.**
+
+- Okno aplikacji: `WindowChrome` z własną belką (pigułka stanu live), nawigacja sekcjami
+  (`RadioButton` + `Visibility`), karty zamiast `ComboBox` dla `CmbProvider`, `CmbPlacement`,
+  `CmbLiveStyle`, `CmbBackground`, `CmbDisplayMode` (`ListBox`, ten sam API `Selector`, więc zapis
+  ustawień bez zmian; `SelectionGuard.KeepSelected` blokuje odznaczenie), `Ui/Theme.xaml` (paleta,
+  typografia Segoe UI Variable, szablony kontrolek, menu zasobnika, DataGrid), `AppLogo` (znak
+  „PL”, `app.ico`), `WindowTheme` (ciemna ramka DWM, wcięcie przy maksymalizacji), nowy wygląd
+  edytora słownika i panelu wyniku. Wersja robocza pobierała ikonę procesu gry przez
+  `OpenProcess`/`QueryFullProcessImageName`; zastąpiona awatarem z pierwszej litery tytułu
+  (`WindowAvatars`) — bez odczytu ikony z pliku programu gry (nazwę procesu lista okien czyta jak
+  dotąd przez `System.Diagnostics.Process`). Integracja: teksty o prywatności,
+  podpowiedzi czasu i skrótów, nazwy dostępności, przekazanie fokusu przy Start/Stop live,
+  obwódka fokusu komórek tabeli.
+- Ikony w zdaniu: `InlineIcons.Annotate` przed grupowaniem szuka ikon w przerwach między słowami
+  (≥ 1,1 wysokości linii) i za ostatnim słowem (do 4,5 wysokości), z kryteriami rozmiaru
+  (szerokość 0,9–4, wysokość 1,1–2,4 wysokości liter), krawędzi, gęstości i środka na linii;
+  linia zaczynająca się od tokenu ikony jest pomijana. Wstawia słowo `[X]` (jak korpus), a gdy
+  plan korpusu z ikonami zawiedzie — plan „gołego” tekstu. Łatka kopiuje piksele ikony
+  (`GlyphCover.Icons`, tło pierścienia → przezroczyste), maska obejmuje ikonę; `GameTextElement`
+  rezerwuje miejsce znakiem NBSP i rysuje ikonę w miejscu znacznika; ikona zgubiona przez
+  dostawcę zostaje w miejscu oryginału; dymki i pasek napisów — znak ▢. Wysokość linii po skosie
+  (`Deskewed`, 4 odcinki, trend linii bazowej). Fałszywe trafienia z przeglądu (ramka „Accept”,
+  „Escape!”, zlepek HUD „Tab I t e”) usunięte zaostrzeniem kryteriów.
+- Imię mówiącego: `TextBlockSplitter.SplitLabels` — krótka pierwsza linia (1–3 słowa, ≤ 30 znaków)
+  nad resztą bloku, której kolor tekstu różni się od każdej innej linii o ≥ 80 na którymś kanale,
+  staje się osobnym blokiem. `overlay.fontRules` w profilu (kolor z tolerancją na kanał, obrys,
+  wysokość liter; walidacja reguł osobno od profilu, zła reguła odpada z ostrzeżeniem), krój
+  Zilla Slab Bold (SIL OFL 1.1, 273 KB) w Escape Academy dla `#FBFA86` z obrysem. Na 6 klatkach
+  OverlayPreview zmieniły się tylko 2 bloki z 18 (imię), na 14 klatkach nagrań 1 z 42 (tytuł),
+  0 pikseli poza nimi.
+- Napis na ścianie: `GlyphTrack.Rescaled`, `GlyphField` (luminancja wycinka liczona raz),
+  `GlyphTracker.LocateScaled`/`RefineScale`/`ScaleLadder` (bez luzowania progów pewności),
+  `GlyphCover.Rescaled`; drabina skal tylko dla bloku jadącego i przy potwierdzeniu w ruchu.
+  Poprawka `BuildScaled`: zapas wycinka także w pikselach roboczych — dla linii powyżej ok. 160 px
+  pierścień tła znikał i łatka się nie budowała (tabliczka w pokoju: 5/27 → 25/27 klatek prawdy).
+  Promień szukania wokół prędkości `max(8, 4·krok, ½·|v|·krok)` (offline mediana kroku 22–33 ms →
+  7–9 ms).
+- Profile: `ProfileProcessMatcher.AutoSelect` przełącza też profil innej gry (własny profil bez
+  nazw procesów zostaje). W zestawie są tylko `generic`, Escape Academy i PoE2 (test
+  `W_zestawie_sa_tylko_profile_ogolny_Escape_Academy_i_PoE2`); profile innych gier dodaje się
+  w folderze danych (`<dane>\profiles\`), opis w instrukcji.
+
+**Pomiary.** MotionLab, jeden przebieg na nagranie (`r9`, `r9-below`), w nawiasie przebiegi rundy (8)
+(`p3`, `p5`, `p5b`, `p5c`; „Pod oryginałem” — `p5-below`). Zakrywanie, pokój: ruch kamery 75,8%
+(74,4–77,3%), HUD w ruchu 79,7% (78,4–81,6%), tekst ruchomy 18,6% (15,5–15,6%), dziury 3,5 s
+(3,7–4,1 s), nieaktualne 8,1 s (7,7–8,1 s), utraty HUD 24 (21–24). Zakrywanie, prolog-intro:
+pokrycie całości 86,1% (79,3–80,4%), dziury 2,8 s w 2 epizodach (7,9–11,6 s w 6–10), utraty HUD 3
+(6–10), HUD w ruchu 69,8% (68,6–90,2% — rozrzut tego nagrania), nieaktualne 16,5 s w 18 zdarzeniach
+(13,4–15,5 s w 7–15). „Pod oryginałem”: pokój 72,7% ruchu kamery i 76,5% HUD w ruchu (75,3% /
+79,4%), prolog-intro pokrycie 86,7% (79,9%), dziury 2,7 s (7,6 s), nieaktualne 18,3 s (15,3 s).
+Wzrost „nieaktualnych” w prologu to głównie liczenie: imię i kwestia są osobnymi blokami, więc
+zmiana kwestii daje dwa krótkie zdarzenia (ok. 0,3 s każde, jak wcześniej jedno), plus „*Ahem*”
+0,8 s; stałe 9,9 s to „Tab Items” we wszystkich przebiegach. Błąd położenia w prologu rośnie (p90
+8,1 px wobec 3,2–5,5 px; ok. 99 px przy kwestiach) — artefakt: prawda MotionLab grupuje linie
+`TextBlockGrouper` bez `SplitLabels`, więc imię z kwestią to jeden blok prawdy, a nakładka rysuje
+je osobno (arkusz klatki 426: kwestia stoi dokładnie na oryginale, imię w Zilla Slab nad nią).
+
+**Regresje.** 1845 testów (1384 Core + 295 Infrastructure + 166 CorpusTool), build bez ostrzeżeń.
+SceneReplay: podstawowe sceny — stary napis usunięty po 35–36 ms, local-occlusion* — 0 strat menu,
+moving-text/position-jitter — błąd 0 px, hud-motion* — 0 strat HUD, typing i typing-nohold — po 2
+zapytania, stale-* syntetyczne 235–374 ms, z prawdziwą etykietą „Inspect” 209–390 ms (runda (8):
+204–446 ms), stale-dim i stale-present-junk bez zniknięcia, jak oczekiwano. Pierwszy przebieg
+scenariuszy z prawdziwą etykietą był nieważny: wycinek odtworzony po wyczyszczeniu katalogu
+tymczasowego był inny niż pierwotny (prawda referencyjna objęła cały wycinek, `stale-dim` odrzucił
+próbę); po wycięciu go z tej samej klatki 4K co pierwotnie (glify 259×69 px w punkcie 149,55)
+wszystkie 9 przebiegów jest ważnych.
+
+**Recenzja przed wydaniem** (2 agentów: logika live, okno i dokumentacja; 14 znalezisk, wszystkie
+sprawdzone w kodzie). Poprawione: bloki z publikacji dwufazowej (runda (8)) nie trafiały na pasek
+napisów (nie liczyły się jako nowe) i pomijały dziedziczenie wyglądu po zastąpionym odczycie —
+teraz liczą się jako nowe, a blok z poprzednikiem czeka na zwykłą ścieżkę; słowa z listy ikon
+(`tab`, `shift`…) wyjmowane z maski tylko, gdy są niższe niż 0,7 mediany wysokości słów linii
+albo stoją same (pomiar na nagraniach: 181 odczytów „Tab” z ikony klawisza, wszystkie poniżej 0,5)
+— zwykłe „Shift” w zdaniu jest wycierane; `GlyphCover.AnchorExact` trzyma ułamkową ramkę między
+krokami skali (wcześniej krok 0,6% zaokrąglał się do zera i ramka nie rosła); ślad poza skalą
+0,5–2× jest uznawany za zgubiony; `GameTextElement.SetIcons` nie unieważnia geometrii przy tych
+samych ikonach; menu zasobnika ze skrótami z ustawień; podpowiedź profilu i nazwy w dokumentacji.
+Odłożone: kopiowanie szerokiego obszaru w każdym kroku śledzenia (kierunek 27) i prawdziwy
+napis „[X]” brany za znacznik (31). Po poprawkach (`r9f`, jeden przebieg): pokój 77,5% ruchu kamery,
+HUD 80,7%, tekst ruchomy 31,3% (górna granica rozrzutu z rundy, 15,5–31,8%), prolog-intro 85,7%,
+dziury 3,9 s; pasek napisów na prolog-intro (`r9f-sub` wobec `p5-sub`) 87,4% (84,4%), dziury 2,5 s
+(5,2 s); SceneReplay bez zmian, `typing-nohold` 3 zapytania (znany rozrzut 2–3).
+
+**Otwarte.** Wszystko z tej rundy — w grze na żywo nieoglądane (M43–M47); okno — stany najechania
+i fokusu, 100% DPI, Windows 10 (kierunek 34); biegunowość łatki ciemnego napisu na jasnej
+tabliczce (32); cięcie sceny czyści stan śledzenia (33); perspektywa i rzadki OCR w ruchu (25);
+reguły kroju poza trybem zakrywania (19); ikona na początku linii nieczytana przez OCR i ikony
+w trybie ręcznym (31).
+

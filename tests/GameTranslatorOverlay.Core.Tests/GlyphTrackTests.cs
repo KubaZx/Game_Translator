@@ -263,6 +263,243 @@ public class GlyphTrackTests
         Assert.True(GlyphTracker.Locate(cover.Track!, empty, 0, 0, 0)!.Value.LettersGone);
     }
 
+    [Theory]
+    [InlineData(1.08, 14, -6)]
+    [InlineData(1.12, -20, 5)]
+    [InlineData(1.2, 9, 8)]
+    [InlineData(0.9, -12, -4)]
+    [InlineData(0.84, 22, 3)]
+    public void Przeskalowany_i_przesuniety_napis_jest_znaleziony_z_wlasciwa_skala(double scale, int dx, int dy)
+    {
+        var glyphs = Word(150, 80, capHeight: 40, stroke: 6).ToList();
+        var first = Background(seed: 21);
+        Paint(first, Grow(glyphs, 3), 0x000000);
+        Paint(first, glyphs, 0xF0F0F0);
+        var box = new RectPx(146, 76, 210, 50);
+        var cover = GlyphCoverBuilder.Build(first, box, [box], ["Hill"])!;
+        var track = cover.Track!;
+
+        var moved = Background(seed: 22);
+        Paint(moved, Transform(Grow(glyphs, 3), track.CenterX, track.CenterY, scale, dx, dy), 0x000000);
+        Paint(moved, Transform(glyphs, track.CenterX, track.CenterY, scale, dx, dy), 0xF0F0F0);
+        var field = new GlyphField(moved, 0, 0);
+        var match = GlyphTracker.LocateScaled(track, field, 48, GlyphTracker.ScaleLadder(track, 0.82, 1.22));
+
+        Assert.NotNull(match);
+        Assert.True(match.Value.IsConfident, $"koszt {match.Value.Cost:F1}/{match.Value.AcceptLimit:F1}");
+        Assert.InRange(match.Value.Scale, scale - 0.025, scale + 0.025);
+        Assert.InRange(match.Value.WindowDx, dx - 3, dx + 3);
+        Assert.InRange(match.Value.WindowDy, dy - 3, dy + 3);
+        if (Math.Abs(scale - 1) >= 0.12)
+            Assert.True(GlyphTracker.Locate(track, field, 48) is not { IsConfident: true }, "bez skali nie powinno pasować");
+    }
+
+    [Fact]
+    public void Przeskalowana_okladka_przesuwa_i_powieksza_ramke_linie_i_latke_spojnie()
+    {
+        const double scale = 1.15;
+        var glyphs = Word(150, 80, capHeight: 40, stroke: 6).ToList();
+        var first = Background(seed: 23);
+        Paint(first, Grow(glyphs, 3), 0x000000);
+        Paint(first, glyphs, 0xF0F0F0);
+        var box = new RectPx(146, 76, 210, 50);
+        var cover = GlyphCoverBuilder.Build(first, box, [box], ["Hill"])! with { Anchor = box };
+        var track = cover.Track!;
+        var moved = Background(seed: 24);
+        Paint(moved, Transform(Grow(glyphs, 3), track.CenterX, track.CenterY, scale, 18, -7), 0x000000);
+        Paint(moved, Transform(glyphs, track.CenterX, track.CenterY, scale, 18, -7), 0xF0F0F0);
+        var match = GlyphTracker.LocateScaled(track, new GlyphField(moved, 0, 0), 48, GlyphTracker.ScaleLadder(track, 0.84, 1.2))!.Value;
+
+        var refilled = GlyphCoverBuilder.Refill(cover.Rescaled(match.Scale), moved, 0, 0, match.WorkDx, match.WorkDy)!;
+
+        double Expected(double value, double center, int shift) => center + (value - center) * scale + shift;
+        Assert.InRange(refilled.Anchor.Width, box.Width * scale - 6, box.Width * scale + 6);
+        Assert.InRange(refilled.Anchor.Height, box.Height * scale - 3, box.Height * scale + 3);
+        Assert.InRange(refilled.Anchor.X, Expected(box.X, track.CenterX, 18) - 3, Expected(box.X, track.CenterX, 18) + 3);
+        Assert.InRange(refilled.Anchor.Y, Expected(box.Y, track.CenterY, -7) - 3, Expected(box.Y, track.CenterY, -7) + 3);
+        Assert.InRange(refilled.Ascent, cover.Ascent * scale - 2, cover.Ascent * scale + 2);
+        Assert.InRange(refilled.PatchWidth, cover.PatchWidth * scale - 1, cover.PatchWidth * scale + 1);
+        Assert.Equal(cover.PatchPixelWidth, refilled.PatchPixelWidth);
+        Assert.Equal(cover.PatchPbgra.Length, refilled.PatchPbgra.Length);
+        var inkLeft = refilled.Anchor.X + refilled.Lines[0].InkLeft;
+        var expectedInk = Expected(box.X + cover.Lines[0].InkLeft, track.CenterX, 18);
+        Assert.InRange(inkLeft, expectedInk - 3, expectedInk + 3);
+        var again = GlyphTracker.Locate(refilled.Track!, moved, 0, 0, 4);
+        Assert.True(again is { IsConfident: true, IsStatic: true }, $"koszt {again?.Cost:F1}");
+    }
+
+    [Fact]
+    public void Skalowanie_okladki_jest_odwracalne_i_trzyma_srodek_wzorca()
+    {
+        var frame = Scene(seed: 25, x: 150, y: 80);
+        var box = new RectPx(146, 76, 210, 50);
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"])! with { Anchor = box };
+        var track = cover.Track!;
+
+        var grown = cover.Rescaled(1.25);
+        var back = grown.Rescaled(1 / 1.25);
+
+        Assert.Equal(track.CenterX, grown.Track!.CenterX, 6);
+        Assert.Equal(track.CenterY, grown.Track.CenterY, 6);
+        Assert.Equal(track.Step * 1.25, grown.Track.Step, 9);
+        Assert.Equal(box, back.Anchor);
+        Assert.Equal(cover.Lines[0].InkLeft + cover.Anchor.X, back.Lines[0].InkLeft + back.Anchor.X, 6);
+        Assert.Equal(cover.Lines[0].Baseline + cover.Anchor.Y, back.Lines[0].Baseline + back.Anchor.Y, 6);
+        Assert.Equal(cover.PatchX + cover.Anchor.X, back.PatchX + back.Anchor.X, 6);
+        Assert.Same(cover, cover.Rescaled(1));
+    }
+
+    [Fact]
+    public void Wiele_malych_krokow_skali_powieksza_ramke_jak_jeden_duzy()
+    {
+        var frame = Scene(seed: 25, x: 150, y: 80);
+        var box = new RectPx(146, 76, 210, 50);
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"])! with { Anchor = box };
+
+        var stepped = cover;
+        for (var i = 0; i < 50; i++)
+            stepped = GlyphCoverBuilder.Shift(stepped.Rescaled(1.006), i % 2 == 0 ? 1 : 0, 0)!;
+        var once = GlyphCoverBuilder.Shift(cover.Rescaled(Math.Pow(1.006, 50)), 25, 0)!;
+
+        Assert.InRange(stepped.Anchor.Height, once.Anchor.Height - 1, once.Anchor.Height + 1);
+        Assert.InRange(stepped.Anchor.Width, once.Anchor.Width - 1, once.Anchor.Width + 1);
+        Assert.InRange(stepped.Anchor.Y, once.Anchor.Y - 1, once.Anchor.Y + 1);
+        Assert.True(stepped.Anchor.Height > box.Height + 10, $"wysokość {stepped.Anchor.Height}");
+    }
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.1)]
+    [InlineData(0.88)]
+    public void Inny_napis_w_tym_miejscu_nie_jest_znaleziony_w_zadnej_skali(double scale)
+    {
+        var glyphs = Word(150, 80, capHeight: 40, stroke: 6).ToList();
+        var first = Background(seed: 26);
+        Paint(first, Grow(glyphs, 3), 0x000000);
+        Paint(first, glyphs, 0xF0F0F0);
+        var box = new RectPx(146, 76, 210, 50);
+        var cover = GlyphCoverBuilder.Build(first, box, [box], ["Hill"])!;
+        var track = cover.Track!;
+
+        var other = Bars(150, 80, capHeight: 40, stroke: 6).ToList();
+        var replaced = Background(seed: 27);
+        Paint(replaced, Transform(Grow(other, 3), track.CenterX, track.CenterY, scale, 4, 2), 0x000000);
+        Paint(replaced, Transform(other, track.CenterX, track.CenterY, scale, 4, 2), 0xF0F0F0);
+        var match = GlyphTracker.LocateScaled(track, new GlyphField(replaced, 0, 0), 48, GlyphTracker.ScaleLadder(track, 0.82, 1.22));
+        var empty = GlyphTracker.LocateScaled(track, new GlyphField(Background(seed: 28), 0, 0), 48, GlyphTracker.ScaleLadder(track, 0.82, 1.22));
+
+        Assert.True(match is not { IsConfident: true }, $"skala {match?.Scale:F2}, koszt {match?.Cost:F1}");
+        Assert.True(empty is not { IsConfident: true });
+    }
+
+    [Fact]
+    public void Doprecyzowanie_skali_dogania_powoli_rosnacy_napis()
+    {
+        const double scale = 1.025;
+        var glyphs = Word(150, 70, capHeight: 48, stroke: 14).ToList();
+        var first = Solid(Width, Height, 0x283038);
+        Paint(first, Grow(glyphs, 2), 0x000000);
+        Paint(first, glyphs, 0xF0F0F0);
+        var box = new RectPx(144, 64, 262, 62);
+        var cover = GlyphCoverBuilder.Build(first, box, [box], ["Hill"])!;
+        var track = cover.Track!;
+        var moved = Solid(Width, Height, 0x283038);
+        Paint(moved, Transform(Grow(glyphs, 2), track.CenterX, track.CenterY, scale, 6, 0), 0x000000);
+        Paint(moved, Transform(glyphs, track.CenterX, track.CenterY, scale, 6, 0), 0xF0F0F0);
+        var field = new GlyphField(moved, 0, 0);
+        var located = GlyphTracker.Locate(track, field, 24);
+        Assert.NotNull(located);
+        Assert.True(located.Value.IsConfident, $"koszt {located.Value.Cost:F1}");
+        var plain = located.Value;
+
+        var refined = GlyphTracker.RefineScale(track, field, plain);
+
+        Assert.InRange(refined.Scale, scale - 0.02, scale + 0.02);
+        Assert.True(refined.Cost < plain.Cost * 0.85, $"przed {plain.Cost:F1}, po {refined.Cost:F1}");
+        Assert.InRange(refined.WindowDx, 3, 9);
+    }
+
+    [Fact]
+    public void Doprecyzowanie_nie_rusza_skali_napisu_ktory_tylko_jedzie()
+    {
+        var first = Scene(seed: 29, x: 150, y: 80);
+        var box = new RectPx(146, 76, 210, 50);
+        var cover = GlyphCoverBuilder.Build(first, box, [box], ["Hill"])!;
+        var moved = Scene(seed: 30, x: 171, y: 74);
+        var field = new GlyphField(moved, 0, 0);
+        var plain = GlyphTracker.Locate(cover.Track!, field, 48)!.Value;
+
+        var refined = GlyphTracker.RefineScale(cover.Track!, field, plain);
+
+        Assert.Equal(1.0, refined.Scale);
+        Assert.Equal(21, refined.WorkDx);
+        Assert.Equal(-6, refined.WorkDy);
+    }
+
+    [Fact]
+    public void Bardzo_duzy_napis_buduje_okladke_ze_sledzeniem()
+    {
+        const int width = 1800;
+        const int height = 900;
+        var frame = Solid(width, height, 0x8A8070);
+        var glyphs = Word(300, 250, capHeight: 340, stroke: 48, letters: 3).ToList();
+        Paint(frame, glyphs, 0x181818);
+        var box = new RectPx(292, 244, 3 * (340 * 3 / 4 + 96), 352);
+
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Esc"]);
+
+        Assert.NotNull(cover);
+        Assert.NotNull(cover.Track);
+        Assert.True(cover.Track.Step >= 3);
+        var match = GlyphTracker.Locate(cover.Track, frame, 0, 0, 30);
+        Assert.True(match is { IsConfident: true, IsStatic: true }, $"koszt {match?.Cost:F1}");
+    }
+
+    private static IEnumerable<(int X, int Y)> Bars(int x, int top, int capHeight, int stroke)
+    {
+        var points = new HashSet<(int, int)>();
+        for (var bar = 0; bar < 5; bar++)
+        {
+            var y0 = top + bar * capHeight / 5;
+            for (var y = y0; y < y0 + stroke; y++)
+                for (var bx = x + (bar % 2) * 30; bx < x + 150 + (bar % 2) * 20; bx++) points.Add((bx, y));
+        }
+        return points;
+    }
+
+    private static List<(int X, int Y)> Grow(IEnumerable<(int X, int Y)> points, int grow)
+    {
+        var grown = new HashSet<(int, int)>();
+        foreach (var (x, y) in points)
+            for (var oy = -grow; oy <= grow; oy++)
+                for (var ox = -grow; ox <= grow; ox++) grown.Add((x + ox, y + oy));
+        return grown.ToList();
+    }
+
+    private static List<(int X, int Y)> Transform(IEnumerable<(int X, int Y)> points, double centerX, double centerY, double scale, int dx, int dy)
+    {
+        var source = points.ToHashSet();
+        var minX = source.Min(static p => p.X);
+        var maxX = source.Max(static p => p.X);
+        var minY = source.Min(static p => p.Y);
+        var maxY = source.Max(static p => p.Y);
+        var left = (int)Math.Floor(centerX + (minX - centerX) * scale + dx) - 2;
+        var right = (int)Math.Ceiling(centerX + (maxX + 1 - centerX) * scale + dx) + 2;
+        var top = (int)Math.Floor(centerY + (minY - centerY) * scale + dy) - 2;
+        var bottom = (int)Math.Ceiling(centerY + (maxY + 1 - centerY) * scale + dy) + 2;
+        var result = new List<(int X, int Y)>();
+        for (var y = top; y <= bottom; y++)
+        {
+            for (var x = left; x <= right; x++)
+            {
+                var sx = (int)Math.Floor(centerX + (x + 0.5 - dx - centerX) / scale);
+                var sy = (int)Math.Floor(centerY + (y + 0.5 - dy - centerY) / scale);
+                if (source.Contains((sx, sy))) result.Add((x, y));
+            }
+        }
+        return result;
+    }
+
     private static OcrBitmap Scene(int seed, int x, int y, int background = -1)
     {
         var frame = background >= 0 ? Solid(Width, Height, background) : Background(seed);

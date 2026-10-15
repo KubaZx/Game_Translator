@@ -63,9 +63,11 @@ internal static class Program
             return 4;
         }
         OverlayFonts.ProfileFont = orchestrator.ActiveProfile?.Overlay?.FontFamily;
+        OverlayFonts.ProfileRules = orchestrator.ActiveFontRules;
+        foreach (var warning in orchestrator.ContentWarnings) Console.WriteLine($"Ostrzeżenie: {warning}");
         var warmUp = System.Diagnostics.Stopwatch.StartNew();
-        OverlayFonts.WarmUp(OverlayFonts.ResolveFamilyName(translator.Settings, OverlayFonts.ProfileFont));
-        Console.WriteLine($"Rozgrzanie krojów: {warmUp.Elapsed.TotalMilliseconds:0} ms");
+        OverlayFonts.WarmUpProfile(translator.Settings);
+        Console.WriteLine($"Rozgrzanie krojów ({string.Join(", ", OverlayFonts.ProfileFamilies(translator.Settings))}): {warmUp.Elapsed.TotalMilliseconds:0} ms");
         Console.WriteLine($"Profil: {orchestrator.ActiveProfile?.Id ?? "brak"} • korpus: {orchestrator.ActiveCorpus.Texts} tekstów • baza: {(options.Cache is null ? "pusta" : "kopia")}");
 
         var galleries = new List<FrameGallery>();

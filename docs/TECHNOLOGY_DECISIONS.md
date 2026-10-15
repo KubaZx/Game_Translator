@@ -515,6 +515,24 @@ krojów dołączonych w `OverlayFonts`, tekstu licencji kopiowanego obok program
 `GameTranslatorOverlay.App.csproj`) i wpisu w `THIRD-PARTY-NOTICES.md` — tylko krój, którego
 licencja pozwala go rozpowszechniać z programem.
 
+**Uzupełnienie (2026-10-14): reguły kroju w profilu i Zilla Slab.** Imię mówiącego w Escape
+Academy to gruby krój szeryfowy (żółty z czarnym obrysem), a nakładka rysowała je Lexend Deca.
+Profil dostał listę `overlay.fontRules`: reguła wskazuje krój dla napisu o danym kolorze liter
+(`textColor` ± `colorTolerance` na każdym kanale), z obrysem albo bez (`outlined`) i opcjonalnie
+o danej wysokości liter (ułamek ekranu). Działa tylko w zakrywaniu z łatką, bo tylko tam kolor
+i obrys pochodzą z maski liter (`GlyphCover`); kolor z dawnego próbkowania bloku bywa zły (dla
+„Employee” szary `#4C4E4C` zamiast żółtego `#FBFA86`). Zła reguła odpada z ostrzeżeniem, profil
+zostaje — w odróżnieniu od błędów reszty profilu, bo krój to kosmetyka, a odrzucenie profilu
+zabrałoby dopasowanie okna i korpus. Dołączony krój: **Zilla Slab Bold** (Mozilla, SIL OFL 1.1,
+273 KB, plik z repozytorium google/fonts bez zmian) — z porównania kształtu „Employee” z klatki
+z 30 plikami kandydatów najbliższy krój statyczny z kompletem polskich liter (Solway ExtraBold,
+Arvo Bold i Patua One wypadły mimo dobrych wyników, bo nie mają m.in. ą, ę, ś, ż; kroje dostępne
+w google/fonts tylko jako zmienne, np. Aleo i Bitter, nie były wyraźnie lepsze, a wymagałyby
+własnej wersji statycznej albo niesprawdzonej obsługi osi grubości w WPF). Pomiar opisuje
+[ROADMAP.md](ROADMAP.md), runda 2026-10-14 (9). Ograniczenie: krój dostaje cały blok — dlatego
+imię mówiącego jest wydzielane z bloku dialogu po kolorze (`TextBlockSplitter.SplitLabels`); gdy
+wydzielenie się nie uda, blok ma kolor mieszany i zostaje w kroju bazowym.
+
 ## ADR-017: Kwestia pisana literami czeka w trybie zakrywania (2026-10-06)
 
 **Kontekst.** Od rundy 2026-10-06 (4) odczyt będący jednoznacznym początkiem jednej linii dialogu

@@ -38,7 +38,7 @@ public partial class App : Application
         if (!isFirstInstance)
         {
             MessageBox.Show(
-                "GameTranslatorOverlay już działa.\n\nSprawdź ikonę „GT” w zasobniku systemowym (przy zegarze) — " +
+                "GameTranslatorOverlay już działa.\n\nSprawdź ikonę z dymkiem „PL” w zasobniku systemowym (przy zegarze) — " +
                 "kliknij ją, aby przywrócić okno.",
                 "GameTranslatorOverlay", MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown(0);
