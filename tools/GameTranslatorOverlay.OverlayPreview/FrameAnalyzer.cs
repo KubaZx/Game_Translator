@@ -5,6 +5,7 @@ using System.Text.Json;
 using GameTranslatorOverlay.App.Capture;
 using GameTranslatorOverlay.Core.Ocr;
 using GameTranslatorOverlay.Core.Text;
+using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Core.Vision;
 using CoreTextBlock = GameTranslatorOverlay.Core.Text.TextBlock;
 
@@ -12,7 +13,7 @@ namespace GameTranslatorOverlay.OverlayPreview;
 
 internal sealed record PreviewBlock(
     int Number, string Key, string Text, RectPx Box, int LineHeight, string? Translation, string Origin, BlockColors Colors,
-    GlyphCover? Cover = null);
+    GlyphCover? Cover = null, TranslationQualityFlags Quality = TranslationQualityFlags.None);
 
 internal sealed record RejectedBlock(string Text, RectPx Box);
 
@@ -20,7 +21,8 @@ internal sealed record FrameAnalysis(
     string FramePath, OcrBitmap Frame, IReadOnlyList<PreviewBlock> Blocks, IReadOnlyList<RejectedBlock> Rejected,
     int RawLines, double OcrFactor, long OcrMs, bool FromJson);
 
-internal sealed record InputBlock(string Text, int X, int Y, int Width, int Height, int? LineHeight, string? Translation);
+internal sealed record InputBlock(
+    string Text, int X, int Y, int Width, int Height, int? LineHeight, string? Translation, string? Quality = null);
 
 internal static class FrameAnalyzer
 {
@@ -91,7 +93,7 @@ internal static class FrameAnalyzer
             while (!keys.Add(key)) key += "'";
             blocks.Add(new PreviewBlock(
                 i + 1, key, keyed[i].Block.Text, keyed[i].Block.Box, TextBlockMetrics.MedianLineHeight(keyed[i].Block),
-                outcomes[i].TranslatedText, PreviewTranslator.OriginLabel(outcomes[i]), colors[i], covers[i]));
+                outcomes[i].TranslatedText, PreviewTranslator.OriginLabel(outcomes[i]), colors[i], covers[i], outcomes[i].QualityIssues));
         }
 
         return new FrameAnalysis(framePath, frame, blocks, rejected, result.Lines.Count, factor, ocrMs, FromJson: false);
@@ -108,9 +110,9 @@ internal static class FrameAnalyzer
 
         var pending = sources.Select((s, i) => (s, i)).Where(static p => p.s.Translation is null).ToList();
         var outcomes = await translator.TranslateAsync(pending.Select(static p => p.s.Text).ToList()).ConfigureAwait(false);
-        var translated = new Dictionary<int, (string? Text, string Origin)>();
+        var translated = new Dictionary<int, (string? Text, string Origin, TranslationQualityFlags Quality)>();
         for (var j = 0; j < pending.Count; j++)
-            translated[pending[j].i] = (outcomes[j].TranslatedText, PreviewTranslator.OriginLabel(outcomes[j]));
+            translated[pending[j].i] = (outcomes[j].TranslatedText, PreviewTranslator.OriginLabel(outcomes[j]), outcomes[j].QualityIssues);
 
         var blocks = new List<PreviewBlock>(keyed.Count);
         var keys = new HashSet<string>(StringComparer.Ordinal);
@@ -120,7 +122,8 @@ internal static class FrameAnalyzer
             var box = keyed[i].Block.Box;
             var lineCount = Math.Max(1, source.Text.Count(static c => c == '\n') + 1);
             var lineHeight = source.LineHeight is > 0 ? source.LineHeight.Value : Math.Max(1, box.Height / lineCount);
-            var (text, origin) = source.Translation is { } given ? (given, "JSON") : translated[i];
+            var (text, origin, quality) = source.Translation is { } given ? (given, "JSON", TranslationQualityFlags.None) : translated[i];
+            if (source.Quality is { } requested) quality = ParseQuality(requested, source.Text, text);
             var key = keyed[i].Key;
             while (!keys.Add(key)) key += "'";
             var colors = BlockColorSampler.SampleColors(frame.PixelsBgra32, frame.Width, frame.Height, frame.Stride, box);
@@ -128,7 +131,7 @@ internal static class FrameAnalyzer
                 .Select(l => new RectPx(box.X, box.Y + l * box.Height / lineCount, box.Width, box.Height / lineCount))
                 .ToList();
             var cover = coverMode == "off" ? null : GlyphCoverBuilder.Build(frame, box, lineBoxes, source.Text.Split('\n'), soft: coverMode == "soft");
-            blocks.Add(new PreviewBlock(i + 1, key, source.Text, box, lineHeight, text, origin, colors, cover));
+            blocks.Add(new PreviewBlock(i + 1, key, source.Text, box, lineHeight, text, origin, colors, cover, quality));
         }
 
         return new FrameAnalysis(framePath, frame, blocks, [], 0, 1.0, 0, FromJson: true);
@@ -150,9 +153,30 @@ internal static class FrameAnalyzer
                 text,
                 Required(item, "x"), Required(item, "y"), Required(item, "width"), Required(item, "height"),
                 item.TryGetProperty("lineHeight", out var lh) && lh.ValueKind == JsonValueKind.Number ? lh.GetInt32() : null,
-                item.TryGetProperty("translation", out var tr) && tr.ValueKind == JsonValueKind.String ? tr.GetString() : null));
+                item.TryGetProperty("translation", out var tr) && tr.ValueKind == JsonValueKind.String ? tr.GetString() : null,
+                item.TryGetProperty("quality", out var q) ? q.ValueKind switch
+                {
+                    JsonValueKind.String => q.GetString(),
+                    JsonValueKind.True => "auto",
+                    JsonValueKind.False or JsonValueKind.Null => null,
+                    _ => throw new ArgumentException("Plik bloków: „quality” to nazwy flag (np. „NumbersChanged”), „auto” albo true/false."),
+                } : null));
         }
         return result;
+    }
+
+    private static TranslationQualityFlags ParseQuality(string requested, string source, string? translation)
+    {
+        var trimmed = requested.Trim();
+        if (trimmed.Length == 0) return TranslationQualityFlags.None;
+        if (trimmed.Equals("auto", StringComparison.OrdinalIgnoreCase))
+            return translation is null ? TranslationQualityFlags.None : TranslationQualityGate.Check(source, translation);
+        const TranslationQualityFlags known = TranslationQualityFlags.Empty | TranslationQualityFlags.NumbersChanged
+            | TranslationQualityFlags.Untranslated | TranslationQualityFlags.Runaway;
+        return !char.IsDigit(trimmed[0])
+            && Enum.TryParse<TranslationQualityFlags>(trimmed, ignoreCase: true, out var flags) && (flags & ~known) == 0
+            ? flags
+            : throw new ArgumentException($"Plik bloków: nieznana flaga jakości „{requested}” (NumbersChanged, Untranslated, Runaway, Empty, auto).");
     }
 
     private static int Required(JsonElement item, string name) =>

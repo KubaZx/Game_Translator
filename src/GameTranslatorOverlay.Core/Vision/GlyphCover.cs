@@ -310,13 +310,20 @@ public static class GlyphCoverBuilder
             .Inflate(Math.Max(1, margin / 2)).Intersect(regionLocal);
 
         var ds = Math.Max(1, (int)Math.Round(lineHeight / 24.0));
-        var fill = DetectFill(work, regionLocal, textLocal, lineHeight, ds, out var bright);
+        var boxLocal = new RectPx(box.X - outer.X, box.Y - outer.Y, box.Width, box.Height).Intersect(regionLocal);
+        var fill = DetectFill(work, regionLocal, textLocal, boxLocal, lineHeight, ds, out var bright, out var container);
         if (fill is null) return null;
 
         var halo = (int)Math.Clamp(Math.Round(lineHeight * 0.2), 2, 30);
         var nearText = Morphology.Dilate(fill, work.Width, work.Height, halo + ds);
         var smoothing = Math.Max(2, ds * 2);
-        var background = work.SmoothExcluding(nearText, smoothing);
+        var excluded = nearText;
+        if (container is not null)
+        {
+            excluded = new bool[work.Count];
+            for (var i = 0; i < work.Count; i++) excluded[i] = nearText[i] || !container[i];
+        }
+        var background = work.SmoothExcluding(excluded, smoothing);
         if (background is null) return null;
 
         var contrast = new float[work.Count];
@@ -430,6 +437,7 @@ public static class GlyphCoverBuilder
         for (var i = 0; i < work.Count; i++)
         {
             if (!haloZone[i] || refined[i] || !inRegion[i] || (inWords is not null && !inWords[i])) continue;
+            if (container is not null && !container[i]) continue;
             if (ColorDistance(work, background, i) <= haloThreshold) continue;
             haloMask[i] = true;
             if (contrast[i] < -haloThreshold * 0.5f)
@@ -466,8 +474,14 @@ public static class GlyphCoverBuilder
             }
         }
 
+        var growZone = haloZone;
+        if (container is not null)
+        {
+            growZone = new bool[work.Count];
+            for (var i = 0; i < work.Count; i++) growZone[i] = haloZone[i] && container[i];
+        }
         if (outlineRgb >= 0)
-            GrowEdge(work, haloMask, outline, (float)LumaOf(outlineRgb), bright ? 1f : -1f, 8f, haloZone, refined, inRegion,
+            GrowEdge(work, haloMask, outline, (float)LumaOf(outlineRgb), bright ? 1f : -1f, 8f, growZone, refined, inRegion,
                 wordZone, contrast, -haloThreshold * 0.25f);
 
         var mask = new bool[work.Count];
@@ -1000,9 +1014,11 @@ public static class GlyphCoverBuilder
         return KeyTokens.Contains(t);
     }
 
-    private static bool[]? DetectFill(Workspace work, RectPx regionLocal, RectPx textLocal, double lineHeight, int ds, out bool bright)
+    private static bool[]? DetectFill(
+        Workspace work, RectPx regionLocal, RectPx textLocal, RectPx boxLocal, double lineHeight, int ds, out bool bright, out bool[]? container)
     {
         bright = true;
+        container = null;
         var ringOnly = RectMask(regionLocal, work.Width, work.Height);
         var anyRing = Array.IndexOf(ringOnly, false) >= 0;
         if (!anyRing) return null;
@@ -1011,41 +1027,24 @@ public static class GlyphCoverBuilder
         var noise = NoiseLevel(work, i => !ringOnly[i]);
         var threshold = Math.Max(16f, noise * 4f);
 
-        var deviation = new float[work.Count];
-        var brightSet = new bool[work.Count];
-        var darkSet = new bool[work.Count];
-        double brightEnergy = 0, darkEnergy = 0;
-        for (var y = textLocal.Y; y < textLocal.Bottom; y++)
+        var deviation = Deviation(work, ringBackground, textLocal, threshold, out var polarity, out _);
+        if (ContainerMask(work, regionLocal, boxLocal, threshold * 0.75f) is { } inside)
         {
-            for (var x = textLocal.X; x < textLocal.Right; x++)
+            var outside = RectMask(boxLocal, work.Width, work.Height);
+            for (var i = 0; i < work.Count; i++) outside[i] = outside[i] || !inside[i];
+            if (work.SmoothExcluding(outside, Math.Max(2, ds * 2)) is { } containerBackground)
             {
-                var i = y * work.Width + x;
-                var d = work.L[i] - Luma(ringBackground, i);
-                deviation[i] = d;
-                if (d > threshold)
+                var containerDeviation = Deviation(work, containerBackground, textLocal, threshold, out var containerPolarity, out var containerBalance);
+                if (containerPolarity is { } chosen && chosen != polarity && containerBalance <= 0.1)
                 {
-                    brightSet[i] = true;
-                    brightEnergy += d - threshold;
-                }
-                else if (d < -threshold)
-                {
-                    darkSet[i] = true;
-                    darkEnergy += -d - threshold;
+                    deviation = containerDeviation;
+                    polarity = chosen;
+                    container = inside;
                 }
             }
         }
-        if (brightEnergy <= 0 && darkEnergy <= 0) return null;
-        var balance = Math.Min(brightEnergy, darkEnergy) / Math.Max(brightEnergy, darkEnergy);
-        if (balance < 0.35)
-        {
-            bright = brightEnergy >= darkEnergy;
-        }
-        else
-        {
-            var brightEnclosed = Enclosure(brightSet, darkSet, work.Width, work.Height);
-            var darkEnclosed = Enclosure(darkSet, brightSet, work.Width, work.Height);
-            bright = Math.Abs(brightEnclosed - darkEnclosed) > 0.1 ? brightEnclosed > darkEnclosed : brightEnergy >= darkEnergy;
-        }
+        if (polarity is not { } isBright) return null;
+        bright = isBright;
 
         var wd = (work.Width + ds - 1) / ds;
         var hd = (work.Height + ds - 1) / ds;
@@ -1119,7 +1118,128 @@ public static class GlyphCoverBuilder
                 any++;
             }
         }
+        if (container is not null) any -= DropEdgeParts(mask, work.Width, textLocal, boxLocal, any);
         return any >= 12 ? mask : null;
+    }
+
+    private static int DropEdgeParts(bool[] mask, int width, RectPx area, RectPx box, int total)
+    {
+        var seen = new bool[mask.Length];
+        var edge = new List<int>();
+        var queue = new Queue<int>();
+        for (var y = area.Y; y < area.Bottom; y++)
+        {
+            for (var x = area.X; x < area.Right; x++)
+            {
+                var start = y * width + x;
+                if (!mask[start] || seen[start]) continue;
+                var part = new List<int>();
+                var touches = false;
+                var outside = 0;
+                seen[start] = true;
+                queue.Enqueue(start);
+                while (queue.Count > 0)
+                {
+                    var i = queue.Dequeue();
+                    part.Add(i);
+                    var px = i % width;
+                    var py = i / width;
+                    touches |= px == area.X || px == area.Right - 1 || py == area.Y || py == area.Bottom - 1;
+                    if (px < box.X || px >= box.Right || py < box.Y || py >= box.Bottom) outside++;
+                    foreach (var j in (ReadOnlySpan<int>)[px > area.X ? i - 1 : -1, px + 1 < area.Right ? i + 1 : -1,
+                        py > area.Y ? i - width : -1, py + 1 < area.Bottom ? i + width : -1])
+                    {
+                        if (j < 0 || !mask[j] || seen[j]) continue;
+                        seen[j] = true;
+                        queue.Enqueue(j);
+                    }
+                }
+                if (touches && outside * 2 >= part.Count) edge.AddRange(part);
+            }
+        }
+        if (edge.Count * 2 > total) return 0;
+        foreach (var i in edge) mask[i] = false;
+        return edge.Count;
+    }
+
+    private static float[] Deviation(Workspace work, float[][] background, RectPx textLocal, float threshold, out bool? bright, out double balance)
+    {
+        var deviation = new float[work.Count];
+        var brightSet = new bool[work.Count];
+        var darkSet = new bool[work.Count];
+        double brightEnergy = 0, darkEnergy = 0;
+        for (var y = textLocal.Y; y < textLocal.Bottom; y++)
+        {
+            for (var x = textLocal.X; x < textLocal.Right; x++)
+            {
+                var i = y * work.Width + x;
+                var d = work.L[i] - Luma(background, i);
+                deviation[i] = d;
+                if (d > threshold)
+                {
+                    brightSet[i] = true;
+                    brightEnergy += d - threshold;
+                }
+                else if (d < -threshold)
+                {
+                    darkSet[i] = true;
+                    darkEnergy += -d - threshold;
+                }
+            }
+        }
+        bright = null;
+        balance = 1;
+        if (brightEnergy <= 0 && darkEnergy <= 0) return deviation;
+        balance = Math.Min(brightEnergy, darkEnergy) / Math.Max(brightEnergy, darkEnergy);
+        if (balance < 0.35)
+        {
+            bright = brightEnergy >= darkEnergy;
+        }
+        else
+        {
+            var brightEnclosed = Enclosure(brightSet, darkSet, work.Width, work.Height);
+            var darkEnclosed = Enclosure(darkSet, brightSet, work.Width, work.Height);
+            bright = Math.Abs(brightEnclosed - darkEnclosed) > 0.1 ? brightEnclosed > darkEnclosed : brightEnergy >= darkEnergy;
+        }
+        return deviation;
+    }
+
+    private static bool[]? ContainerMask(Workspace work, RectPx regionLocal, RectPx boxLocal, float tolerance)
+    {
+        var histogram = new int[256];
+        var band = 0;
+        for (var y = regionLocal.Y; y < regionLocal.Bottom; y++)
+        {
+            for (var x = regionLocal.X; x < regionLocal.Right; x++)
+            {
+                if (x >= boxLocal.X && x < boxLocal.Right && y >= boxLocal.Y && y < boxLocal.Bottom) continue;
+                histogram[Math.Clamp((int)work.L[y * work.Width + x], 0, 255)]++;
+                band++;
+            }
+        }
+        var ring = work.Count - regionLocal.Width * regionLocal.Height;
+        if (band < 16 || ring < 16) return null;
+        var seen = 0;
+        var level = 0;
+        while (level < 255 && (seen += histogram[level]) * 2 < band) level++;
+        var inside = new bool[work.Count];
+        int bandInside = 0, ringOutside = 0;
+        for (var y = 0; y < work.Height; y++)
+        {
+            for (var x = 0; x < work.Width; x++)
+            {
+                var i = y * work.Width + x;
+                var near = Math.Abs(work.L[i] - level) <= tolerance;
+                inside[i] = near;
+                var inRegion = x >= regionLocal.X && x < regionLocal.Right && y >= regionLocal.Y && y < regionLocal.Bottom;
+                if (!inRegion)
+                {
+                    if (!near) ringOutside++;
+                }
+                else if (near && !(x >= boxLocal.X && x < boxLocal.Right && y >= boxLocal.Y && y < boxLocal.Bottom)) bandInside++;
+            }
+        }
+        return bandInside >= band * 0.5 && ringOutside >= ring * 0.25 ? inside : null;
     }
 
     private static int BridgeGap(double lineHeight) => Math.Max(4, (int)Math.Round(lineHeight * 1.2));

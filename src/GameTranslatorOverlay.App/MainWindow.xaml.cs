@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Windows;
@@ -51,6 +52,8 @@ public partial class MainWindow : Window
 
     private readonly OverlayWindow _overlay = new();
     private readonly ResultPanelWindow _panel = new();
+    private readonly ObservableCollection<QualityWarningItem> _qualityWarnings = [];
+    private long _qualityWarningsVersion = -1;
     private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private H.NotifyIcon.TaskbarIcon? _trayIcon;
     private IntPtr _trayIconHandle;
@@ -99,6 +102,7 @@ public partial class MainWindow : Window
         _userGlossaryStore = userGlossaryStore;
         _paths = paths;
         _logger = logger;
+        _userProfiles = UserProfileStore.CreateDefault(paths);
 
         InitializeComponent();
         Icon = AppLogo.CreateWindowIcon();
@@ -143,11 +147,7 @@ public partial class MainWindow : Window
             PnlLlmPresets.Children.Add(preset);
         }
 
-        var profileNames = new List<string> { NoProfileLabel };
-        profileNames.AddRange(_orchestrator.Profiles.Select(static p => p.Name));
-        CmbProfile.ItemsSource = profileNames;
-        var activeProfileName = _orchestrator.ActiveProfile?.Name;
-        CmbProfile.SelectedItem = activeProfileName ?? NoProfileLabel;
+        RefreshProfileList();
 
         CmbDisplayMode.ItemsSource = new[] { "Panel obok regionu", "Nakładka na ekranie" };
         CmbDisplayMode.SelectedIndex = _settings.ResultDisplayMode == "overlay" ? 1 : 0;
@@ -178,10 +178,12 @@ public partial class MainWindow : Window
         ChkCacheOnly.IsChecked = _settings.CacheOnlyMode;
         ChkPrivate.IsChecked = _settings.PrivateMode;
         ChkOverlayNotices.IsChecked = _settings.ShowOverlayNotices;
+        ChkQualityMarks.IsChecked = _settings.ShowQualityMarks;
+        ListQualityWarnings.ItemsSource = _qualityWarnings;
+        ChkStreamLlm.IsChecked = _settings.StreamLlmResponses;
 
         TxtVersion.Text = "Wersja " + AppVersion();
         TxtDataFolder.Text = _paths.RootDirectory;
-        UpdateHotkeyLabels();
 
         _loadingUi = false;
 
@@ -190,22 +192,15 @@ public partial class MainWindow : Window
         _ = RefreshWindowsAsync();
 
         _hotkeys.Attach(this);
-        _translateHotkeyRegistered = _hotkeys.TryRegister(_settings.TranslateHotkey, () => _ = TranslateRegionInteractiveAsync(), out var hotkeyError);
-        if (!_translateHotkeyRegistered)
+        foreach (var action in HotkeyActions)
         {
-            SetStatus(hotkeyError);
+            if (!RegisterHotkey(action, HotkeyGestureText(action), out var hotkeyError))
+            {
+                SetStatus(hotkeyError);
+            }
         }
-        _overlayHotkeyRegistered = _hotkeys.TryRegister(_settings.ToggleOverlayHotkey, () => _overlay.ToggleVisibility(), out var overlayHotkeyError);
-        if (!_overlayHotkeyRegistered)
-        {
-            SetStatus(overlayHotkeyError);
-        }
-        _liveHotkeyRegistered = _hotkeys.TryRegister(
-            _settings.LiveToggleHotkey, () => _ = ToggleLiveFromHotkeyAsync(), out var liveHotkeyError);
-        if (!_liveHotkeyRegistered)
-        {
-            SetStatus(liveHotkeyError);
-        }
+        UpdateHotkeyLabels();
+        UpdateGameProfileCard();
 
         foreach (var warning in _orchestrator.ContentWarnings)
         {
@@ -270,17 +265,6 @@ public partial class MainWindow : Window
         return metadata > 0 ? version[..metadata] : version;
     }
 
-    private void UpdateHotkeyLabels()
-    {
-        TxtHotkeyTranslate.Text = _settings.TranslateHotkey;
-        TxtHotkeyResult.Text = _settings.TranslateHotkey;
-        TxtTimingHint.Text = $"Brak — przetłumacz region ({_settings.TranslateHotkey}), żeby zobaczyć rozkład czasu.";
-        TxtHotkeyOverlay.Text = _settings.ToggleOverlayHotkey;
-        TxtHotkeyLive.Text = _settings.LiveToggleHotkey;
-        Visuals.SetCaption(BtnTranslateRegion, _settings.TranslateHotkey);
-        Visuals.SetCaption(BtnToggleOverlay, _settings.ToggleOverlayHotkey);
-    }
-
     private void OnMinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
 
     private void OnMaximizeClick(object sender, RoutedEventArgs e)
@@ -301,8 +285,12 @@ public partial class MainWindow : Window
             menu.Items.Add(CreateMenuItem("Pokaż okno", RestoreFromTray));
             _trayLiveItem = CreateMenuItem(LiveMenuHeader(), () => _ = ToggleLiveFromHotkeyAsync());
             menu.Items.Add(_trayLiveItem);
-            menu.Items.Add(CreateMenuItem($"Przetłumacz region{(_translateHotkeyRegistered ? $"  ({_settings.TranslateHotkey})" : string.Empty)}", () => _ = TranslateRegionInteractiveAsync()));
-            menu.Items.Add(CreateMenuItem($"Ukryj / pokaż nakładkę{(_overlayHotkeyRegistered ? $"  ({_settings.ToggleOverlayHotkey})" : string.Empty)}", _overlay.ToggleVisibility));
+            _trayTranslateItem = CreateMenuItem(
+                TrayHeader("Przetłumacz region", RegisteredHotkey(HotkeyAction.Translate)), () => _ = TranslateRegionInteractiveAsync());
+            menu.Items.Add(_trayTranslateItem);
+            _trayOverlayItem = CreateMenuItem(
+                TrayHeader("Ukryj / pokaż nakładkę", RegisteredHotkey(HotkeyAction.ToggleOverlay)), _overlay.ToggleVisibility);
+            menu.Items.Add(_trayOverlayItem);
             menu.Items.Add(new Separator());
             menu.Items.Add(CreateMenuItem("Zakończ", Close));
 
@@ -365,8 +353,9 @@ public partial class MainWindow : Window
     {
         var windows = await Task.Run(WindowEnumerator.GetOpenWindows);
         WindowsList.ItemsSource = windows;
-        var liveHotkey = _liveHotkeyRegistered ? _settings.LiveToggleHotkey : null;
-        SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: false, liveHotkey));
+        var liveHotkey = RegisteredHotkey(HotkeyAction.LiveToggle);
+        var translateHotkey = RegisteredHotkey(HotkeyAction.Translate);
+        SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: false, liveHotkey, translateHotkey));
 
         // Zapamiętana gra jest tylko zaznaczana — start live zostaje decyzją użytkownika.
         // Bez autodetekcji profilu: świadomy wybór „brak profilu” ma przetrwać restart
@@ -383,7 +372,7 @@ public partial class MainWindow : Window
                 _preselectingRememberedGame = false;
             }
             WindowsList.ScrollIntoView(remembered);
-            SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: true, liveHotkey));
+            SetStatus(LiveHotkeyMessages.WindowListRefreshed(windows.Count, rememberedGameSelected: true, liveHotkey, translateHotkey));
         }
 
         // Diagnostyka dev: GTO_AUTOLIVE="fragment tytułu" od razu startuje tryb live na
@@ -430,6 +419,27 @@ public partial class MainWindow : Window
         SetStatus(_settings.ShowOverlayNotices
             ? "Komunikaty w nakładce włączone."
             : "Komunikaty w nakładce wyłączone — błędy widać tylko w tym oknie.");
+    }
+
+    private void OnQualityMarksChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loadingUi) return;
+        _settings.ShowQualityMarks = ChkQualityMarks.IsChecked == true;
+        SaveSettingsWithoutRebuild();
+        _overlay.RefreshQualityMarks(_settings);
+        SetStatus(_settings.ShowQualityMarks
+            ? "Znacznik ostrzeżeń w nakładce włączony."
+            : "Znacznik ostrzeżeń w nakładce wyłączony — ostrzeżenia widać tylko w tym oknie.");
+    }
+
+    private void OnStreamLlmChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loadingUi) return;
+        _settings.StreamLlmResponses = ChkStreamLlm.IsChecked == true;
+        SaveSettingsWithoutRebuild();
+        SetStatus(_settings.StreamLlmResponses
+            ? "Pierwsze linie od razu: tryb live pokaże gotowe linie, zanim model skończy odpowiedź."
+            : "Pierwsze linie od razu wyłączone — tryb live czeka na całą odpowiedź modelu.");
     }
 
     private void OnRefreshClick(object sender, RoutedEventArgs e) => _ = RefreshWindowsAsync();
@@ -632,7 +642,8 @@ public partial class MainWindow : Window
         {
             var translated = result.Blocks
                 .Where(static b => b.Outcome.TranslatedText is not null)
-                .Select(static b => (b.Block.Box, b.Outcome.TranslatedText!, Core.Text.TextBlockMetrics.MedianLineHeight(b.Block), b.TextColorRgb))
+                .Select(static b => (b.Block.Box, b.Outcome.TranslatedText!, Core.Text.TextBlockMetrics.MedianLineHeight(b.Block), b.TextColorRgb,
+                    b.Outcome.QualityIssues))
                 .ToList();
             if (translated.Count > 0)
             {
@@ -646,11 +657,15 @@ public partial class MainWindow : Window
             _panel.ShowResults(result, _settings, SaveCorrectionAsync, AddTermAsync);
         }
 
+        UpdateCounters();
         SetStatus(result.Warning ?? $"Przetłumaczono {result.Blocks.Count} bloków tekstu ({result.Timings.TotalMs} ms).");
     }
 
-    private Task SaveCorrectionAsync(ResultItem item, string corrected) =>
-        _orchestrator.SaveManualCorrectionAsync(item.Block, corrected);
+    private async Task SaveCorrectionAsync(ResultItem item, string corrected)
+    {
+        await _orchestrator.SaveManualCorrectionAsync(item.Block, corrected);
+        SyncQualityWarnings();
+    }
 
     private Task AddTermAsync(ResultItem item) =>
         _orchestrator.AddGlossaryTermAsync(item.SourceText, item.TranslatedText);
@@ -759,6 +774,7 @@ public partial class MainWindow : Window
         PnlAzureSettings.Visibility = VisibleFor(provider, ProviderSetting.AzureRegion);
         PnlLlmSettings.Visibility = VisibleFor(provider, ProviderSetting.LlmEndpoint);
         PnlClaudeSettings.Visibility = VisibleFor(provider, ProviderSetting.ClaudeModel);
+        ChkStreamLlm.Visibility = VisibleFor(provider, ProviderSetting.StreamResponses);
 
         PwdApiKey.IsEnabled = BtnSaveKey.IsEnabled = BtnDeleteKey.IsEnabled = provider.UsesApiKey;
         TxtProviderHint.Text = provider.UsesApiKey
@@ -865,7 +881,15 @@ public partial class MainWindow : Window
             _ => 0.85,
         };
         _settings.CacheOnlyMode = ChkCacheOnly.IsChecked == true;
+        var privateChanged = _settings.PrivateMode != (ChkPrivate.IsChecked == true);
         _settings.PrivateMode = ChkPrivate.IsChecked == true;
+        if (privateChanged)
+        {
+            _orchestrator.QualityWarnings.Forget();
+            _qualityWarnings.Clear();
+            _qualityWarningsVersion = -1;
+            SyncQualityWarnings();
+        }
 
         var selectedProfileName = CmbProfile.SelectedItem as string;
         _settings.ActiveProfileId = _orchestrator.Profiles
@@ -910,6 +934,7 @@ public partial class MainWindow : Window
         _orchestrator.RebuildPipeline();
         _appliedSettingsJson = snapshot;
         _appliedPipelineJson = pipelineSnapshot;
+        UpdateGameProfileCard();
 
         var profileInfo = _orchestrator.ActiveProfile is { } profile ? $", profil: {profile.Name}" : string.Empty;
         if (_orchestrator.ActiveCorpus.IsLoaded) profileInfo += $", korpus: {_orchestrator.ActiveCorpus.Texts:N0} tekstów";
@@ -974,6 +999,120 @@ public partial class MainWindow : Window
         var latency = change ?? _usage.Latency.Summarize(LatencyStage.NewText);
         TxtStatLatencyLabel.Text = change is null && latency is not null ? "Nowy tekst" : "Zmiana → napis";
         TxtStatLatency.Text = latency is { } summary ? LatencyMonitor.FormatMs(summary.MedianMs) : "—";
+
+        var warnings = _orchestrator.QualityWarnings.Total;
+        TxtChipQuality.Text = $"Ostrzeżenia {warnings.ToString("N0", culture)}";
+        TxtStatQuality.Text = warnings.ToString("N0", culture);
+        TxtStatRetries.Text = _usage.QualityIssues.Retries.ToString("N0", culture);
+        var warningBrush = (System.Windows.Media.Brush)FindResource(warnings > 0 ? "Brush.Warning" : "Brush.TextMuted");
+        TxtChipQuality.Foreground = warningBrush;
+        TxtStatQuality.Foreground = warnings > 0 ? warningBrush : (System.Windows.Media.Brush)FindResource("Brush.Text");
+        SyncQualityWarnings();
+    }
+
+    private void SyncQualityWarnings()
+    {
+        var log = _orchestrator.QualityWarnings;
+        var version = log.Version;
+        if (version == _qualityWarningsVersion) return;
+        _qualityWarningsVersion = version;
+
+        var entries = log.Recent;
+        var previous = _qualityWarnings.ToDictionary(static item => item.Id);
+        var next = new List<QualityWarningItem>(entries.Count);
+        foreach (var entry in entries)
+        {
+            if (previous.Remove(entry.Id, out var item)) item.Update(entry);
+            else item = new QualityWarningItem(entry);
+            next.Add(item);
+        }
+        next.AddRange(_qualityWarnings.Where(item => item.IsEditing && previous.ContainsKey(item.Id)));
+
+        foreach (var stale in _qualityWarnings.Where(item => !next.Contains(item)).ToList()) _qualityWarnings.Remove(stale);
+        for (var i = 0; i < next.Count; i++)
+        {
+            var at = _qualityWarnings.IndexOf(next[i]);
+            if (at < 0) _qualityWarnings.Insert(i, next[i]);
+            else if (at != i) _qualityWarnings.Move(at, i);
+        }
+
+        var any = _qualityWarnings.Count > 0;
+        ListQualityWarnings.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
+        PnlQualityWarningsEmpty.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
+        BtnClearQualityWarnings.IsEnabled = any;
+        var total = log.Total.ToString("N0", CultureInfo.GetCultureInfo("pl-PL"));
+        TxtQualityWarningsSummary.Text = (any, log.Total > 0) switch
+        {
+            (true, _) => $"Na liście: {_qualityWarnings.Count} (najwyżej {QualityWarningLog.Capacity} ostatnich) · w tej sesji razem: {total} — tylko w pamięci, nic nie trafia na dysk.",
+            (false, true) => $"Lista wyczyszczona · w tej sesji razem: {total}. Nowe ostrzeżenia pojawią się tutaj — tylko w pamięci, nic nie trafia na dysk.",
+            _ => $"Do {QualityWarningLog.Capacity} ostatnich tłumaczeń, które kontrola jakości oznaczyła w tej sesji — tylko w pamięci, nic nie trafia na dysk.",
+        };
+        TxtQualityWarningsEmpty.Text = (log.Total > 0 ? "Brak nowych ostrzeżeń od wyczyszczenia listy." : "Brak ostrzeżeń.")
+            + " Gdy tłumaczenie zgubi liczbę z oryginału, zostanie po angielsku albo będzie podejrzanie długie, pojawi się tutaj — z przyciskiem „Popraw”.";
+    }
+
+    private void OnClearQualityWarningsClick(object sender, RoutedEventArgs e)
+    {
+        _orchestrator.QualityWarnings.Clear();
+        _qualityWarnings.Clear();
+        _qualityWarningsVersion = -1;
+        SyncQualityWarnings();
+        SetStatus("Lista ostrzeżeń wyczyszczona — licznik sesji na Pulpicie zostaje.");
+    }
+
+    private static QualityWarningItem? QualityWarningFrom(object sender) =>
+        (sender as FrameworkElement)?.DataContext as QualityWarningItem;
+
+    private void OnEditQualityWarningClick(object sender, RoutedEventArgs e)
+    {
+        if (QualityWarningFrom(sender) is not { } item) return;
+        item.EditText = item.TranslatedText;
+        item.IsEditing = true;
+    }
+
+    private void OnCancelQualityWarningClick(object sender, RoutedEventArgs e)
+    {
+        if (QualityWarningFrom(sender) is not { } item) return;
+        item.IsEditing = false;
+        _qualityWarningsVersion = -1;
+        SyncQualityWarnings();
+    }
+
+    private void OnQualityEditBoxVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (sender is not TextBox { IsVisible: true } box) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            box.Focus();
+            box.SelectAll();
+        }, DispatcherPriority.Input);
+    }
+
+    private async void OnSaveQualityWarningClick(object sender, RoutedEventArgs e)
+    {
+        if (QualityWarningFrom(sender) is not { } item) return;
+        var corrected = item.EditText.Trim();
+        if (corrected.Length == 0)
+        {
+            item.IsEditing = false;
+            return;
+        }
+
+        try
+        {
+            await _orchestrator.SaveManualCorrectionAsync(item.Entry, corrected);
+            item.IsEditing = false;
+            _qualityWarningsVersion = -1;
+            SyncQualityWarnings();
+            SetStatus(_settings.PrivateMode
+                ? "Poprawka zapisana w pamięci (tryb prywatny) — ten tekst dostanie Twoje tłumaczenie do końca sesji."
+                : "Poprawka zapisana — ten tekst dostanie odtąd Twoje tłumaczenie (ręczna korekta w cache).");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Nie udało się zapisać poprawki z listy ostrzeżeń");
+            SetStatus("Nie udało się zapisać poprawki — szczegóły w logu diagnostycznym.");
+        }
     }
 
     private void OnCopyLatencyReportClick(object sender, RoutedEventArgs e)
@@ -1012,6 +1151,8 @@ public partial class MainWindow : Window
 
     private void OnWindowSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        TxtProfileEditError.Text = string.Empty;
+        UpdateGameProfileCard();
         if (_loadingUi || _preselectingRememberedGame || WindowsList.SelectedItem is not TargetWindow window) return;
         ApplyProfileAutoSelection(window);
     }
@@ -1268,6 +1409,7 @@ public partial class MainWindow : Window
         TxtNavLiveHotkey.Text = _settings.LiveToggleHotkey;
         NavLiveHotkeyCard.Visibility = _liveHotkeyRegistered ? Visibility.Visible : Visibility.Collapsed;
         if (_trayLiveItem is not null) _trayLiveItem.Header = LiveMenuHeader();
+        UpdateGameProfileCard();
         if (_trayIcon is not null)
         {
             // Bez tytułu okna gry — podpowiedź ikony widać też na zrzutach i nagraniach pulpitu.
@@ -1333,7 +1475,8 @@ public partial class MainWindow : Window
             {
                 if (update.SubtitleText is { Length: > 0 } subtitle)
                 {
-                    _overlay.ShowSubtitle(subtitle, update.WindowBounds, _settings, update.PreserveSubtitleLifetime);
+                    _overlay.ShowSubtitle(subtitle, update.WindowBounds, _settings, update.PreserveSubtitleLifetime,
+                        update.SubtitleQualityWarning);
                 }
                 else
                 {

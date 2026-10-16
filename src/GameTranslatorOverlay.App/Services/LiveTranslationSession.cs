@@ -18,6 +18,8 @@ public sealed record LiveDisplayBlock(
     public GlyphCover? Cover { get; init; }
 
     public bool SameAsSource { get; init; }
+
+    public TranslationQualityFlags QualityIssues { get; init; }
 }
 
 /// <summary>
@@ -58,6 +60,7 @@ public sealed record LiveUpdate(
 {
     public bool ClearSubtitle { get; init; }
     public bool PreserveSubtitleLifetime { get; init; }
+    public bool SubtitleQualityWarning { get; init; }
 
     /// <summary>
     /// Komunikat dla gracza w nakładce (błąd dostawcy, Cache-only, start/stop live) —
@@ -424,6 +427,7 @@ public sealed class LiveTranslationSession(
             {
                 Cover = kv.Value.Cover,
                 SameAsSource = IsIdentity(kv.Value),
+                QualityIssues = kv.Value.QualityIssues,
             })
             .ToList();
 
@@ -605,6 +609,8 @@ public sealed class LiveTranslationSession(
                     // epokę — to NIE jest stop sesji. Pomijamy klatkę; następny cykl pójdzie
                     // już przez nowy pipeline. Bez tego rozróżnienia każda zmiana comboboxa
                     // podczas live po cichu zabijała całą pętlę.
+                    WithdrawProvisional(_displayed.Where(static p => p.Value.Provisional).Select(static p => p.Key).ToList(),
+                        "Live: ustawienia zmienione w trakcie klatki — wznawiam z nowym pipeline'em.", cancellationToken);
                     Emit(new LiveUpdate("Live: ustawienia zmienione w trakcie klatki — wznawiam z nowym pipeline'em."),
                         cancellationToken);
                 }
@@ -614,6 +620,8 @@ public sealed class LiveTranslationSession(
                     // ubić wielogodzinnej sesji — pomijamy klatkę i jedziemy dalej.
                     _consecutiveFailures++;
                     logger.LogWarning(ex, "Błąd cyklu live ({Count}/{Max})", _consecutiveFailures, MaxConsecutiveFailures);
+                    WithdrawProvisional(_displayed.Where(static p => p.Value.Provisional).Select(static p => p.Key).ToList(),
+                        "Live: pominięto klatkę z powodu błędu (szczegóły w logu).", cancellationToken);
                     if (_consecutiveFailures >= MaxConsecutiveFailures)
                     {
                         EmitStopped("Tryb live zatrzymany po serii błędów — szczegóły w logu diagnostycznym.", clock);
@@ -842,6 +850,7 @@ public sealed class LiveTranslationSession(
     {
         RectPx bounds;
         OcrBitmap? frameForOcr = null;
+        OcrBitmap? nativeForOcr = null;
         var ocrScaleBack = 1.0;
         var ocrRegion = default(RectPx);
         var capturedFrameRect = default(RectPx);
@@ -1007,10 +1016,13 @@ public sealed class LiveTranslationSession(
                     using var scaled = ScreenCapture.Rescale(source, factor);
                     frameForOcr = ScreenCapture.ToOcrBitmap(scaled);
                     ocrScaleBack = 1.0 / factor;
+                    if (!usedScreenFallback && options.BuildGlyphCovers() && orchestrator.StreamsPartialResults)
+                        nativeForOcr = ScreenCapture.ToOcrBitmap(source);
                 }
                 else
                 {
                     frameForOcr = ScreenCapture.ToOcrBitmap(source);
+                    if (!usedScreenFallback) nativeForOcr = frameForOcr;
                 }
             }
         }
@@ -1042,7 +1054,7 @@ public sealed class LiveTranslationSession(
             try
             {
                 await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, capturedFrameRect, captureMs, peakChanged,
-                        captureStartedTimestamp, usedScreenFallback, clock, cancellationToken)
+                        captureStartedTimestamp, usedScreenFallback, clock, cancellationToken, nativeForOcr)
                     .ConfigureAwait(false);
                 frameCompleted = !_frameDiscarded;
             }
@@ -1382,6 +1394,10 @@ public sealed class LiveTranslationSession(
 
     private void InvalidateScene(CancellationToken cancellationToken, System.Drawing.Bitmap? current = null)
     {
+        var followed = current is null
+            ? new Dictionary<string, TrackState>(StringComparer.Ordinal)
+            : _tracks.Where(p => _presentByTracking.Contains(p.Key) && p.Value.Absences == 0)
+                .ToDictionary(static p => p.Key, static p => p.Value, StringComparer.Ordinal);
         _ghosts.Clear();
         _tracks.Clear();
         _absenceSuspects.Clear();
@@ -1402,6 +1418,8 @@ public sealed class LiveTranslationSession(
             if (removedKeys.Length < _displayed.Count)
             {
                 RemoveLocalBlocks(removedKeys, cancellationToken, status: "Live: zmiana widoku — usuwam niepotwierdzone napisy.");
+                var moved = followed.ToDictionary(static p => p.Key, static p => p.Value.Moving, StringComparer.Ordinal);
+                foreach (var key in SceneCutTracking.Retained(moved, _displayed.Keys)) _tracks[key] = followed[key];
                 var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
                 if (bounds != _lastEmittedBounds)
                 {
@@ -1425,9 +1443,62 @@ public sealed class LiveTranslationSession(
             ClearOverlay: true), cancellationToken);
     }
 
+    private sealed record InterimWork(Func<Task> Arrived, Func<Task> PublishAsync);
+
+    private long _frameWarningGeneration;
+
+    private sealed class StreamedOutcomes(int count)
+    {
+        private readonly Lock _gate = new();
+        private readonly TranslationOutcome?[] _outcomes = new TranslationOutcome?[count];
+        private TaskCompletionSource _arrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private bool _fresh;
+        private bool _reset;
+
+        public void Report(int index, TranslationOutcome outcome)
+        {
+            if (index == PartialResults.Reset)
+            {
+                lock (_gate)
+                {
+                    Array.Clear(_outcomes);
+                    _reset = true;
+                    _fresh = true;
+                    _arrived.TrySetResult();
+                }
+                return;
+            }
+            if (index < 0 || index >= _outcomes.Length || outcome.TranslatedText is null) return;
+            lock (_gate)
+            {
+                _outcomes[index] = outcome;
+                _fresh = true;
+                _arrived.TrySetResult();
+            }
+        }
+
+        public Task Arrived()
+        {
+            lock (_gate) return _arrived.Task;
+        }
+
+        public (TranslationOutcome?[]? Snapshot, bool Reset) Take()
+        {
+            lock (_gate)
+            {
+                var reset = _reset;
+                _reset = false;
+                if (!_fresh) return (null, reset);
+                _fresh = false;
+                _arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                return ((TranslationOutcome?[])_outcomes.Clone(), reset);
+            }
+        }
+    }
+
     private async Task<T> AwaitWithSceneChecksAsync<T>(
         Task<T> operation, Stopwatch clock, CancellationToken cancellationToken,
-        long? abandonGeneration = null, long? ocrStartedTimestamp = null)
+        long? abandonGeneration = null, long? ocrStartedTimestamp = null, InterimWork? interim = null)
     {
         void EnsureCurrent()
         {
@@ -1457,9 +1528,16 @@ public sealed class LiveTranslationSession(
         {
             while (!operation.IsCompleted)
             {
-                var wait = nextCheckDelay;
+                var checkAt = clock.Elapsed + nextCheckDelay;
                 nextCheckDelay = interval;
-                await DelayWithFastTrackAsync(wait, operation, clock, polling.Token).ConfigureAwait(false);
+                while (true)
+                {
+                    var wake = interim is null ? (Task)operation : Task.WhenAny(operation, interim.Arrived());
+                    await DelayWithFastTrackAsync(checkAt - clock.Elapsed, wake, clock, polling.Token).ConfigureAwait(false);
+                    if (operation.IsCompleted || interim is null || !interim.Arrived().IsCompleted) break;
+                    EnsureCurrent();
+                    await interim.PublishAsync().ConfigureAwait(false);
+                }
                 if (operation.IsCompleted) break;
                 try { CheckSceneWhileBusy(clock, cancellationToken); }
                 catch (Exception) when (!cancellationToken.IsCancellationRequested)
@@ -1648,7 +1726,7 @@ public sealed class LiveTranslationSession(
             {
                 _invalidatedTranslations.Add(old.NormalizedTranslation);
                 removed = true;
-                if (ghostSince is { } since && old.SourceText.Length > 0
+                if (ghostSince is { } since && old.SourceText.Length > 0 && !old.Provisional
                     && (ghostKeys is null || ghostKeys.Contains(key)))
                     _ghosts[key] = (old with { Misses = 0 }, since, inSubtitle.Contains(key), true);
             }
@@ -1663,6 +1741,7 @@ public sealed class LiveTranslationSession(
             {
                 ClearSubtitle = updatedSubtitle is { Length: 0 },
                 PreserveSubtitleLifetime = updatedSubtitle is not null,
+                SubtitleQualityWarning = _subtitleContent.HasFlagged,
             }, cancellationToken);
     }
 
@@ -1715,9 +1794,10 @@ public sealed class LiveTranslationSession(
     private async Task ProcessFrameAsync(
         OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr, RectPx capturedFrameRect,
         long captureMs, double peakChangedFraction, long captureStartedTimestamp,
-        bool usedScreenFallback, Stopwatch clock, CancellationToken cancellationToken)
+        bool usedScreenFallback, Stopwatch clock, CancellationToken cancellationToken, OcrBitmap? nativeFrame = null)
     {
         var generation = _sceneValidity.Generation;
+        _frameWarningGeneration = orchestrator.QualityWarnings.Generation;
         var ocrWatch = Stopwatch.StartNew();
         var ocrChecksBefore = _diagnosticSceneChecks;
         var ocrCheckMsBefore = _diagnosticSceneCheckMs;
@@ -2031,8 +2111,9 @@ public sealed class LiveTranslationSession(
                     // Wynik próby trafia do tłumaczenia: znane teksty nie są szukane w bazie
                     // drugi raz (podwójny licznik użyć i zbędne zapytanie na gorącej ścieżce).
                     Task<IReadOnlyList<TranslationOutcome>>? translation;
+                    var streamed = coverTask is not null && !usedScreenFallback && orchestrator.StreamsPartialResults ? new StreamedOutcomes(texts.Count) : null;
                     while (!_translationWork.TryStart(
-                               () => orchestrator.TranslateTextsAsync(texts, local, cancellationToken),
+                               () => orchestrator.TranslateTextsAsync(texts, local, streamed is null ? null : streamed.Report, cancellationToken),
                                out translation))
                     {
                         // No FIFO of old frames. If both slots are occupied, watch the scene
@@ -2040,9 +2121,12 @@ public sealed class LiveTranslationSession(
                         await AwaitWithSceneChecksAsync(_translationWork.WaitForCapacityAsync(),
                             clock, cancellationToken, generation).ConfigureAwait(false);
                     }
-                    if (coverTask is not null && local.Any(static o => o is not null) && !translation!.IsCompleted)
+                    IReadOnlyList<GlyphCover?>? earlyCovers = null;
+                    var earlyCoversAwaited = false;
+                    async Task<IReadOnlyList<GlyphCover?>?> EarlyCoversAsync()
                     {
-                        IReadOnlyList<GlyphCover?>? earlyCovers = null;
+                        if (earlyCoversAwaited || coverTask is null) return earlyCovers;
+                        earlyCoversAwaited = true;
                         try
                         {
                             earlyCovers = await coverTask.ConfigureAwait(false);
@@ -2051,16 +2135,32 @@ public sealed class LiveTranslationSession(
                         {
                             logger.LogDebug(ex, "Łatka napisu nie powstała");
                         }
-                        if (earlyCovers is not null && !translation.IsCompleted)
-                            PublishKnownBlocks(keyed, local, earlyCovers, sampledStyles, inheritFrom, earlyKeys, frame, ocrRegion, scaleBack, generation, cancellationToken);
+                        return earlyCovers;
                     }
+                    if (coverTask is not null && local.Any(static o => o is not null) && !translation!.IsCompleted)
+                    {
+                        if (await EarlyCoversAsync().ConfigureAwait(false) is { } knownCovers && !translation.IsCompleted)
+                            PublishKnownBlocks(keyed, local, knownCovers, sampledStyles, inheritFrom, earlyKeys, frame, ocrRegion, scaleBack, generation, cancellationToken);
+                    }
+                    var interim = streamed is null
+                        ? null
+                        : new InterimWork(streamed.Arrived, async () =>
+                        {
+                            var (partial, reset) = streamed.Take();
+                            if (reset && !translation!.IsCompleted) WithdrawProvisional(earlyKeys, "Live: model pomylił liczbę linii — czekam na pewne tłumaczenia.", cancellationToken);
+                            if (partial is null || translation!.IsCompleted) return;
+                            if (await EarlyCoversAsync().ConfigureAwait(false) is { } streamedCovers && !translation.IsCompleted)
+                                PublishKnownBlocks(keyed, partial, streamedCovers, sampledStyles, inheritFrom, earlyKeys, frame, ocrRegion, scaleBack,
+                                    generation, cancellationToken, provisional: true, proof: nativeFrame, proofFrameRect: capturedFrameRect);
+                        });
                     outcomes = await AwaitWithSceneChecksAsync(translation!,
-                        clock, cancellationToken, generation).ConfigureAwait(false);
+                        clock, cancellationToken, generation, interim: interim).ConfigureAwait(false);
                 }
             }
         }
         catch (SceneSupersededException)
         {
+            WithdrawProvisional(earlyKeys, "Live: zmiana widoku — usuwam niepotwierdzone napisy.", cancellationToken);
             _refreshAfterBusyChanges = true;
             _frameDiscarded = true;
             return;
@@ -2087,10 +2187,15 @@ public sealed class LiveTranslationSession(
         {
             // The provider may fill its cache, but no block/style/survivor from the
             // obsolete frame is allowed back onto the overlay.
+            WithdrawProvisional(earlyKeys, "Live: zmiana widoku — usuwam niepotwierdzone napisy.", cancellationToken);
             _refreshAfterBusyChanges = true;
             _frameDiscarded = true;
             return;
         }
+
+        DropProvisional(Enumerable.Range(0, keyed.Count)
+            .Where(i => outcomes[i].TranslatedText is null)
+            .Select(i => keyed[i].Key));
 
         var freshKeys = new List<string>();
         var claimedBoxes = new List<RectPx>();
@@ -2225,7 +2330,9 @@ public sealed class LiveTranslationSession(
                 SourceText: keyed[i].NormalizedText,
                 PendingBackgroundRgb: pendingBackgroundRgb,
                 Probe: ProbeReference(frame, keyed[i].Block.Box, ocrRegion, scaleBack, sampled),
-                Cover: cover);
+                Cover: cover,
+                QualityIssues: outcome.QualityIssues);
+            orchestrator.QualityWarnings.Record(outcome, _frameWarningGeneration);
             if (caughtUp is not null && cover is not null) _tracks[key] = new TrackState(cover, [], Moving: true);
             // Reference the source box, not the presentation box stabilized above.
             // A rescaled OCR image cannot prove equality with future native pixels.
@@ -2244,6 +2351,23 @@ public sealed class LiveTranslationSession(
                 freshKeys.Add(key);
             }
         }
+        foreach (var (key, block) in next)
+        {
+            if (_displayed.TryGetValue(key, out var earlier) && earlier.Provisional
+                && earlier.NormalizedTranslation != block.NormalizedTranslation)
+                _invalidatedTranslations.Add(earlier.NormalizedTranslation);
+        }
+        var unsettled = new List<string>();
+        for (var i = 0; i < keyed.Count; i++)
+        {
+            var key = keyed[i].Key;
+            if (next.ContainsKey(key) || !_displayed.TryGetValue(key, out var shown) || !shown.Provisional) continue;
+            if (outcomes[i].TranslatedText is { } final && TextNormalizer.Normalize(final) == shown.NormalizedTranslation)
+                _displayed[key] = shown with { Provisional = false };
+            else
+                unsettled.Add(key);
+        }
+        DropProvisional(unsettled);
         // Okres łaski: bloki, których ten przebieg nie widział, nie znikają od razu —
         // Windows OCR miewa puste przebiegi na niezmienionej scenie, a bez łaski każde
         // takie czknięcie zdejmowało i przywracało całą nakładkę (miganie).
@@ -2298,7 +2422,7 @@ public sealed class LiveTranslationSession(
         {
             foreach (var (key, block) in _displayed)
             {
-                if (!next.ContainsKey(key) && block.SourceText.Length > 0)
+                if (!next.ContainsKey(key) && block.SourceText.Length > 0 && !block.Provisional)
                 {
                     _ghosts[key] = (block with { Misses = 0 }, _cycleTime, false, false);
                 }
@@ -2334,16 +2458,19 @@ public sealed class LiveTranslationSession(
             .ToList();
         var preserveSubtitle = false;
         string? subtitle = null;
+        var flaggedSubtitle = freshKeys.Concat(returnedSubtitle.Select(static pair => pair.Key))
+            .Where(key => next[key].QualityIssues != TranslationQualityFlags.None)
+            .ToList();
         if (freshKeys.Count > 0)
         {
             subtitle = _subtitleContent.Replace(freshKeys
                 .Select(key => new KeyValuePair<string, string>(key, next[key].TranslatedText))
-                .Concat(returnedSubtitle));
+                .Concat(returnedSubtitle), flaggedSubtitle);
         }
         else if (returnedSubtitle.Count > 0)
         {
             preserveSubtitle = !_subtitleContent.IsEmpty;
-            subtitle = _subtitleContent.Restore(returnedSubtitle);
+            subtitle = _subtitleContent.Restore(returnedSubtitle, flaggedSubtitle);
         }
 
         _displayed.Clear();
@@ -2414,6 +2541,7 @@ public sealed class LiveTranslationSession(
             {
                 Notice = notice,
                 PreserveSubtitleLifetime = preserveSubtitle,
+                SubtitleQualityWarning = _subtitleContent.HasFlagged,
             },
             cancellationToken);
     }
@@ -2421,10 +2549,12 @@ public sealed class LiveTranslationSession(
     private void PublishKnownBlocks(
         IReadOnlyList<KeyedTextBlock> keyed, IReadOnlyList<TranslationOutcome?> local, IReadOnlyList<GlyphCover?> covers,
         IReadOnlyList<BlockColors> sampledStyles, IReadOnlyDictionary<string, LiveOverlayBlock> inheritFrom, ISet<string> published,
-        OcrBitmap frame, RectPx ocrRegion, double scaleBack, long generation, CancellationToken cancellationToken)
+        OcrBitmap frame, RectPx ocrRegion, double scaleBack, long generation, CancellationToken cancellationToken,
+        bool provisional = false, OcrBitmap? proof = null, RectPx proofFrameRect = default)
     {
         if (cancellationToken.IsCancellationRequested || !_sceneValidity.IsCurrent(generation) || _pendingTextGone) return;
         using var confirmation = new MotionConfirmation(this);
+        using var still = new StillConfirmation(this, proof, ocrRegion, proofFrameRect);
         var added = 0;
         for (var i = 0; i < keyed.Count && i < local.Count && i < covers.Count; i++)
         {
@@ -2434,6 +2564,8 @@ public sealed class LiveTranslationSession(
             var box = keyed[i].Block.Box;
             var lineHeight = TextBlockMetrics.MedianLineHeight(keyed[i].Block);
             if (_displayed.Values.Any(other => Overlaps(other.WindowRelativeBox, box))) continue;
+            if (provisional && !(_frameCapturedInMotion || _motionDuringProcessing) && !still.Unchanged(box)
+                && confirmation.Confirm(cover) is not (true, null)) continue;
             var caughtUp = false;
             if (_frameCapturedInMotion || _motionDuringProcessing)
             {
@@ -2462,7 +2594,12 @@ public sealed class LiveTranslationSession(
                 Texture: sampled.Texture,
                 SourceText: keyed[i].NormalizedText,
                 Probe: ProbeReference(frame, keyed[i].Block.Box, ocrRegion, scaleBack, sampled),
-                Cover: cover);
+                Cover: cover,
+                QualityIssues: local[i]!.QualityIssues)
+            {
+                Provisional = provisional,
+            };
+            if (!provisional) orchestrator.QualityWarnings.Record(local[i], _frameWarningGeneration);
             _captureBoxes[key] = keyed[i].Block.Box;
             published.Add(key);
             added++;
@@ -2470,8 +2607,60 @@ public sealed class LiveTranslationSession(
         if (added == 0) return;
         var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
         _lastEmittedBounds = bounds;
-        Emit(new LiveUpdate($"Live: {added} znanych napisów od razu, reszta czeka na tłumaczenie.",
+        Emit(new LiveUpdate(provisional
+                ? $"Live: {added} pierwszych tłumaczeń z odpowiedzi modelu, reszta jeszcze spływa."
+                : $"Live: {added} znanych napisów od razu, reszta czeka na tłumaczenie.",
             BuildDisplayList(bounds), WindowBounds: bounds), cancellationToken);
+    }
+
+    private void WithdrawProvisional(IEnumerable<string> keys, string status, CancellationToken cancellationToken)
+    {
+        var before = _displayed.Count;
+        DropProvisional(keys);
+        if (_displayed.Count == before) return;
+        var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
+        _lastEmittedBounds = bounds;
+        Emit(new LiveUpdate(status, BuildDisplayList(bounds), WindowBounds: bounds), cancellationToken);
+    }
+
+    private void DropProvisional(IEnumerable<string> keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!_displayed.TryGetValue(key, out var shown) || !shown.Provisional) continue;
+            _displayed.Remove(key);
+            _invalidatedTranslations.Add(shown.NormalizedTranslation);
+            _ghosts.Remove(key);
+            _tracks.Remove(key);
+            _absenceSuspects.Remove(key);
+            _blockFingerprints.Remove(key);
+            _readings.Reset(key);
+        }
+    }
+
+    private sealed class StillConfirmation(LiveTranslationSession session, OcrBitmap? proof, RectPx ocrRegion, RectPx frameRect) : IDisposable
+    {
+        private System.Drawing.Bitmap? _frame;
+        private bool _tried;
+
+        public bool Unchanged(RectPx box)
+        {
+            if (proof is null || frameRect.IsEmpty) return false;
+            var sourceBox = box.Inflate(3).Intersect(ocrRegion);
+            if (sourceBox.IsEmpty
+                || TextRegionFingerprint.FromBitmap(proof, sourceBox.Offset(-ocrRegion.X, -ocrRegion.Y)) is not { } reference) return false;
+            if (!_tried)
+            {
+                _tried = true;
+                var (fresh, fallback) = session.CaptureGameFrame();
+                if (fresh is not null && !fallback && fresh.Width == frameRect.Width && fresh.Height == frameRect.Height) _frame = fresh;
+                else fresh?.Dispose();
+            }
+            return _frame is not null
+                && reference.Matches(ScreenCapture.ComputeTextFingerprint(_frame, sourceBox, ref session._presenceRowBuffer));
+        }
+
+        public void Dispose() => _frame?.Dispose();
     }
 
     private sealed class MotionConfirmation(LiveTranslationSession session) : IDisposable

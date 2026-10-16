@@ -7,24 +7,26 @@ i wyświetla tłumaczenie nad grą — **nie dotykając plików ani procesu gry*
 `CorpusTool`, które uruchamiasz sam — patrz [Spolszczenie z wyprzedzeniem](#spolszczenie-z-wyprzedzeniem-korpus-gry).
 
 Projekt jest przeznaczony do różnych gier; nie wymaga profilu konkretnego tytułu.
-Instrukcja opisuje wydanie 0.7.0 — szczegóły w
+Instrukcja opisuje wydanie 0.8.0 — szczegóły w
 [historii zmian](https://github.com/KubaZx/Game_Translator/blob/main/CHANGELOG.md).
 
-**Nowe w 0.7.0** (w skrócie):
+**Nowe w 0.8.0** (w skrócie):
 
-- **nowe okno aplikacji**: ciemny wygląd, własna belka i sekcje po lewej (Pulpit, Gra,
-  Tłumaczenie, Wygląd nakładki, Dane i słownik, O programie) — [opis](#okno-aplikacji),
-- **ikony klawiszy ze środka zdania** (Shift, Tab, mysz, WASD) stoją w polskim zdaniu w trybie
-  zakrywania, w miejscu, w którym wypada ich słowo; w dymkach i na pasku napisów zostaje znak ▢,
-- **imię mówiącego** nad oknem dialogu jest osobnym napisem, a w Escape Academy dostaje szeryfowy
-  krój Zilla Slab, jak w grze,
-- tłumaczenie jedzie razem z napisem w ruchu kamery **we wszystkich trybach** (także „Pod
-  oryginałem” i przy pasku napisów), a napis na ścianie jest śledzony także wtedy, gdy rośnie albo
-  maleje przy podchodzeniu,
-- wybór okna innej gry z profilem **przełącza profil sam** (dotąd tylko przy „brak profilu”).
+- **własny profil gry z okna** — karta **Profil tej gry** w sekcji **Gra**
+  ([opis](#własne-profile-gier)),
+- **zmiana skrótów w oknie** — **O programie → Skróty klawiszowe** ([opis](#skróty)),
+- **ostrzeżenia kontroli jakości** widać w oknie, w panelu wyniku i w dymkach nakładki
+  ([opis](#kontrola-jakości-tłumaczeń)),
+- **pierwsze linie od razu** przy modelach językowych (Claude, serwer zgodny z OpenAI) — gotowe
+  linie trafiają nad grę, zanim model skończy całą odpowiedź ([opis](#strumieniowanie-odpowiedzi-modeli)),
+- ciemne napisy na jasnych tabliczkach z ramką dostają poprawny kolor i zakrycie, a napis jadący
+  z kamerą nie gubi się przy gwałtownym skoku obrazu.
 
-Zmian z 0.7.0 nikt jeszcze nie sprawdzał w grze na żywo: nakładkę sprawdzono na klatkach 4K
-i nagraniach z Escape Academy (narzędzia OverlayPreview i MotionLab), zachowanie w powtórkach
+Poprzednie wydanie (0.7.0) przyniosło nowe okno aplikacji, ikony klawiszy w polskim zdaniu,
+imię mówiącego w kroju gry i śledzenie napisów w ruchu kamery we wszystkich trybach.
+
+Zmian z 0.7.0 i 0.8.0 nikt jeszcze nie sprawdzał w grze na żywo: nakładkę sprawdzono na klatkach
+4K i nagraniach z Escape Academy (narzędzia OverlayPreview i MotionLab), zachowanie w powtórkach
 syntetycznych (SceneReplay), a okno aplikacji na renderach (UiPreview). Uwagi z gry zgłaszaj
 według [ostatniej sekcji](#jak-zgłosić-problem-jakości).
 
@@ -42,15 +44,15 @@ Okno ma po lewej sześć sekcji; przełączasz je kliknięciem, a zmiany ustawie
 
 | Sekcja | Co tam jest |
 |---|---|
-| **Pulpit** | wybrana gra, duży przycisk **Start live** / **Stop live**, przełączniki **Cache-only**, **Prywatny** i **Komunikaty w nakładce**, kafelki „Przetłumacz region” i „Ukryj / pokaż nakładkę”, liczniki sesji i ostatni wynik |
-| **Gra** | lista **Uruchomione okna** (kliknij okno gry), **Odśwież**, **Podgląd okna** i **Test OCR** — co widzi tłumacz; obraz zostaje na komputerze |
-| **Tłumaczenie** | języki, dostawca tłumaczeń (karty) z kluczem API, **Profil gry** i **Postać gracza** |
-| **Wygląd nakładki** | **Położenie dymków**, **Wyświetlanie w trybie live**, **Tło dymków**, **Wyświetlanie wyniku**, **Krój czcionki** i **Rozmiar czcionki** |
-| **Dane i słownik** | **Słownik…**, cache tłumaczeń (eksport, import, czyszczenie), szybkość i folder danych |
-| **O programie** | wersja, zastrzeżenie, prywatność i lista skrótów |
+| **Pulpit** | wybrana gra, duży przycisk **Start live** / **Stop live**, przełączniki **Cache-only**, **Prywatny** i **Komunikaty w nakładce**, kafelki „Przetłumacz region” i „Ukryj / pokaż nakładkę”, liczniki sesji (w tym **Ostrzeżenia jakości** i **Ponowienia**) i ostatni wynik |
+| **Gra** | lista **Uruchomione okna** (kliknij okno gry), **Odśwież**, karta **Profil tej gry**, **Podgląd okna** i **Test OCR** — co widzi tłumacz; obraz zostaje na komputerze |
+| **Tłumaczenie** | języki, dostawca tłumaczeń (karty) z kluczem API i — przy modelach językowych — przełącznikiem **Pierwsze linie od razu**, **Profil gry** i **Postać gracza** |
+| **Wygląd nakładki** | **Położenie dymków**, **Wyświetlanie w trybie live**, **Tło dymków**, **Znacznik ostrzeżeń w nakładce**, **Wyświetlanie wyniku**, **Krój czcionki** i **Rozmiar czcionki** |
+| **Dane i słownik** | **Słownik…**, **Ostatnie ostrzeżenia**, cache tłumaczeń (eksport, import, czyszczenie), szybkość i folder danych |
+| **O programie** | wersja, zastrzeżenie, prywatność i skróty klawiszowe (z edycją) |
 
 Belka u góry pokazuje stan trybu live (wyłączony / działa / wstrzymany), a pasek na dole —
-komunikaty i liczniki (zapytania API, cache, słownik, błędy). Minimalizacja chowa okno do
+komunikaty i liczniki (zapytania API, cache, słownik, ostrzeżenia, błędy). Minimalizacja chowa okno do
 zasobnika — ikona z dymkiem „PL” przy zegarze. Okno jest wykluczone z przechwytywania obrazu,
 więc nie widać go na zrzutach ekranu ani w nakładce.
 
@@ -138,6 +140,29 @@ Claude sam ponawia zapytanie na modelu zastępczym wskazanym przez Anthropic; do
 modeli `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5` i `claude-fable-5-1`.
 Opłaty rozlicza Anthropic według zużytych tokenów, nie znaków.
 
+### Strumieniowanie odpowiedzi modeli
+
+Przy **Claude** i **Modelu językowym** (serwer zgodny z OpenAI) przełącznik **Pierwsze linie od
+razu** (sekcja **Tłumaczenie**, panel dostawcy; domyślnie włączony) każe modelowi odsyłać
+odpowiedź strumieniem. W trybie live gotowe linie trafiają nad grę, zanim model skończy całą
+odpowiedź — w scenie testowej z 5 liniami i symulowanym dostawcą pierwsza linia pojawiała się
+po mniej więcej połowie czasu (ok. 1,5 s zamiast 2,9 s), a całość tak samo szybko jak bez
+strumienia; na prawdziwym API tego jeszcze nie mierzono. Koszt zapytania się nie zmienia.
+
+- Wczesna linia przechodzi tę samą kontrolę jakości co wynik końcowy; linia z problemem czeka na
+  zwykłe ponowienie. Do cache, pamięci dialogu i liczników trafia tylko wynik końcowy.
+- Wynik końcowy decyduje: inny tekst podmienia linię w miejscu, a błąd albo odmowa modelu zdejmuje
+  wcześnie pokazane linie. Gdy model zwróci złą liczbę linii, wczesne linie znikają od razu,
+  a partia od 2 do 12 linii jest tłumaczona linia po linii (dłuższa kończy się błędem tłumaczenia
+  — jak bez strumienia).
+- Na nieruchomej scenie linia pojawia się tylko wtedy, gdy świeże przechwycenie potwierdza, że
+  tekst w tym miejscu się nie zmienił. Przy przechwytywaniu zrzutem ekranu (pełny ekran bez obsługi
+  okna) linie czekają na całą odpowiedź.
+- Serwer zgodny z OpenAI dostaje w trybie live `stream: true` i `stream_options.include_usage`.
+  Serwer, który odrzuci strumień błędem, dostaje zwykłe zapytanie i jest zapamiętany jako „bez
+  strumienia” do końca działania aplikacji. DeepL, Azure i Google działają jak dotąd.
+- Czas pierwszej linii widać w karcie **Szybkość** (etap „Pierwsza linia”).
+
 ### Pamięć dialogu i postać gracza (tylko Claude i model językowy)
 
 Model językowy dostaje do 6 ostatnich linii z tej sesji (łącznie ok. 1500 znaków) razem
@@ -146,8 +171,9 @@ z tłumaczeniami, które **sam już dla nich zwrócił**. Dzięki temu trzyma si
 z cache i słownika ani wyniki puste, nieprzetłumaczone i „rozgadane”. Ręczna poprawka linii
 (**Popraw**) zastępuje jej tłumaczenie w pamięci, więc kolejne linie trzymają się poprawionej
 formy. Pamięć jest tylko w RAM; czyści ją zmiana dostawcy, profilu lub ustawień tłumaczenia
-i zamknięcie programu. Zmiana samego wyglądu (czcionka, tło, styl napisów, skróty,
-komunikaty) jej nie czyści — status pokazuje wtedy „Wygląd zapisany.”. DeepL dostaje jako
+i zamknięcie programu. Zmiana samego wyglądu (czcionka, tło, styl napisów, komunikaty,
+znacznik ostrzeżeń), skrótów ani przełącznika **Pierwsze linie od razu** jej nie czyści — przy
+zmianie wyglądu status pokazuje „Wygląd zapisany.”. DeepL dostaje jako
 kontekst tylko angielskie linie, jak dotąd.
 
 **Postać gracza** (sekcja **Tłumaczenie**, obok profilu gry): *nieznana*, *mężczyzna* albo
@@ -215,7 +241,23 @@ i końcówka `.exe` nie mają znaczenia.
 | Path of Exile 2 | `PathOfExile.exe`, `PathOfExileSteam.exe`, `PathOfExile_x64.exe`, `PathOfExile_x64Steam.exe` | słownik terminów PoE2, OCR pod drobny tekst |
 | Escape Academy | `Escape Academy.exe` | krój Lexend Deca, Zilla Slab dla imion i tytułów, pomijany zegar poziomu, recepta korpusu |
 
-**Własne profile.** Profil innej gry możesz dodać sam: utwórz folder
+### Własne profile gier
+
+Najprościej z okna: w sekcji **Gra** zaznacz okno gry, a w karcie **Profil tej gry** kliknij
+**Utwórz profil dla tej gry**. Nazwa podpowiada się z tytułu okna (możesz ją zmienić), proces
+`.exe` bierze się z okna, a język — z bieżących ustawień. Profil zapisuje się w folderze danych
+(`%LOCALAPPDATA%\GameTranslatorOverlay\profiles\<id>\profile.json`, `id` to nazwa bez polskich
+znaków, np. `mroczna-latarnia`) i od razu się włącza, bez restartu. Zawiera tylko nazwę, proces
+i język — nie zmienia ustawień OCR ani wykrywania zmian.
+
+Gdy okno ma już profil, karta pokazuje, który i skąd (**z zestawu** albo **własny**) i czy jest
+włączony. Własny profil można **przemianować** (zmienia się tylko jego nazwa; komentarze dopisane
+ręcznie w pliku znikają) albo **usunąć** po potwierdzeniu — znika wyłącznie jego folder w folderze
+danych. Profili z zestawu nie da się zmienić ani usunąć. W trakcie trybu live karta jest zablokowana
+(przeładowanie profili przerwałoby tłumaczenia w locie), a w **trybie prywatnym** nie da się tworzyć
+ani przemianowywać profili, bo zapisałyby nazwę gry na dysku.
+
+Ręcznie (np. żeby dopisać słownik albo ustawienia OCR): utwórz folder
 `%LOCALAPPDATA%\GameTranslatorOverlay\profiles\<id>\` i zapisz w nim `profile.json`, np.:
 
 ```json
@@ -232,8 +274,8 @@ i końcówka `.exe` nie mają znaczenia.
 jej nazwę, a OCR, wykrywanie zmian i krój napisów zostają z ustawień aplikacji. Pozostałe pola
 (słownik, OCR, krój) opisuje [ARCHITECTURE.md](ARCHITECTURE.md#profil-gry--profilesidprofilejson).
 Profile z folderu danych nie są nadpisywane przy aktualizacji programu; profil o tym samym `id` co
-profil z zestawu jest pomijany (ostrzeżenie w logu). Nowy profil wczytuje się po ponownym
-uruchomieniu aplikacji.
+profil z zestawu jest pomijany (ostrzeżenie w logu). Profil dopisany ręcznie wczytuje się po
+ponownym uruchomieniu aplikacji; utworzony w oknie — od razu.
 
 ### Start i stop live skrótem (Ctrl+Shift+L)
 
@@ -256,9 +298,9 @@ Menu ikony w zasobniku ma pozycję **▶ Start live na aktywnej grze** (w trakci
 **⏹ Stop live**); podpowiedź ikony pokazuje „live: włączony / wyłączony”. Gdy skrót udało się
 zarejestrować, widać go pod przyciskiem **Start live** i w karcie **Skrót live** w menu okna.
 
-Skrót zmienisz w `settings.json` (folder danych) polem `liveToggleHotkey`, np.
-`"liveToggleHotkey": "Ctrl+Alt+F9"`. Gdy skrót jest zajęty przez inny program albo zapisany
-błędnie, pasek statusu to pokazuje, a reszta aplikacji działa.
+Skrót zmienisz w oknie: **O programie → Skróty klawiszowe** ([opis](#skróty)). Gdy skrót jest
+zajęty przez inny program albo zapisany błędnie, pasek statusu i edytor skrótów to pokazują,
+a reszta aplikacji działa.
 
 Ograniczenia:
 
@@ -609,6 +651,8 @@ było szybszych):
 - **Nowy tekst** — od przechwycenia klatki do gotowego napisu, gdy trzeba było zapytać dostawcę,
 - **Znany** — to samo dla tekstu z cache albo słownika,
 - **nazwa dostawcy** (np. DeepL) — samo zapytanie do dostawcy,
+- **Pierwsza linia** (tylko strumień Claude albo modelu językowego) — od wysłania zapytania do
+  pierwszej gotowej linii odpowiedzi,
 - **OCR** i **Klatka** — rozpoznanie tekstu i przechwycenie obrazu.
 
 **Kopiuj raport** kopiuje szczegóły do schowka (bez tekstu z gry), a **Wyzeruj** zaczyna
@@ -632,7 +676,26 @@ płatne zapytanie, liczone w limicie znaków sesji (przy wyczerpanym limicie pon
 DeepL, Azure i Google nie są ponawiane, bo zwróciłyby to samo. Przy następnym wystąpieniu
 oznaczony tekst jest tłumaczony ponownie jeszcze raz; jeśli problem zostaje, wynik jest
 ostateczny. Razem tekst z trwałym problemem kosztuje najwyżej 3 zapytania u modeli językowych
-i 2 u DeepL/Azure/Google. Opis problemu nie jest jeszcze pokazywany w oknie ani w nakładce.
+i 2 u DeepL/Azure/Google.
+
+Gdzie widać ostrzeżenia:
+
+- **Pulpit**: kafelek **Ostrzeżenia jakości** (różne tłumaczenia oznaczone w tej sesji; liczba
+  robi się bursztynowa, gdy są) i **Ponowienia** (płatne drugie zapytania do modelu), chip „Ostrzeżenia N” na pasku stanu.
+- **Dane i słownik → Ostatnie ostrzeżenia**: do 20 ostatnich pozycji z godziną, oryginałem,
+  tłumaczeniem i powodem (chip z powodem: „zmienione liczby”, „bez tłumaczenia”, „za długie”;
+  podpowiedź po najechaniu go wyjaśnia, a przy bloku z kilku akapitów zaczyna się od „Dotyczy co
+  najmniej jednego z fragmentów bloku.”).
+  **Popraw** zapisuje ręczną korektę tak samo jak panel wyniku, z profilem i językami z chwili
+  ostrzeżenia. **Wyczyść** opróżnia listę (licznik na Pulpicie zostaje). Lista jest tylko w pamięci —
+  nigdy na dysku — i czyści się przy włączeniu albo wyłączeniu trybu prywatnego.
+- **Panel wyniku** (Ctrl+Shift+T): bursztynowy chip „⚠ powód” przy linii z ostrzeżeniem.
+- **Nakładka**: bursztynowy rożek w rogu dymka pod oryginałem, dymka ręcznej nakładki i paska
+  napisów; przy tle „Brak” — kropka obok tekstu. W dymkach **nigdy** w trybie „Na oryginale
+  (zakrywa)”, bo napis ma wyglądać jak w grze; pasek napisów ma znacznik przy każdym położeniu. Wyłączysz go przełącznikiem **Znacznik ostrzeżeń w nakładce**
+  (sekcja **Wygląd nakładki**; zmiana działa od razu).
+
+Częsty fałszywy alarm „zmienione liczby” to zmiana zapisu godziny (np. 10:30 PM → 22:30).
 
 ## Słownik i dane
 
@@ -665,7 +728,11 @@ W Cache-only przy niedziałającej bazie nic nie jest wysyłane.
 - **Tryb prywatny**: nic nie zapisuje się na dysku — cache działa tylko w pamięci,
   a termin dodany przyciskiem **Słownik** w panelu wyniku obowiązuje do końca sesji. Glosariusz DeepL nie jest wtedy tworzony, a terminy
   dodane w tym trybie nigdy do niego nie trafiają. Ostatnia gra nie jest zapisywana
-  w `settings.json`.
+  w `settings.json`, a tworzenie i przemianowywanie własnych profili gier jest zablokowane.
+- **Lista ostrzeżeń jakości** (Dane i słownik) jest tylko w pamięci programu i czyści się przy
+  przełączeniu trybu prywatnego.
+- **Własne profile gier** zapisane w folderze danych zawierają nazwę gry (domyślnie z tytułu okna)
+  i nazwę procesu.
 - **Tryb Cache-only**: tłumaczenie korzysta z lokalnych wyników i nie wysyła brakującego tekstu do dostawcy.
 - **Korpus gry**: plik korpusu i baza tłumaczeń nie są nigdzie wysyłane. Gdy odczyt z ekranu
   zostanie dopasowany do tekstu korpusu, do dostawcy może trafić pełne zdanie z korpusu — także
@@ -682,8 +749,20 @@ W Cache-only przy niedziałającej bazie nic nie jest wysyłane.
 | Ctrl+Shift+H | ukryj / pokaż nakładkę |
 | Esc lub Ctrl+Shift+T (podczas zaznaczania) | anuluj |
 
-Skróty można zmienić w pliku `settings.json` w folderze danych (`translateHotkey`,
-`toggleOverlayHotkey`, `liveToggleHotkey`; wymagany modyfikator Ctrl/Alt/Shift dla liter i cyfr).
+Skróty zmienisz w **O programie → Skróty klawiszowe**: kliknij pole skrótu i wciśnij nową
+kombinację; **Esc** anuluje. Zmiana działa od razu i zapisuje się w `settings.json`
+(`translateHotkey`, `toggleOverlayHotkey`, `liveToggleHotkey`). **Przywróć domyślne** wraca do
+Ctrl+Shift+T, Ctrl+Shift+L i Ctrl+Shift+H — wszystkie naraz albo żaden, gdy któryś zajmuje inny
+program.
+
+- Litera i cyfra wymagają Ctrl, Alt albo Win (sam Shift nie wystarczy); klawisze F1–F24 mogą być same.
+- Edytor odrzuca: ten sam skrót dla dwóch czynności, samo Esc, Alt+F4, Ctrl+C/V/X/Z/A, sam Shift
+  z literą lub cyfrą (blokowałby wielkie litery, np. na czacie gry) oraz **Ctrl+Alt z literą lub
+  cyfrą** — w Windows to AltGr, więc skrót zablokowałby polskie znaki (ą, ę, ł…).
+- Skrót zajęty przez inny program system zwykle „połyka”: gdy po wciśnięciu w polu nic się nie
+  zmienia, wybierz inną kombinację. Skrót, którego nie udało się zarejestrować przy starcie, edytor
+  oznacza ostrzeżeniem.
+- Esc anulujący zaznaczanie regionu jest stały.
 
 ## Rozwiązywanie problemów
 
@@ -715,7 +794,7 @@ Skróty można zmienić w pliku `settings.json` w folderze danych (`translateHot
 | Widać `[PL]` i nadal angielski tekst | wybrano Mock; do prawdziwego tłumaczenia wybierz innego dostawcę i skonfiguruj go |
 | Live jest opóźniony lub znika przy ruchu | zatrzymaj na chwilę kamerę; sprawdź osobno czas nowego wyniku i znikania starego; porównaj z ręcznym regionem |
 | W Cache-only nie pojawia się nowy opis | tego tekstu może nie być w lokalnych wynikach; tryb celowo nie pyta dostawcy |
-| Ctrl+Shift+L nie reaguje | sprawdź pasek statusu — skrót mógł być zajęty przez inny program; zmień `liveToggleHotkey` w `settings.json` |
+| Ctrl+Shift+L nie reaguje | sprawdź pasek statusu — skrót mógł być zajęty przez inny program; zmień go w **O programie → Skróty klawiszowe** |
 | „Przełącz się do gry i wciśnij skrót ponownie.” | kliknij w okno gry i wciśnij skrót; gry UWP/Game Pass wybierz raz na liście |
 | „⚠ Cache niedostępny — tłumaczenia nie są zapisywane” | zamknij program blokujący plik bazy w folderze danych, zwolnij miejsce na dysku; tłumaczenie działa dalej bez zapisu |
 | Inny problem | zajrzyj do logów: folder danych → `logs\` (logi nie zawierają treści z ekranu) |

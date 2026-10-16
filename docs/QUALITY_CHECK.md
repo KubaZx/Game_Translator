@@ -1,4 +1,8 @@
-# Sprawdzenie wydań 0.5.0–0.7.0 w grze — checklista (~75 min)
+# Sprawdzenie wydań 0.5.0–0.8.0 w grze — checklista (~95 min)
+
+**0.8.0 (edytory, ostrzeżenia, pierwsze linie, ~20 min):** przejdź M48 (własny profil gry z okna),
+M49 (edytor skrótów), M50 (ostrzeżenia kontroli jakości) i M51 (pierwsze linie od razu, tylko
+z Claude albo modelem językowym) z [MANUAL_TESTING.md](MANUAL_TESTING.md).
 
 **0.7.0 (nowe okno, ikony, imię mówiącego, ~20 min):** przejdź scenariusze M45 (nowe okno: mysz,
 Tab, maksymalizacja, zasobnik, przełączanie profilu), M44 (ikony w polskim zdaniu na kartce
@@ -25,7 +29,7 @@ Wynik wystarczy zapisać w tabelach poniżej (✔ / ✘ / uwaga) i odesłać —
 
 ## 0. Przygotowanie (10 min)
 
-- [ ] Zainstalowane 0.7.0 z [Releases](https://github.com/KubaZx/Game_Translator/releases);
+- [ ] Zainstalowane 0.8.0 z [Releases](https://github.com/KubaZx/Game_Translator/releases);
       stare ustawienia i klucz są na miejscu (status „Klucz …: zapisany ✔”).
 - [ ] **Krój czcionki** pokazuje „Jak w grze (krój z profilu)” (ustawiony Segoe UI, dawny domyślny,
       przechodzi na niego raz; inny wybrany krój zostaje).

@@ -26,6 +26,8 @@ public enum LatencyStage
     /// OCR/dostawcę. To opóźnienie, które faktycznie odczuwa gracz.
     /// </summary>
     ChangeToText,
+
+    ProviderFirstLine,
 }
 
 public sealed record LatencySummary(int Count, double MedianMs, double P90Ms, double MaxMs, double LastMs);
@@ -113,6 +115,7 @@ public sealed class LatencyMonitor
         Add(parts, "Nowy tekst", Summarize(LatencyStage.NewText), withP90: true);
         Add(parts, "Znany", Summarize(LatencyStage.KnownText), withP90: false);
         Add(parts, providerName, Summarize(LatencyStage.Provider), withP90: true);
+        Add(parts, "Pierwsza linia", Summarize(LatencyStage.ProviderFirstLine), withP90: false);
         Add(parts, "OCR", Summarize(LatencyStage.Ocr), withP90: false);
         Add(parts, "Klatka", Summarize(LatencyStage.Capture), withP90: false);
         return string.Join(" • ", parts);
@@ -139,6 +142,7 @@ public sealed class LatencyMonitor
         (LatencyStage.NewText, "Nowy tekst (klatka → napis)"),
         (LatencyStage.KnownText, "Znany tekst (klatka → napis)"),
         (LatencyStage.Provider, $"Odpowiedź {providerName}"),
+        (LatencyStage.ProviderFirstLine, $"Pierwsza linia odpowiedzi {providerName} (strumień)"),
         (LatencyStage.Ocr, "OCR"),
         (LatencyStage.Capture, "Przechwycenie klatki"),
     ];

@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using GameTranslatorOverlay.Core.Translation;
 using Microsoft.Extensions.Logging;
@@ -73,6 +76,148 @@ public sealed class OpenAiCompatibleTranslationProvider(
 
     protected override async Task<string?> CompleteAsync(string systemPrompt, string userMessage, CancellationToken cancellationToken)
     {
+        var call = PrepareCall(systemPrompt, userMessage, stream: false);
+        var response = await SendChatAsync(call, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
+        using (response)
+        {
+            return await ReadChatResponseAsync(response, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private readonly ConcurrentDictionary<string, byte> _streamRejected = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task<string?> CompleteStreamingAsync(
+        string systemPrompt, string userMessage, LlmTranslationStreamParser stream, CancellationToken cancellationToken)
+    {
+        var call = PrepareCall(systemPrompt, userMessage, stream: true);
+        if (_streamRejected.ContainsKey(call.BaseUri.Authority))
+        {
+            return await CompleteAsync(systemPrompt, userMessage, cancellationToken).ConfigureAwait(false);
+        }
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await SendChatAsync(call, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TranslationException ex) when (ex.Kind is TranslationFailureKind.InvalidRequest or TranslationFailureKind.Unknown)
+        {
+            var result = await CompleteAsync(systemPrompt, userMessage, cancellationToken).ConfigureAwait(false);
+            _streamRejected.TryAdd(call.BaseUri.Authority, 0);
+            Logger.LogInformation("{Provider}: serwer {Server} odrzucił odpowiedź strumieniowaną — dalej bez strumienia",
+                ProviderName, call.BaseUri.Authority);
+            return result;
+        }
+
+        using (response)
+        {
+            if (response.Content.Headers.ContentType?.MediaType is { } mediaType
+                && !mediaType.Equals("text/event-stream", StringComparison.OrdinalIgnoreCase))
+            {
+                return await ReadChatResponseAsync(response, cancellationToken).ConfigureAwait(false);
+            }
+
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(Options.RequestTimeout);
+            try
+            {
+                return await ReadStreamAsync(response, stream, deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+            {
+                throw new TranslationException(TranslationFailureKind.Timeout,
+                    $"{ProviderName} nie odpowiedział w ciągu {Options.RequestTimeout.TotalSeconds:0} s.");
+            }
+            catch (Exception ex) when (ex is IOException or HttpRequestException)
+            {
+                throw new TranslationException(TranslationFailureKind.NetworkError,
+                    $"Połączenie z serwerem LLM ({call.BaseUri.Authority}) zostało przerwane w trakcie odpowiedzi.", ex);
+            }
+        }
+    }
+
+    private async Task<string?> ReadStreamAsync(
+        HttpResponseMessage response, LlmTranslationStreamParser stream, CancellationToken cancellationToken)
+    {
+        await using var body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var reader = new StreamReader(body, Encoding.UTF8);
+        var content = new StringBuilder();
+        var refusal = new StringBuilder();
+        var data = new StringBuilder();
+        string? finishReason = null;
+        ChatUsage? usage = null;
+        var events = 0;
+        var done = false;
+
+        void Dispatch()
+        {
+            if (data.Length == 0) return;
+            var payload = data.ToString();
+            data.Clear();
+            if (payload.Trim() == "[DONE]")
+            {
+                done = true;
+                return;
+            }
+            ChatStreamChunk? chunk;
+            try
+            {
+                chunk = JsonSerializer.Deserialize<ChatStreamChunk>(payload);
+            }
+            catch (JsonException ex)
+            {
+                throw new TranslationException(TranslationFailureKind.NetworkError,
+                    $"{ProviderName} zwrócił odpowiedź w nieoczekiwanym formacie (przechwycenie przez portal/proxy sieci?).", ex);
+            }
+            events++;
+            if (chunk?.Error is { ValueKind: not JsonValueKind.Null })
+            {
+                throw new TranslationException(TranslationFailureKind.ServiceUnavailable,
+                    "Serwer LLM przerwał odpowiedź z błędem.");
+            }
+            if (chunk?.Usage is { } reported) usage = reported;
+            if (chunk?.Choices is not { Count: > 0 } choices) return;
+            var choice = choices[0];
+            if (choice.Delta?.Content is { Length: > 0 } piece)
+            {
+                content.Append(piece);
+                stream.Append(piece);
+            }
+            if (choice.Delta?.Refusal is { Length: > 0 } refused) refusal.Append(refused);
+            if (choice.FinishReason is { } reason) finishReason = reason;
+        }
+
+        while (!done && await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        {
+            if (line.Length == 0)
+            {
+                Dispatch();
+                continue;
+            }
+            if (line[0] == ':' || !line.StartsWith("data:", StringComparison.Ordinal)) continue;
+            if (data.Length > 0) data.Append('\n');
+            data.Append(line.AsSpan(line.Length > 5 && line[5] == ' ' ? 6 : 5));
+        }
+        Dispatch();
+
+        if (events == 0)
+        {
+            throw new TranslationException(TranslationFailureKind.NetworkError,
+                $"{ProviderName} zwrócił odpowiedź w nieoczekiwanym formacie (przechwycenie przez portal/proxy sieci?).");
+        }
+        RecordUsage(usage);
+        if (refusal.Length > 0 || finishReason == "content_filter")
+        {
+            throw new TranslationException(TranslationFailureKind.ContentRefused,
+                "Model odmówił przetłumaczenia tekstu (filtr treści dostawcy).");
+        }
+        return content.ToString();
+    }
+
+    private sealed record ChatCall(Uri BaseUri, ChatRequest Request, string? ApiKey, bool KeyWithheld);
+
+    private ChatCall PrepareCall(string systemPrompt, string userMessage, bool stream)
+    {
         var baseUri = ResolveEndpoint();
         var model = ResolveModel();
         var storedKey = apiKeyAccessor()?.Trim();
@@ -81,14 +226,35 @@ public sealed class OpenAiCompatibleTranslationProvider(
         var keyWithheld = !string.IsNullOrEmpty(storedKey) && !KeyBelongsTo(keyHostAccessor(), baseUri);
         var apiKey = keyWithheld ? null : storedKey;
         var serverOptions = ServerOptionsFor(baseUri);
-        var request = new ChatRequest(model, [new ChatMessage("system", systemPrompt), new ChatMessage("user", userMessage)])
+        var request = new ChatRequest(model, [new ChatMessage("system", systemPrompt), new ChatMessage("user", userMessage)], stream)
         {
             Thinking = serverOptions?.Thinking is { } thinking ? new ThinkingOption(thinking) : null,
             ReasoningEffort = serverOptions?.ReasoningEffort,
             MaxTokens = serverOptions?.MaxTokens,
             ResponseFormat = serverOptions?.ResponseFormat is { } format ? new ResponseFormatOption(format) : null,
+            StreamOptions = stream ? new StreamOptionsOption(IncludeUsage: true) : null,
         };
+        return new ChatCall(baseUri, request, apiKey, keyWithheld);
+    }
 
+    private async Task<string?> ReadChatResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var payload = await ProviderHttp.ReadJsonAsync<ChatResponse>(response, ProviderName, cancellationToken)
+            .ConfigureAwait(false);
+        RecordUsage(payload?.Usage);
+        var choice = payload?.Choices is { Count: > 0 } choices ? choices[0] : null;
+        if (!string.IsNullOrWhiteSpace(choice?.Message?.Refusal) || choice?.FinishReason == "content_filter")
+        {
+            throw new TranslationException(TranslationFailureKind.ContentRefused,
+                "Model odmówił przetłumaczenia tekstu (filtr treści dostawcy).");
+        }
+        return choice?.Message?.Content;
+    }
+
+    private async Task<HttpResponseMessage> SendChatAsync(
+        ChatCall call, HttpCompletionOption completionOption, CancellationToken cancellationToken)
+    {
+        var (baseUri, request, apiKey, keyWithheld) = call;
         HttpResponseMessage response;
         try
         {
@@ -112,7 +278,8 @@ public sealed class OpenAiCompatibleTranslationProvider(
                 Logger,
                 cancellationToken,
                 isRetryable: static failure =>
-                    (failure.StatusCode == 429 && !IsQuotaExhausted(failure)) || failure.StatusCode >= 500).ConfigureAwait(false);
+                    (failure.StatusCode == 429 && !IsQuotaExhausted(failure)) || failure.StatusCode >= 500,
+                completionOption: completionOption).ConfigureAwait(false);
         }
         catch (TranslationException ex) when (ex.Kind == TranslationFailureKind.NetworkError && LlmEndpoint.IsLoopback(baseUri))
         {
@@ -127,20 +294,7 @@ public sealed class OpenAiCompatibleTranslationProvider(
                 $"Serwer {baseUri.Authority} wymaga klucza, a zapisany klucz należy do innego serwera{owner}. " +
                 "Zapisz klucz ponownie dla tego adresu.");
         }
-
-        using (response)
-        {
-            var payload = await ProviderHttp.ReadJsonAsync<ChatResponse>(response, ProviderName, cancellationToken)
-                .ConfigureAwait(false);
-            RecordUsage(payload?.Usage);
-            var choice = payload?.Choices is { Count: > 0 } choices ? choices[0] : null;
-            if (!string.IsNullOrWhiteSpace(choice?.Message?.Refusal) || choice?.FinishReason == "content_filter")
-            {
-                throw new TranslationException(TranslationFailureKind.ContentRefused,
-                    "Model odmówił przetłumaczenia tekstu (filtr treści dostawcy).");
-            }
-            return choice?.Message?.Content;
-        }
+        return response;
     }
 
     public Task WarmUpAsync(CancellationToken cancellationToken = default)
@@ -221,7 +375,22 @@ public sealed class OpenAiCompatibleTranslationProvider(
         [JsonPropertyName("response_format")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public ResponseFormatOption? ResponseFormat { get; init; }
+
+        [JsonPropertyName("stream_options")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public StreamOptionsOption? StreamOptions { get; init; }
     }
+
+    private sealed record StreamOptionsOption([property: JsonPropertyName("include_usage")] bool IncludeUsage);
+
+    private sealed record ChatStreamChunk(
+        [property: JsonPropertyName("choices")] List<ChatStreamChoice>? Choices,
+        [property: JsonPropertyName("usage")] ChatUsage? Usage = null,
+        [property: JsonPropertyName("error")] JsonElement? Error = null);
+
+    private sealed record ChatStreamChoice(
+        [property: JsonPropertyName("delta")] ChatResponseMessage? Delta,
+        [property: JsonPropertyName("finish_reason")] string? FinishReason);
 
     private sealed record ThinkingOption([property: JsonPropertyName("type")] string Type);
 

@@ -187,6 +187,11 @@ treść (np. czat w grze). Po włączeniu:
   w tym trybie nie trafią do niego także po wyłączeniu trybu prywatnego,
 - **bez zapamiętywania ostatniej gry** — nazwa procesu i tytuł okna są trzymane tylko w pamięci
   do zamknięcia programu (wartości zapisane wcześniej zostają w pliku),
+- **bez nowych własnych profili** — tworzenie i przemianowywanie profili gier w oknie jest
+  zablokowane, bo profil zapisuje na dysku nazwę gry i procesu (usuwać można),
+- **lista ostrzeżeń jakości** („Dane i słownik → Ostatnie ostrzeżenia”) jest jak zawsze tylko
+  w pamięci i czyści się przy włączeniu i wyłączeniu trybu prywatnego, więc pozycja z sesji
+  prywatnej nie może trafić do trwałej bazy przez „Popraw”,
 - pamięć dialogu i znaczniki wpisów cache (np. płeć postaci) są wyłącznie w RAM,
 - **bez bazy z dysku** — tłumaczenie nie czyta też wcześniejszych wpisów z bazy SQLite, więc
   tłumaczenia korpusu z wyprzedzeniem (`CorpusTool translate`) w tym trybie nie działają;
@@ -196,7 +201,9 @@ treść (np. czat w grze). Po włączeniu:
   (przebieg próbny `--dry-run` tylko ostrzega i niczego nie wysyła).
 
 Uwaga: tryb prywatny nie zmienia faktu, że przy korzystaniu z zewnętrznego API rozpoznany
-tekst nadal jest wysyłany do dostawcy tłumaczeń. Aby nic nie opuszczało komputera, połącz
+tekst nadal jest wysyłany do dostawcy tłumaczeń. Strumieniowanie odpowiedzi modeli językowych
+(„Pierwsze linie od razu”) nie zmienia tego, co trafia do dostawcy — zmienia się tylko sposób
+odbioru odpowiedzi. Aby nic nie opuszczało komputera, połącz
 tryb prywatny z trybem Cache-only.
 
 ## Dane przechowywane lokalnie
@@ -209,7 +216,8 @@ Wszystkie dane programu leżą w `%LOCALAPPDATA%\GameTranslatorOverlay`:
 | cache SQLite (`cache.db`) | pary tekst źródłowy → tłumaczenie, także tłumaczenia korpusu z wyprzedzeniem (`CorpusTool translate`: profil gry, znacznik `src=corpus`) | w trybie prywatnym tłumaczenie go nie czyta i nie zapisuje (cache tylko w pamięci) |
 | klucze API (osobny dla każdego dostawcy) | zaszyfrowane Windows DPAPI (`CurrentUser`) | odczyta je tylko ten sam użytkownik Windows na tej maszynie |
 | logi (Serilog, rolling) | zdarzenia techniczne, błędy (stack trace tylko do logu); liczba tekstów wczytanego korpusu i zużycie tokenów modeli językowych jako same liczby | nigdy kluczy API; bez treści tłumaczeń w trybie prywatnym |
-| profile i słowniki | pliki JSON (`profiles/`, `glossaries/`) | dane statyczne, bez treści użytkownika |
+| profile i słowniki | pliki JSON (`profiles/`, `glossaries/`) | profile z zestawu i słowniki to dane statyczne; **własne profile gier** utworzone w oknie (`profiles\<id>\profile.json`) zawierają nazwę gry (domyślnie z tytułu okna) i nazwę procesu `.exe`; identyfikator profilu (skrót nazwy) zapisuje się też jako aktywny profil w `settings.json` i przy wpisach cache; w logu własny profil występuje jako „(własny)” albo „własny profil”, bez nazwy i identyfikatora |
+| lista ostrzeżeń jakości | oryginał, tłumaczenie, powód i godzina ostatnich 20 ostrzeżeń | tylko w pamięci procesu, nigdy na dysku ani w logu |
 | korpus gry (`corpus\<profil>.corpus.jsonl`) | angielskie teksty gry odczytane przez narzędzie z ADR-014 | tworzy go tylko narzędzie na polecenie użytkownika; aplikacja go czyta (aktywny profil, także w trybie prywatnym) i nie wysyła pliku, ale do dostawcy może trafić pojedynczy tekst korpusu dopasowany do odczytu z ekranu; `CorpusTool translate` wysyła teksty korpusu do dostawcy wybranego przez użytkownika, tylko na jego polecenie |
 
 Usunięcie folderu `%LOCALAPPDATA%\GameTranslatorOverlay` usuwa wszystkie dane programu.

@@ -32,7 +32,7 @@ public sealed class LlmProviderOptions : HttpProviderOptions
 /// odmienić zwroty do gracza według jego płci (<see cref="IGenderAwareTranslationProvider"/>).
 /// </summary>
 public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, ILogger logger)
-    : IContextualTranslationProvider, IRetryableTranslationProvider, IGenderAwareTranslationProvider
+    : IContextualTranslationProvider, IRetryableTranslationProvider, IGenderAwareTranslationProvider, IStreamingTranslationProvider
 {
     protected LlmProviderOptions Options { get; } = options ?? new LlmProviderOptions();
     protected ILogger Logger { get; } = logger;
@@ -46,6 +46,10 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
     /// <summary>Jedno wywołanie modelu: prompt systemowy + wiadomość użytkownika → tekst odpowiedzi.</summary>
     protected abstract Task<string?> CompleteAsync(string systemPrompt, string userMessage, CancellationToken cancellationToken);
 
+    protected virtual Task<string?> CompleteStreamingAsync(
+        string systemPrompt, string userMessage, LlmTranslationStreamParser stream, CancellationToken cancellationToken) =>
+        CompleteAsync(systemPrompt, userMessage, cancellationToken);
+
     public abstract Task<ProviderStatus> TestConnectionAsync(CancellationToken cancellationToken = default);
 
     public Task<IReadOnlyList<string>> TranslateBatchAsync(
@@ -55,12 +59,30 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
         CancellationToken cancellationToken = default) =>
         TranslateWithContextAsync(texts, sourceLanguage, targetLanguage, TranslationContext.Empty, cancellationToken);
 
-    public async Task<IReadOnlyList<string>> TranslateWithContextAsync(
+    public Task<IReadOnlyList<string>> TranslateWithContextAsync(
         IReadOnlyList<string> texts,
         string sourceLanguage,
         string targetLanguage,
         TranslationContext context,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        TranslateCoreAsync(texts, sourceLanguage, targetLanguage, context, onTranslation: null, cancellationToken);
+
+    public Task<IReadOnlyList<string>> TranslateStreamingAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        string targetLanguage,
+        TranslationContext context,
+        Action<int, string> onTranslation,
+        CancellationToken cancellationToken = default) =>
+        TranslateCoreAsync(texts, sourceLanguage, targetLanguage, context, onTranslation, cancellationToken);
+
+    private async Task<IReadOnlyList<string>> TranslateCoreAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        string targetLanguage,
+        TranslationContext context,
+        Action<int, string>? onTranslation,
+        CancellationToken cancellationToken)
     {
         if (texts.Count == 0) return [];
         EnsureConfigured();
@@ -72,18 +94,48 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
         foreach (var chunk in texts.Chunk(Math.Max(1, Options.MaxBatchSize)))
         {
             var chunkNotes = notes?.Skip(offset).Take(chunk.Length).ToList();
+            var chunkOffset = offset;
             offset += chunk.Length;
-            results.AddRange(await TranslateChunkAsync(chunk, chunkNotes, systemPrompt, context.RecentExchanges, cancellationToken)
+            Action<int, string>? onChunkTranslation = onTranslation is null
+                ? null
+                : (index, text) => onTranslation(index == PartialResults.Reset ? PartialResults.Reset : chunkOffset + index, text);
+            results.AddRange(await TranslateChunkAsync(chunk, chunkNotes, systemPrompt, context.RecentExchanges, onChunkTranslation,
+                    cancellationToken)
                 .ConfigureAwait(false));
         }
         return results;
     }
 
+    private async Task<string?> CompleteChunkAsync(
+        string systemPrompt, string userMessage, int count, Action<int, string>? onTranslation, CancellationToken cancellationToken)
+    {
+        if (onTranslation is null)
+        {
+            return await CompleteAsync(systemPrompt, userMessage, cancellationToken).ConfigureAwait(false);
+        }
+
+        LlmTranslationStreamParser? stream = null;
+        stream = new LlmTranslationStreamParser(count, (index, text) =>
+        {
+            try
+            {
+                onTranslation(index, text);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.LogWarning(ex, "{Provider}: odbiorca wczesnych tłumaczeń zgłosił błąd", Name);
+                stream!.Stop();
+            }
+        });
+        return await CompleteStreamingAsync(systemPrompt, userMessage, stream, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<IReadOnlyList<string>> TranslateChunkAsync(
         string[] chunk, IReadOnlyList<string?>? notes, string systemPrompt, IReadOnlyList<RecentExchange> previousLines,
-        CancellationToken cancellationToken)
+        Action<int, string>? onTranslation, CancellationToken cancellationToken)
     {
-        var content = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage(chunk, previousLines, notes), cancellationToken)
+        var content = await CompleteChunkAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage(chunk, previousLines, notes),
+                chunk.Length, onTranslation, cancellationToken)
             .ConfigureAwait(false);
         if (LlmTranslationPrompt.ParseTranslations(content, chunk.Length) is { } parsed)
         {
@@ -99,6 +151,17 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
         // ryzykować przesunięcie tłumaczeń między blokami.
         Logger.LogInformation("{Provider}: nieczytelna odpowiedź dla partii {Count} tekstów — tłumaczę pojedynczo",
             Name, chunk.Length);
+        if (onTranslation is not null)
+        {
+            try
+            {
+                onTranslation(PartialResults.Reset, string.Empty);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.LogWarning(ex, "{Provider}: odbiorca wczesnych tłumaczeń zgłosił błąd", Name);
+            }
+        }
         var singles = new List<string>(chunk.Length);
         for (var i = 0; i < chunk.Length; i++)
         {

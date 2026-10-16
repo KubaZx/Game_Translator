@@ -29,14 +29,14 @@ public sealed class AppSettings
 
     /// <summary>Model Claude (Anthropic).</summary>
     public string ClaudeModel { get; set; } = Providers.ClaudeTranslationProvider.DefaultModel;
-    public string TranslateHotkey { get; set; } = "Ctrl+Shift+T";
-    public string ToggleOverlayHotkey { get; set; } = "Ctrl+Shift+H";
+    public string TranslateHotkey { get; set; } = Core.Windows.HotkeyDefaults.Translate;
+    public string ToggleOverlayHotkey { get; set; } = Core.Windows.HotkeyDefaults.ToggleOverlay;
 
     /// <summary>
     /// Globalny skrót start/stop trybu live na aktywnej grze — bez Alt+Tab do okna tłumacza.
     /// Brak pola w starym pliku = Ctrl+Shift+L.
     /// </summary>
-    public string LiveToggleHotkey { get; set; } = "Ctrl+Shift+L";
+    public string LiveToggleHotkey { get; set; } = Core.Windows.HotkeyDefaults.LiveToggle;
 
     /// <summary>
     /// Proces gry (np. „latarnia.exe”) z ostatniego startu live — skrót wybiera go, gdy na
@@ -97,6 +97,15 @@ public sealed class AppSettings
     /// </summary>
     public bool ShowOverlayNotices { get; set; } = true;
 
+    public bool ShowQualityMarks { get; set; } = true;
+
+    public bool ShowsQualityMark(Core.Translation.TranslationQualityFlags issues, bool subtitleBar = false) =>
+        ShowsQualityMark(issues != Core.Translation.TranslationQualityFlags.None, subtitleBar);
+
+    public bool ShowsQualityMark(bool warning, bool subtitleBar = false) =>
+        ShowQualityMarks && warning
+        && (subtitleBar || !OverlayPlacement.Equals("cover", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>
     /// Płeć postaci gracza: unknown | male | female. Tylko dostawcy LLM (Claude, zgodny z OpenAI)
     /// odmieniają według niej zwroty do gracza; brak pola w starym pliku = unknown.
@@ -106,6 +115,8 @@ public sealed class AppSettings
     public bool ParagraphCacheKeys { get; set; }
 
     public bool LiveGraphicsCapture { get; set; } = true;
+
+    public bool StreamLlmResponses { get; set; } = true;
 
     /// <summary>
     /// Pola, które nie wpływają na pipeline tłumaczenia: wygląd nakładki i panelu, skróty
@@ -117,9 +128,9 @@ public sealed class AppSettings
     [
         nameof(ResultDisplayMode), nameof(LiveDisplayMode), nameof(OverlayPlacement),
         nameof(OverlayBackgroundOpacity), nameof(OverlayFontSize), nameof(OverlayFontFamily), nameof(OverlayFontRevision),
-        nameof(ResultAutoHideSeconds), nameof(SubtitleSeconds), nameof(ShowOverlayNotices),
+        nameof(ResultAutoHideSeconds), nameof(SubtitleSeconds), nameof(ShowOverlayNotices), nameof(ShowQualityMarks),
         nameof(TranslateHotkey), nameof(ToggleOverlayHotkey), nameof(LiveToggleHotkey),
-        nameof(LastGameProcess), nameof(LastGameTitle), nameof(DisclaimerAcknowledged),
+        nameof(LastGameProcess), nameof(LastGameTitle), nameof(DisclaimerAcknowledged), nameof(StreamLlmResponses),
     ];
 
     /// <summary>

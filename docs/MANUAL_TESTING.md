@@ -1110,3 +1110,69 @@ postaci, których imię zostało w Lexend Deca (inny kolor imienia nie jest obj�
 panoramę, zamiast znikać po pierwszym ruchu; przy mocnej perspektywie (napis ukosem) może zniknąć
 — to znane ograniczenie. Rozmiar może rosnąć skokami co kilka procent. Zapisz, jak długo napis
 trzyma się w ruchu i czy nie zostaje w starym miejscu.
+
+## M48 — Własny profil gry z okna (0.8.0)
+
+**Kroki:**
+1. Uruchom grę bez profilu w zestawie. W sekcji **Gra** zaznacz jej okno.
+2. W karcie **Profil tej gry** kliknij **Utwórz profil dla tej gry**, zostaw albo zmień nazwę
+   i kliknij **Utwórz profil**.
+3. Przejdź do **Tłumaczenie** — sprawdź pole **Profil gry**. Wróć do **Gra**, **Zmień nazwę**,
+   zapisz nową nazwę.
+4. Uruchom live (profil ma być aktywny), zatrzymaj. Włącz **Prywatny** i otwórz kartę jeszcze raz.
+5. Wyłącz **Prywatny**, **Usuń** profil (potwierdź).
+
+**Oczekiwany wynik:** po zapisie profil jest od razu wybrany (bez restartu), a w folderze danych
+jest `profiles\<id>\profile.json` z nazwą, procesem i językiem. Zmiana nazwy widać na liście
+profili. W trakcie live przyciski karty są zablokowane z podpowiedzią; w trybie prywatnym
+tworzenie i zmiana nazwy są zablokowane. Po usunięciu folder profilu znika, a wybrany jest tryb
+uniwersalny; profile z zestawu (PoE2, Escape Academy) nie mają przycisków zmiany i usuwania.
+
+## M49 — Edytor skrótów (0.8.0)
+
+**Kroki:**
+1. **O programie → Skróty klawiszowe**: kliknij pole przy „Start / stop trybu live na aktywnej
+   grze” i wciśnij Ctrl+Shift+K.
+2. W grze wciśnij nowy skrót, potem stary Ctrl+Shift+L.
+3. Spróbuj ustawić: Ctrl+Alt+L, Shift+T, Ctrl+C i skrót innej czynności (np. Ctrl+Shift+T).
+4. Spróbuj skrótu zajętego przez inny program (np. skrót wyciszenia z komunikatora).
+5. **Przywróć domyślne**; zamknij i uruchom aplikację ponownie.
+
+**Oczekiwany wynik:** w kroku 2 działa tylko nowy skrót, a jego nazwa jest na Pulpicie, w karcie
+„Skrót live”, w menu zasobnika i pod Start live. W kroku 3 każda kombinacja jest odrzucona
+z powodem (AltGr, wielkie litery, skrót edycji, duplikat). W kroku 4 pole nie przyjmuje skrótu
+(podpowiedź mówi, że zajmuje go inny program) albo pojawia się komunikat „zajęty przez inny
+program” i zostaje poprzedni. Po kroku 5 działają Ctrl+Shift+T, Ctrl+Shift+L i Ctrl+Shift+H
+także po restarcie. Zapisz, jeśli klawisze AltGr, Win albo F10 zachowują się dziwnie w polu.
+
+## M50 — Ostrzeżenia kontroli jakości (0.8.0)
+
+**Kroki:**
+1. Dostawca **Model językowy** albo **Claude**, tekst z liczbą w grze (np. cena, poziom), tryb
+   „Pod oryginałem”.
+2. Gdy pojawi się ostrzeżenie: sprawdź Pulpit (kafelek, chip na pasku), **Dane i słownik →
+   Ostatnie ostrzeżenia** i rożek w dymku nad grą.
+3. **Popraw** na liście → wpisz tłumaczenie → **Zapisz**; poczekaj na kolejny odczyt tekstu.
+4. Przy „Pod oryginałem” wyłącz i włącz **Znacznik ostrzeżeń w nakładce**, potem przełącz
+   położenie na „Na oryginale (zakrywa)”.
+5. Włącz i wyłącz **Prywatny**.
+
+**Oczekiwany wynik:** liczba na kafelku jest bursztynowa, pozycja ma powód i godzinę, dymek ma rożek.
+Po poprawce pozycja ma „Poprawione ✔”, a napis w grze zmienia się przy następnym odczycie.
+Wyłączenie przełącznika zdejmuje rożki od razu, a włączenie przywraca; w zakrywaniu znacznika
+nie ma wcale. Przełączenie
+trybu prywatnego czyści listę. Zapisz fałszywe alarmy (np. zmiana zapisu godziny).
+
+## M51 — Pierwsze linie od razu (0.8.0)
+
+**Kroki:**
+1. Dostawca **Claude** albo **Model językowy** (np. DeepSeek albo Ollama), przełącznik **Pierwsze
+   linie od razu** włączony, tryb live na scenie z kilkoma nowymi liniami (menu, opis, dialog).
+2. Obserwuj kolejność pojawiania się linii; potem wyłącz przełącznik i porównaj.
+3. **Dane i słownik → Szybkość**: odczytaj etap „Pierwsza linia”.
+4. Z lokalnym serwerem (Ollama, LM Studio) sprawdź, czy tłumaczenie w ogóle działa.
+
+**Oczekiwany wynik:** z przełącznikiem pierwsze linie pojawiają się wyraźnie wcześniej niż całość,
+bez migania i bez linii przypisanych do złego napisu. Bez przełącznika wszystkie linie pojawiają
+się naraz. Serwer, który nie obsługuje strumienia, tłumaczy dalej (po pierwszym zapytaniu bez
+strumienia). Zapisz model, serwer i czasy z karty Szybkość.

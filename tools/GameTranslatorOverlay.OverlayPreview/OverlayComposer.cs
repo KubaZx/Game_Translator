@@ -12,7 +12,7 @@ using WpfTextBlock = System.Windows.Controls.TextBlock;
 namespace GameTranslatorOverlay.OverlayPreview;
 
 internal sealed record RenderedBlock(
-    PreviewBlock Block, RectPx ElementPx, RectPx PatchPx, RectPx TextPx, double FontSizePx, string Style);
+    PreviewBlock Block, RectPx ElementPx, RectPx PatchPx, RectPx TextPx, double FontSizePx, string Style, bool QualityMark = false);
 
 internal sealed record RenderedOverlay(Pixels Layer, IReadOnlyList<RenderedBlock> Blocks, double LayoutMs = 0);
 
@@ -57,6 +57,7 @@ internal static class OverlayComposer
                     OverlayBlockRenderer.BoxText(translation, block.Cover), settings, scale, block.LineHeight,
                     colors.TextRgb, colors.BackgroundRgb, colors.OutlineRgb, colors.Texture);
                 element.Tag = block.LineHeight;
+                OverlayBlockRenderer.SetQualityMark(element, settings.ShowsQualityMark(block.Quality));
                 canvas.Children.Add(element);
                 OverlayBlockRenderer.PositionBlockElement(element, block.Box, monitor, settings, scale, fitSignatures, block.Key);
             }
@@ -140,7 +141,9 @@ internal static class OverlayComposer
             textRect = ToPx(left + origin.X, top + origin.Y, primary.DesiredSize.Width, primary.DesiredSize.Height, scale);
         }
 
-        return new RenderedBlock(block, elementRect, patch, textRect, OverlayBlockRenderer.GetFontSize(element) * scale, style);
+        var mark = element is OverlayBubble { QualityMark: true };
+        if (mark) style += " • znacznik ostrzeżenia";
+        return new RenderedBlock(block, elementRect, patch, textRect, OverlayBlockRenderer.GetFontSize(element) * scale, style, mark);
     }
 
     private static RectPx ToPx(double left, double top, double width, double height, double scale)

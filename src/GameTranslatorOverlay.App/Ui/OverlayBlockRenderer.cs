@@ -618,7 +618,7 @@ public static class OverlayBlockRenderer
             background = Brushes.Transparent;
         }
 
-        var element = new Border
+        var element = new OverlayBubble
         {
             Background = background,
             // Wtopiona łatka ma udawać tekst gry: bez dymkowych rogów i grubego paddingu.
@@ -630,6 +630,30 @@ public static class OverlayBlockRenderer
         // Mini-siatka tła rozciąga się z interpolacją liniową — gradient, nie kafelki.
         RenderOptions.SetBitmapScalingMode(element, BitmapScalingMode.Linear);
         return element;
+    }
+
+    public static void SetQualityMark(Border element, bool visible)
+    {
+        if (element is OverlayBubble bubble && bubble.QualityMark != visible) bubble.QualityMark = visible;
+    }
+
+    public static double SubtitleFontSize(AppSettings settings) =>
+        settings.OverlayFontSize >= 9 ? settings.OverlayFontSize + 2 : 18;
+
+    public static Border CreateSubtitleElement(AppSettings settings)
+    {
+        var subtitleContent = CreateBlockText(string.Empty, settings, SubtitleFontSize(settings));
+        subtitleContent.TextAlignment = TextAlignment.Center;
+        return new OverlayBubble
+        {
+            Background = IsBackgroundless(settings)
+                ? Brushes.Transparent
+                : new SolidColorBrush(Color.FromArgb(
+                    (byte)Math.Clamp(settings.OverlayBackgroundOpacity * 255, 0, 255), 0x0B, 0x0E, 0x11)),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(14, 8, 14, 8),
+            Child = subtitleContent,
+        };
     }
 
     /// <summary>Szerokość tekstu w DIP dla danej czcionki — bez udziału układu WPF (deterministycznie).</summary>

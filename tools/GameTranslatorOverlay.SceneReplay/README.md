@@ -268,3 +268,83 @@ wycinków bez odczytanej współrzędnej (`undecodedCrops`) i braku fallbacku. N
 nieudane zamknięcie sesji lub okna kończy się kodem 4, błąd albo timeout w trakcie próby —
 kodem 3. Zdarzenia `ocr` zapisują długości odczytów, nie ich treść; zdarzenia `update` zapisują
 pokazane tłumaczenie Mocka syntetycznych linii.
+
+## Szybka panorama z cięciem sceny
+
+`pan-cut` w `PanCutReplay.cs` (scripted OCR, Mock 200 ms, prywatny cache w pamięci, HTTP
+zablokowane): własne okno 1200×700 DIP pokazuje mocno teksturowany „świat” (losowe kafle
+24 DIP, jasność 24–175) z jasnym napisem na ciemnej tabliczce. Po pokazaniu tłumaczenia i 1,5 s
+spokoju cały świat przeskakuje w bok o 40, a potem sześć razy o 110 fizycznych pikseli, z przerwą
+450 ms po każdym skoku. Przerwa sprawia, że każdy skok zaczyna się od próbki bez ruchu, więc sesja
+widzi go jako globalne cięcie sceny (zmiana ≥ 55% siatki przy jednej próbce ruchu), choć napis
+po prostu jedzie z kamerą. OCR zwraca stały tekst z prostokątem białych glifów przechwyconej
+bitmapy (pełna klatka albo wycinek), prawda to niezależne przechwycenie własnego okna po każdym
+skoku.
+
+Raport: `removalTransitionsDuringPan` (ile razy blok zniknął z callbacków w trakcie panoramy),
+`firstRemovalAfterPanStartMs`, `trackingLossUpdates` (aktualizacje „napis zniknął albo odjechał”),
+`clearCallbacks`, `jumpsDisplayedAtEnd`/`jumpsMissingAtEnd` (stan na końcu przerwy po skoku) i
+`maxPositionErrorAtJumpEndPx`. `fixtureValid` wymaga wszystkich skoków o zadaną odległość (±1 px),
+braku fallbacku i stopu; **exit 0 oznacza ważną próbę, a `desiredTrackingBehavior` wynik**: blok ani
+razu nie zniknął, jest widoczny po każdym skoku z błędem położenia ≤ 3 px, bez czyszczenia nakładki.
+Skoki 110 px przekraczają zwykły promień śledzenia (72 px), więc blok przechodzi przez cięcie tylko
+wtedy, gdy zachował prędkość i flagę ruchu z poprzedniego skoku. Nie mierzy fizycznej nakładki ani
+ciągłego ruchu w grze.
+
+## Ostrzeżenie kontroli jakości w bloku nakładki
+
+`quality-mark` i `quality-mark-clean` w `QualityMarkReplay.cs` (scripted OCR): własne okno ze stałym
+napisem `Unlock level 20 door`, OCR zwraca ten tekst z prostokątem białych glifów, a zamiast Mocka
+działa natychmiastowy dostawca testowy (bez sieci, tryb prywatny, świeży cache w pamięci).
+W `quality-mark` dostawca gubi liczbę (`Otwórz drzwi poziomu`), w `quality-mark-clean` ją zachowuje.
+Po pierwszym pokazaniu bloku narzędzie obserwuje 4 s przy powtórnym OCR co 500 ms. Odrzucane:
+`--provider-delay-ms`, `--phase-ms`, `--ocr-delay-ms` i `--ocr windows`.
+
+Podsumowanie: `flaggedBlocks`/`cleanBlocks` (bloki `LiveDisplayBlock` z flagą `QualityIssues` i bez),
+`subtitleUpdates`/`flaggedSubtitles` (`LiveUpdate.SubtitleQualityWarning`), `keys` i `boxes` bloków
+(porównanie obu wariantów pokazuje, że flaga nie zmienia kluczy ani stabilizacji), `warningsTotal`
+z `TranslationOrchestrator.QualityWarnings` (ta sama para liczona raz mimo kolejnych odczytów)
+i `providerRequests` (z problemem: pierwsze tłumaczenie + jedno ponowne, potem wpis ostateczny
+z cache). `expectedBehavior` to wynik regresji; kod 4 — za mało odczytów albo bloków (`fixtureValid`).
+
+## Strumieniowanie odpowiedzi modelu
+
+`stream`, `stream-refusal` i `stream-change` w `StreamReplay.cs` (zawsze Windows OCR): własne okno pokazuje pięć
+syntetycznych linii w osobnych wierszach, po 1,5 s od startu sesji naraz. Zamiast Mocka działa
+prawdziwy dostawca — `OpenAiCompatibleTranslationProvider` (adres `http://localhost:5799/v1`,
+bez klucza) albo `ClaudeTranslationProvider` — ale jego `HttpClient` ma skryptowany handler
+(„strumieniowy Mock”): odpowiada wyłącznie na adres tego dostawcy, nie łączy się z siecią
+i tłumaczy każdy tekst jako `PL ` + tekst. Element k odpowiedzi kończy się po
+`--first-line-ms + k × --line-ms` od zapytania (domyślnie 900 i 350 ms); z `stream: true`
+handler wysyła SSE w formacie dostawcy (OpenAI: `data:` + `choices[0].delta.content` + `[DONE]`;
+Anthropic: `message_start` / `content_block_*` / `message_delta` / `message_stop`), każdy element
+w dwóch kawałkach, a bez strumienia oddaje cały JSON w chwili ostatniego elementu. Koszt
+odpowiedzi jest więc ten sam, różni się tylko moment pojawienia się linii.
+
+```
+dotnet run --project tools/GameTranslatorOverlay.SceneReplay -c Release -- --output C:\folder\stream-on.jsonl --scenario stream --stream on --stream-provider llm
+dotnet run --project tools/GameTranslatorOverlay.SceneReplay -c Release -- --output C:\folder\stream-off.jsonl --scenario stream --stream off --stream-provider claude
+dotnet run --project tools/GameTranslatorOverlay.SceneReplay -c Release -- --output C:\folder\refusal.jsonl --scenario stream-refusal --stream-provider claude
+```
+
+`--stream on|off` ustawia `AppSettings.StreamLlmResponses` (domyślnie on), `--stream-provider
+llm|claude` wybiera dostawcę (domyślnie llm). `stream-refusal` kończy strumień odmową
+(`finish_reason: content_filter` albo `stop_reason: refusal`) i wymaga `--stream on`: mierzy, czy
+wcześnie pokazane linie zostają zdjęte. `stream-change` podmienia w tych samych miejscach pięć linii
+na inne (ze słowem „garden”) `--first-line-ms` + 100 ms po pierwszym zapytaniu, czyli w trakcie odpowiedzi;
+działa też z `--stream off` jako porównanie. Mierzy, czy po zmianie pojawiają się jeszcze wczesne
+linie starej sceny (zdarzenia `update` z `provisional: true` po `change_started`), jak długo widać
+stare bloki (`maxOldShownAfterChange`, `lastOldShownAfterChangeMs`) i kiedy pojawia się nowa scena
+(`changedFirstBlockMs`, `changedAllBlocksMs`, `mixedOldAndChangedUpdates`, `oldUpdatesAfterChangedAll`). Opcje Mocka (`--provider-delay-ms`, `--phase-ms`,
+`--ocr-delay-ms`, `--ocr scripted`) są tu odrzucane, a opcje strumienia — w pozostałych scenariuszach.
+
+Podsumowanie: `firstBlockMs` i `allBlocksMs` (od renderu nowych linii do callbacku sesji
+z pierwszym / wszystkimi pięcioma blokami `PL `), `firstToAllMs`, `provisionalUpdates`
+(publikacje wczesnych linii), `textChangesOfShownBlocks` (zmiana tekstu już pokazanego bloku —
+miganie albo podmiana), `dropsAfterAllShown`, `clearedAfterRefusalMs` (od pierwszego bloku do
+pustej nakładki po odmowie), zapytania handlera (`providerRequests`, `streamedRequests`, czas
+pierwszej linii i całej odpowiedzi od strony handlera) oraz mediany `LatencyMonitor`
+(dostawca, pierwsza linia, nowy tekst, zmiana → napis). Kod 0 oznacza ważną próbę; 4 — fallback
+przechwytywania, mniej niż dwa rozpoznane bloki albo nieudane zamknięcie; 3 — błąd albo timeout.
+To callbacki sesji, nie fizyczna nakładka, a czasy modelu są syntetyczne. JSONL nie zawiera
+pikseli ani rozpoznanych tekstów.

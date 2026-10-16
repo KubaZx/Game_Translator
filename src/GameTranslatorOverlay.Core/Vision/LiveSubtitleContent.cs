@@ -9,10 +9,13 @@ public sealed class LiveSubtitleContent
 {
     private const int MaximumLength = 400;
     private List<KeyValuePair<string, string>> _texts = [];
+    private readonly HashSet<string> _flagged = new(StringComparer.Ordinal);
 
-    public string Replace(IEnumerable<KeyValuePair<string, string>> freshTexts)
+    public string Replace(IEnumerable<KeyValuePair<string, string>> freshTexts, IEnumerable<string>? flaggedKeys = null)
     {
         _texts = freshTexts.ToList();
+        _flagged.Clear();
+        if (flaggedKeys is not null) _flagged.UnionWith(flaggedKeys);
         return Render();
     }
 
@@ -23,23 +26,31 @@ public sealed class LiveSubtitleContent
     public string? Remove(IEnumerable<string> removedKeys)
     {
         var keys = removedKeys.ToHashSet(StringComparer.Ordinal);
+        _flagged.ExceptWith(keys);
         return _texts.RemoveAll(pair => keys.Contains(pair.Key)) > 0 ? Render() : null;
     }
 
     public bool IsEmpty => _texts.Count == 0;
 
+    public bool HasFlagged => _texts.Any(pair => _flagged.Contains(pair.Key));
+
     public bool Contains(string key) => _texts.Any(pair => string.Equals(pair.Key, key, StringComparison.Ordinal));
 
-    public string Restore(IEnumerable<KeyValuePair<string, string>> returnedTexts)
+    public string Restore(IEnumerable<KeyValuePair<string, string>> returnedTexts, IEnumerable<string>? flaggedKeys = null)
     {
         foreach (var pair in returnedTexts)
         {
             if (!Contains(pair.Key)) _texts.Add(pair);
         }
+        if (flaggedKeys is not null) _flagged.UnionWith(flaggedKeys);
         return Render();
     }
 
-    public void Clear() => _texts.Clear();
+    public void Clear()
+    {
+        _texts.Clear();
+        _flagged.Clear();
+    }
 
     private string Render()
     {

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Interop;
 using GameTranslatorOverlay.App.Interop;
+using GameTranslatorOverlay.Core.Windows;
 
 namespace GameTranslatorOverlay.App.Hotkeys;
 
@@ -22,8 +23,12 @@ public sealed class HotkeyManager : IDisposable
         _source?.AddHook(WndProc);
     }
 
-    public bool TryRegister(string gesture, Action callback, out string error)
+    public bool TryRegister(string gesture, Action callback, out string error) =>
+        TryRegister(gesture, callback, out _, out error);
+
+    public bool TryRegister(string gesture, Action callback, out int id, out string error)
     {
+        id = 0;
         error = string.Empty;
 
         if (_source is null)
@@ -37,54 +42,33 @@ public sealed class HotkeyManager : IDisposable
             return false;
         }
 
-        var id = _nextId++;
-        if (!NativeMethods.RegisterHotKey(_source.Handle, id, modifiers | NativeMethods.MOD_NOREPEAT, key))
+        var candidate = _nextId++;
+        if (!NativeMethods.RegisterHotKey(_source.Handle, candidate, modifiers | NativeMethods.MOD_NOREPEAT, key))
         {
-            error = $"Skrót {gesture} jest już zajęty przez inny program. Wybierz inny w ustawieniach.";
+            error = $"Skrót {gesture} jest już zajęty przez inny program. Wybierz inny w sekcji O programie → Skróty klawiszowe.";
             return false;
         }
 
-        _handlers[id] = callback;
+        _handlers[candidate] = callback;
+        id = candidate;
         return true;
+    }
+
+    public void Unregister(int id)
+    {
+        if (!_handlers.Remove(id) || _source is null) return;
+        NativeMethods.UnregisterHotKey(_source.Handle, id);
     }
 
     public static bool TryParseGesture(string gesture, out uint modifiers, out uint key)
     {
         modifiers = 0;
         key = 0;
+        if (!HotkeyGesture.TryParse(gesture, out var parsed)) return false;
 
-        var tokens = gesture.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (tokens.Length == 0) return false;
-
-        foreach (var token in tokens[..^1])
-        {
-            switch (token.ToLowerInvariant())
-            {
-                case "ctrl" or "control": modifiers |= NativeMethods.MOD_CONTROL; break;
-                case "shift": modifiers |= NativeMethods.MOD_SHIFT; break;
-                case "alt": modifiers |= NativeMethods.MOD_ALT; break;
-                case "win" or "windows": modifiers |= NativeMethods.MOD_WIN; break;
-                default: return false;
-            }
-        }
-
-        var keyToken = tokens[^1].ToUpperInvariant();
-        if (keyToken.Length == 1 && (char.IsAsciiLetter(keyToken[0]) || char.IsAsciiDigit(keyToken[0])))
-        {
-            // Goła litera/cyfra jako GLOBALNY skrót połykałaby klawisz w całym systemie,
-            // także w grze (ruch, czat) — wymagamy modyfikatora. Klawisze F1–F24 mogą być solo.
-            if (modifiers == 0) return false;
-            key = keyToken[0];
-            return true;
-        }
-        if (keyToken.Length is 2 or 3 && keyToken[0] == 'F'
-            && int.TryParse(keyToken[1..], out var functionKey) && functionKey is >= 1 and <= 24)
-        {
-            key = (uint)(0x6F + functionKey);
-            return true;
-        }
-
-        return false;
+        modifiers = (uint)parsed.Modifiers;
+        key = parsed.VirtualKey;
+        return true;
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

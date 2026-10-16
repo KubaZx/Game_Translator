@@ -441,6 +441,117 @@ public class GlyphCoverTests
         Assert.InRange(slanted, straight * 0.85, straight * 1.15);
     }
 
+    [Fact]
+    public void Ciemny_napis_na_jasnej_tabliczce_z_ciemna_ramka_ma_ciemny_wzorzec_i_pelny_kontrast()
+    {
+        var box = new RectPx(36, 46, 200, 50);
+        var frame = Plate(wall: 0x4E5C58, rim: 0x2E1A20, plate: 0x908274, box);
+        var glyphs = Word(40, 50, capHeight: 40, stroke: 6);
+        Paint(frame, glyphs, 0x151714);
+
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"]);
+
+        Assert.NotNull(cover);
+        AssertColor(0x151714, cover.TextRgb, 16);
+        Assert.NotNull(cover.Track);
+        Assert.True(cover.Track.TemplateContrast < -80, $"kontrast wzorca {cover.Track.TemplateContrast}");
+        Assert.True(cover.Track.Contrast > 80, $"kontrast {cover.Track.Contrast}");
+        AssertOnGlyphs(cover, glyphs);
+        var origin = (X: box.X + (int)cover.PatchX, Y: box.Y + (int)cover.PatchY);
+        foreach (var (x, y) in glyphs.Where(static (_, i) => i % 7 == 0))
+        {
+            var o = ((y - origin.Y) * cover.PatchPixelWidth + (x - origin.X)) * 4;
+            Assert.Equal(255, cover.PatchPbgra[o + 3]);
+            Assert.InRange(cover.PatchPbgra[o + 2], 0x90 - 14, 0x90 + 14);
+        }
+    }
+
+    [Fact]
+    public void Jasny_napis_na_ciemnej_tabliczce_z_jasna_ramka_ma_jasny_wzorzec()
+    {
+        var box = new RectPx(36, 46, 200, 50);
+        var frame = Plate(wall: 0x8A8E80, rim: 0x6C8088, plate: 0x022E20, box);
+        var glyphs = Word(40, 50, capHeight: 40, stroke: 6);
+        Paint(frame, glyphs, 0x6C8088);
+
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"]);
+
+        Assert.NotNull(cover);
+        AssertColor(0x6C8088, cover.TextRgb, 16);
+        Assert.True(cover.Track!.TemplateContrast > 40, $"kontrast wzorca {cover.Track.TemplateContrast}");
+        AssertOnGlyphs(cover, glyphs);
+    }
+
+    [Fact]
+    public void Zwykly_jasny_napis_na_ciemnym_tle_i_ciemny_na_jasnym_zachowuja_biegunowosc()
+    {
+        var box = new RectPx(36, 46, 200, 50);
+        var glyphs = Word(40, 50, capHeight: 40, stroke: 6);
+        var dark = Solid(Width, Height, 0x1A1F24);
+        Paint(dark, glyphs, 0xF0F0F0);
+        var light = Solid(Width, Height, 0xE8E2D4);
+        Paint(light, glyphs, 0x202020);
+
+        var bright = GlyphCoverBuilder.Build(dark, box, [box], ["Hill"])!;
+        var ink = GlyphCoverBuilder.Build(light, box, [box], ["Hill"])!;
+
+        AssertColor(0xF0F0F0, bright.TextRgb, 12);
+        Assert.True(bright.Track!.TemplateContrast > 150);
+        AssertOnGlyphs(bright, glyphs);
+        AssertColor(0x202020, ink.TextRgb, 12);
+        Assert.True(ink.Track!.TemplateContrast < -150);
+        AssertOnGlyphs(ink, glyphs);
+    }
+
+    [Fact]
+    public void Jasny_napis_na_ciemnym_panelu_z_jasnym_brzegiem_w_pierscieniu_tla_ma_jasny_wzorzec()
+    {
+        var box = new RectPx(36, 46, 200, 50);
+        var frame = Plate(wall: 0x1A1F24, rim: 0x6A6A6A, plate: 0x1A1F24, box);
+        var glyphs = Word(40, 50, capHeight: 40, stroke: 6);
+        Paint(frame, glyphs, 0xF0F0F0);
+
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"])!;
+
+        AssertColor(0xF0F0F0, cover.TextRgb, 12);
+        Assert.True(cover.Track!.TemplateContrast > 100);
+        AssertOnGlyphs(cover, glyphs);
+    }
+
+    [Fact]
+    public void Duza_tabliczka_liczona_w_zmniejszonej_rozdzielczosci_tez_ma_ciemny_wzorzec()
+    {
+        var box = new RectPx(56, 96, 632, 168);
+        var frame = Plate(wall: 0x4E5C58, rim: 0x2E1A20, plate: 0x908274, box, width: 800, height: 400, inner: 18, outer: 60);
+        var glyphs = Word(60, 100, capHeight: 160, stroke: 24);
+        Paint(frame, glyphs, 0x151714);
+
+        var cover = GlyphCoverBuilder.Build(frame, box, [box], ["Hill"]);
+
+        Assert.NotNull(cover);
+        Assert.Equal(3, cover.Track!.Step);
+        AssertColor(0x151714, cover.TextRgb, 16);
+        Assert.True(cover.Track.TemplateContrast < -80, $"kontrast wzorca {cover.Track.TemplateContrast}");
+        AssertOnGlyphs(cover, glyphs);
+    }
+
+    private static OcrBitmap Plate(int wall, int rim, int plate, RectPx box, int width = Width, int height = Height, int inner = 5, int outer = 16)
+    {
+        var frame = Solid(width, height, wall);
+        Paint(frame, Rect(box.X - outer, box.Y - outer, box.Width + 2 * outer, box.Height + 2 * outer), rim);
+        Paint(frame, Rect(box.X - inner, box.Y - inner, box.Width + 2 * inner, box.Height + 2 * inner), plate);
+        return frame;
+    }
+
+    private static void AssertOnGlyphs(GlyphCover cover, IEnumerable<(int X, int Y)> glyphs)
+    {
+        var track = cover.Track!;
+        var ink = glyphs.ToHashSet();
+        var on = track.GlyphPoints.Count(p => ink.Contains(
+            ((int)Math.Floor(track.OriginX + (p % track.Width) * track.Step), (int)Math.Floor(track.OriginY + (p / track.Width) * track.Step))));
+        Assert.True(track.GlyphPoints.Length >= 100 && on >= track.GlyphPoints.Length * 0.9, $"punkty wzorca na literach: {on}/{track.GlyphPoints.Length}");
+    }
+
     private static (bool[] Fill, RectPx Area) RuleCanvas() => (new bool[200 * 40], new RectPx(0, 0, 200, 40));
 
     private static IEnumerable<(int X, int Y)> Word(int x, int top, int capHeight, int stroke, int letters = 4)

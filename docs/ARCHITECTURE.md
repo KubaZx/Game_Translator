@@ -137,7 +137,8 @@ Implementacje kontraktów z Core, które wymagają świata zewnętrznego, ale ni
   korpusu, plik pusty albo nieczytelny = ostrzeżenie treści i pipeline bez korpusu.
 - **Pliki**: odczyt/zapis profili gier i słowników (JSON, schematy w rozdz. 7),
   `settings.json`. `AppSettings.PipelineSnapshot()` to ustawienia bez pól samego wyglądu
-  (czcionka, tło, tryby wyświetlania, skróty, komunikaty, ostatnia gra) — orchestrator
+  (czcionka, tło, tryby wyświetlania, skróty, komunikaty, znacznik ostrzeżeń, ostatnia gra)
+  i bez przełącznika strumienia (`StreamLlmResponses`, czytany przy każdej klatce) — orchestrator
   przebudowuje pipeline (i czyści pamięć dialogu) tylko, gdy zmieni się ta migawka.
 - **Glosariusz DeepL**: `DeepLGlossaryManager` przygotowuje glosariusz w tle; nowy glosariusz
   opóźnia najwyżej jedną partię o najwyżej `GlossaryWaitBudget` (300 ms).
@@ -326,13 +327,19 @@ zadanie dostaje `CancellationToken.Cancel()` i jego wynik nigdzie nie trafia.
 | `KnownTextAbsenceProbe`, `KnownTextReference` | dowód zniknięcia znanego tekstu także na teksturze; wzorzec kolorów i liczba pikseli rdzenia liter z ostatniego potwierdzającego odczytu | Core |
 | `MainWindow`, `Ui/Theme.xaml` | okno aplikacji: sekcje (Pulpit, Gra, Tłumaczenie, Wygląd nakładki, Dane i słownik, O programie), karty ustawień (`ListBox` z API `Selector`), własna belka `WindowChrome`; motyw i szablony kontrolek bez niejawnych stylów `TextBlock`/`Border`, więc nakładka nie dziedziczy wyglądu okna | App |
 | `AppLogo`, `WindowTheme`, `WindowAvatars` | znak „PL” (okno, zasobnik, `app.ico`), ciemna ramka DWM i wcięcie przy maksymalizacji, awatar okna gry z pierwszej litery tytułu (bez odczytu ikony z pliku programu gry) | App (`Ui/`) |
+| `HotkeyGesture`, `HotkeyCapture`, `HotkeyRules`, `HotkeyDefaults` | zapis i parsowanie skrótów (kolejność Ctrl, Alt, Shift, Win), odczyt wciśniętych klawiszy w edytorze, reguły edytora (duplikaty, Esc, Alt+F4, skróty edycji, sam Shift, Ctrl+Alt = AltGr) | Core (`Windows/`) |
+| `ProfileIds`, `ProfileNames`, `UserProfileStore`, `ProfileCatalog.LoadEntries` | id własnego profilu (slug ASCII, unikalny), nazwa z tytułu okna; tworzenie, zmiana nazwy i usuwanie własnych profili wyłącznie w `<dane>\profiles\` (zapis atomowy, profile z zestawu nietykalne); katalog z ścieżką pliku każdego profilu; `TranslationOrchestrator.ReloadProfiles` przeładowuje bez restartu | Core, Infrastructure, App |
+| `QualityWarningLog`, `TranslationQualityGate.ShortReason`/`Hint` | do 20 ostatnich ostrzeżeń jakości tylko w pamięci (deduplikacja par, kontekst profilu i języków dla poprawki, czyszczenie przy przełączeniu trybu prywatnego); krótki powód i podpowiedź po polsku | Core (`Usage/`, `Translation/`) |
+| `OverlayBubble` | dymek nakładki i pasek napisów ze znacznikiem ostrzeżenia (rożek, przy braku tła kropka); dymki nigdy przy położeniu „zakrywa”, pasek napisów zawsze (`AppSettings.ShowsQualityMark`) | App (`Ui/`) |
+| `IStreamingTranslationProvider`, `LlmTranslationStreamParser`, `PartialResults` | strumień odpowiedzi modeli językowych: przyrostowy parser tablicy `translations`, wczesne wyniki przez bramkę jakości (`TranslationPipeline.TranslateAsync(…, onPartial)`), unieważnienie wczesnych wyników (`PartialResults.Reset`) przy złej liczbie elementów; sesja live publikuje je jako bloki tymczasowe (`LiveOverlayBlock.Provisional`), które wynik końcowy potwierdza, podmienia albo zdejmuje | Core, Infrastructure, App |
+| `SceneCutTracking` | które bloki zachowują stan śledzenia przez „cięcie sceny” wywołane szybkim ruchem (gdy któryś blok był przesunięty — wszystkie potwierdzone śledzeniem) | Core (`Vision/`) |
 | `OverlayWindow` | prezentacja bloków/paska, click-through, DPI i ręczne ukrywanie | App |
 | `OverlayBlockRenderer` | wygląd i pozycja bloku (łatka, kontur, dopasowanie czcionki, wyrównanie, pominięcie tłumaczeń identycznych z oryginałem w trybie zakrywania) — wspólny dla `OverlayWindow` i OverlayPreview | App |
 | `GlyphTracker` / `GlyphTrack` | śledzenie napisu z łatką między odczytami OCR: wzorzec punktów liter i obrysu, koszt SAD z przewidywaniem ruchu, kontrola kontrastu liter wobec obrysu/tła, odrzucanie dopasowań wieloznacznych, dowód zniknięcia liter | Core (`Vision/`) |
 | `GraphicsCaptureSource` | sesja Windows Graphics Capture okna gry: ostatnia klatka na GPU, pełna klatka albo wycinek do pamięci, sygnał nowej klatki | App (`Capture/`) |
 | `OcrBands` | ponowny odczyt pustego wyniku Windows OCR dużego obrazu w 2, a potem 4 poziomych pasach z zakładką | Core (`Ocr/`) |
 | `TextBlockSplitter` | podział zlepionego bloku według napisów wyświetlanych i obecnych na swoich miejscach | Core (`Text/`) |
-| `GlyphCoverBuilder` / `GlyphCover` / `InkProfile` | łatka „natywna”: maska liter (odchylenie od tła z pierścienia + top-hat), wypełnienie pikseli liter z otoczenia (push-pull), kolor tekstu, kontur, cień, linia bazowa, wysokość, wyrównanie, ikony klawiszy; liczona w `LiveTranslationSession` równolegle z tłumaczeniem | Core (`Vision/`) |
+| `GlyphCoverBuilder` / `GlyphCover` / `InkProfile` | łatka „natywna”: maska liter (odchylenie od tła z pierścienia + top-hat), wypełnienie pikseli liter z otoczenia (push-pull), kolor tekstu, kontur, cień, linia bazowa, wysokość, wyrównanie, ikony klawiszy; liczona w `LiveTranslationSession` równolegle z tłumaczeniem; tekst w kontenerze (tabliczka z ramką: pas wokół boxu w jednej jasności) ma biegunowość i tło liczone z pikseli kontenera, a łatka nie przemalowuje ramki | Core (`Vision/`) |
 | `GameTextElement` / `OverlayFonts` | tekst z geometrii (kontur piórem, cień), łatka jako obraz; krój z ustawień albo profilu (dołączony Lexend Deca, a dla stylu z reguły `overlay.fontRules` — np. Zilla Slab), rozmiar z wysokości liter nad linią bazową, grubość z gęstości tuszu oryginału — jedna dla bloków w tym samym stylu | App |
 | `OverlayFontRuleSet` / `OverlayFontRule` | reguły kroju z profilu: walidacja (zła reguła odpada z ostrzeżeniem, profil zostaje), dopasowanie po kolorze tekstu, obrysie i wysokości liter | Core (`Profiles/`) |
 

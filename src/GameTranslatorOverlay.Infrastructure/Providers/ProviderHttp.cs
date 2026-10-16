@@ -85,7 +85,8 @@ internal static class ProviderHttp
         ILogger logger,
         CancellationToken cancellationToken,
         Func<ProviderHttpFailure, bool>? isRetryable = null,
-        bool allowRetry = true)
+        bool allowRetry = true,
+        HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -96,7 +97,7 @@ internal static class ProviderHttp
                 timeoutCts.CancelAfter(options.RequestTimeout);
 
                 using var request = createRequest();
-                response = await httpClient.SendAsync(request, timeoutCts.Token).ConfigureAwait(false);
+                response = await httpClient.SendAsync(request, completionOption, timeoutCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -126,7 +127,7 @@ internal static class ProviderHttp
             {
                 var failure = new ProviderHttpFailure(
                     (int)response.StatusCode,
-                    await ReadErrorBodyAsync(response, cancellationToken).ConfigureAwait(false));
+                    await ReadErrorBodyAsync(response, options.RequestTimeout, cancellationToken).ConfigureAwait(false));
 
                 var retryable = isRetryable?.Invoke(failure) ?? (failure.StatusCode == 429 || failure.StatusCode >= 500);
                 var retryAfter = response.Headers.RetryAfter?.Delta;
@@ -194,14 +195,20 @@ internal static class ProviderHttp
         }
     }
 
-    private static async Task<string> ReadErrorBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<string> ReadErrorBodyAsync(HttpResponseMessage response, TimeSpan timeout, CancellationToken cancellationToken)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(timeout);
         try
         {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(deadline.Token).ConfigureAwait(false);
             return body.Length > MaxErrorBodyChars ? body[..MaxErrorBodyChars] : body;
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException)
+        {
+            return string.Empty;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             return string.Empty;
         }

@@ -84,6 +84,38 @@ public static class TranslationQualityGate
         return "Możliwy błąd tłumaczenia: " + string.Join(", ", parts) + ".";
     }
 
+    public static string? ShortReason(TranslationQualityFlags flags)
+    {
+        if (flags == TranslationQualityFlags.None) return null;
+        if (flags.HasFlag(TranslationQualityFlags.Empty)) return "pusty wynik";
+
+        var parts = new List<string>(3);
+        if (flags.HasFlag(TranslationQualityFlags.NumbersChanged)) parts.Add("zmienione liczby");
+        if (flags.HasFlag(TranslationQualityFlags.Untranslated)) parts.Add("bez tłumaczenia");
+        if (flags.HasFlag(TranslationQualityFlags.Runaway)) parts.Add("za długie");
+        return string.Join(", ", parts);
+    }
+
+    public static string? Hint(TranslationQualityFlags flags)
+    {
+        if (flags == TranslationQualityFlags.None) return null;
+        if (flags.HasFlag(TranslationQualityFlags.Empty)) return EmptyResultMessage;
+
+        var lines = new List<string>(3);
+        if (flags.HasFlag(TranslationQualityFlags.NumbersChanged))
+            lines.Add("W tłumaczeniu brakuje liczby z oryginału (np. ceny, poziomu, godziny) — zgubionej albo zmienionej.");
+        if (flags.HasFlag(TranslationQualityFlags.Untranslated))
+            lines.Add("Wynik jest taki sam jak angielski oryginał — dostawca niczego nie przetłumaczył.");
+        if (flags.HasFlag(TranslationQualityFlags.Runaway))
+            lines.Add("Tłumaczenie jest wielokrotnie dłuższe od oryginału — model mógł dopisać komentarz.");
+        return string.Join("\n", lines);
+    }
+
+    public static string? Hint(TranslationQualityFlags flags, bool partOfBlock) =>
+        Hint(flags) is { } hint && partOfBlock && !flags.HasFlag(TranslationQualityFlags.Empty)
+            ? "Dotyczy co najmniej jednego z fragmentów bloku.\n" + hint
+            : Hint(flags);
+
     /// <summary>Liczba zgłoszonych problemów — mniej znaczy lepiej; pusty wynik jest zawsze najgorszy.</summary>
     public static int Severity(TranslationQualityFlags flags) =>
         flags.HasFlag(TranslationQualityFlags.Empty) ? int.MaxValue : System.Numerics.BitOperations.PopCount((uint)flags);

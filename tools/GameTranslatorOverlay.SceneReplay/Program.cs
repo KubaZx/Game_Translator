@@ -50,10 +50,11 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink|typing|typing-nohold] [--ocr scripted|windows]\n" +
+            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink|typing|typing-nohold|pan-cut|quality-mark|quality-mark-clean] [--ocr scripted|windows]\n" +
                 "  [--provider-delay-ms 0..5000] [--phase-ms 0..200] [--ocr-delay-ms 100..600 only ocr-timing]\n" +
                 "  [--assets KATALOG_Z_inspect_crop.png] [--texture OBRAZ] [--texture-origin X,Y] [--bright-spot-px 4..14] only stale-*\n" +
                 "  [--fade-ms 100..1000 only stale-fade] [--dim-percent 10..90 only stale-dim] [--junk-run 1..3 only stale-present-junk]\n" +
+                "  --scenario stream|stream-refusal|stream-change [--stream on|off] [--stream-provider llm|claude] [--first-line-ms 0..5000] [--line-ms 0..2000]\n" +
                 "Wlasne widoczne okno; prawdziwy capture i LiveTranslationSession. Mock domyslnie 2000 ms, bez sieci.\n" +
                 "Faza domyslnie 0 ms; niezerowa tylko dla displayed/inflight/stale-*. Scenariusze local-reading/reading-jitter/reading-whiff odrzucaja oba parametry.\n" +
                 "Domyslnie displayed oraz scripted OCR z koloru przechwyconej klatki. Bez sterowania gra.");
@@ -77,6 +78,10 @@ internal static class Program
             int? dimPercent = null;
             int? fadeMs = null;
             int? junkRun = null;
+            string? streamMode = null;
+            string? streamProvider = null;
+            int? firstLineMs = null;
+            int? lineMs = null;
             for (var i = 0; i < args.Length; i++)
             {
                 var option = args[i];
@@ -118,10 +123,30 @@ internal static class Program
                         junkRun = ParseMilliseconds(args[i], option, 3);
                         if (junkRun < 1) throw new ArgumentException("--junk-run wymaga liczby calkowitej od 1 do 3.");
                         break;
+                    case "--stream":
+                        streamMode = args[i] is "on" or "off" ? args[i] : throw new ArgumentException("--stream wymaga on albo off.");
+                        break;
+                    case "--stream-provider":
+                        streamProvider = args[i] is "llm" or "claude" ? args[i] : throw new ArgumentException("--stream-provider wymaga llm albo claude.");
+                        break;
+                    case "--first-line-ms": firstLineMs = ParseMilliseconds(args[i], option, 5000); break;
+                    case "--line-ms": lineMs = ParseMilliseconds(args[i], option, 2000); break;
                     default: throw new ArgumentException("Nieznany argument.");
                 }
             }
             if (output is null) throw new ArgumentException("Wymagany nowy plik --output.");
+            var streamScenario = StreamReplay.Scenarios.Contains(scenario);
+            if (!streamScenario && (streamMode is not null || streamProvider is not null || firstLineMs is not null || lineMs is not null))
+                throw new ArgumentException("--stream, --stream-provider, --first-line-ms i --line-ms sa dostepne tylko dla stream, stream-refusal i stream-change.");
+            if (streamScenario)
+            {
+                if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "windows"))
+                    throw new ArgumentException($"{scenario} uses Windows OCR and its own scripted model timing (--first-line-ms, --line-ms).");
+                if (StreamReplay.RequiresStreaming(scenario) && streamMode == "off")
+                    throw new ArgumentException($"{scenario} mierzy wczesne linie, wymaga --stream on.");
+                return StreamReplay.Run(output, scenario, new StreamReplay.Options(
+                    streamProvider ?? "llm", streamMode != "off", firstLineMs ?? 900, lineMs ?? 350));
+            }
             var staleScenario = StaleLabelReplay.Scenarios.Contains(scenario);
             if (!staleScenario && (assetsDirectory is not null || texturePath is not null || textureOrigin is not null || brightSpotPx > 0))
                 throw new ArgumentException("--assets, --texture, --texture-origin i --bright-spot-px sa dostepne tylko dla stale-*.");
@@ -157,6 +182,18 @@ internal static class Program
                 if (providerDelaySpecified || phaseSpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
                     throw new ArgumentException("OCR timing uses scripted OCR and Mock 0; only --ocr-delay-ms is supported.");
                 return OcrTimingReplay.Run(output, ocrDelayMs);
+            }
+            if (scenario == "pan-cut")
+            {
+                if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
+                    throw new ArgumentException("pan-cut uses scripted OCR and Mock 200; timing overrides are not supported.");
+                return PanCutReplay.Run(output);
+            }
+            if (scenario is "quality-mark" or "quality-mark-clean")
+            {
+                if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
+                    throw new ArgumentException("Quality mark uses scripted OCR and an instant scripted provider; timing overrides are not supported.");
+                return QualityMarkReplay.Run(output, scenario == "quality-mark");
             }
             if (ocrDelaySpecified) throw new ArgumentException("--ocr-delay-ms requires --scenario ocr-timing.");
             if (scenario is ("local-occlusion" or "local-occlusion-hover" or "local-occlusion-inflight" or "moving-text" or "position-jitter"))

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Anthropic;
 using Anthropic.Exceptions;
@@ -114,32 +115,7 @@ public sealed class ClaudeTranslationProvider(
     {
         var model = ResolveModel();
         var client = CreateClient(ResolveApiKey());
-
-        var outputConfig = SupportsEffort(model)
-            ? new BetaOutputConfig { Format = new BetaJsonOutputFormat { Schema = TranslationsSchema }, Effort = Effort.Low }
-            : new BetaOutputConfig { Format = new BetaJsonOutputFormat { Schema = TranslationsSchema } };
-
-        var parameters = UsesDefaultFallbacks(model)
-            ? new MessageCreateParams
-            {
-                Model = model,
-                MaxTokens = Options.MaxOutputTokens,
-                System = systemPrompt,
-                Messages = [new() { Role = Role.User, Content = userMessage }],
-                OutputConfig = outputConfig,
-                // Odmowa filtra bezpieczeństwa jest ponawiana po stronie serwera na modelu
-                // wybranym przez Anthropic dla danej kategorii — gracz nie traci tłumaczenia.
-                Fallbacks = new Default(),
-                Betas = [DefaultFallbacksBeta],
-            }
-            : new MessageCreateParams
-            {
-                Model = model,
-                MaxTokens = Options.MaxOutputTokens,
-                System = systemPrompt,
-                Messages = [new() { Role = Role.User, Content = userMessage }],
-                OutputConfig = outputConfig,
-            };
+        var parameters = BuildParameters(model, systemPrompt, userMessage);
 
         try
         {
@@ -170,6 +146,114 @@ public sealed class ClaudeTranslationProvider(
         }
     }
 
+    protected override async Task<string?> CompleteStreamingAsync(
+        string systemPrompt, string userMessage, LlmTranslationStreamParser stream, CancellationToken cancellationToken)
+    {
+        var model = ResolveModel();
+        var client = CreateClient(ResolveApiKey());
+        var parameters = BuildParameters(model, systemPrompt, userMessage);
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(Options.RequestTimeout * (Math.Min(Options.MaxRetries, 1) + 1));
+        var texts = new List<(long Index, StringBuilder Text)>();
+        var fallback = false;
+        string? stopReason = null;
+        try
+        {
+            await foreach (var streamEvent in client.Beta.Messages.CreateStreaming(parameters, deadline.Token)
+                               .WithCancellation(deadline.Token).ConfigureAwait(false))
+            {
+                if (streamEvent.TryPickContentBlockStart(out var start))
+                {
+                    if (start.ContentBlock.TryPickBetaText(out var opened))
+                    {
+                        texts.Add((start.Index, new StringBuilder(opened.Text)));
+                        if (!fallback) stream.Append(opened.Text);
+                    }
+                    else if (start.ContentBlock.TryPickBetaFallback(out _))
+                    {
+                        fallback = true;
+                        stream.Stop();
+                    }
+                }
+                else if (streamEvent.TryPickContentBlockDelta(out var delta) && delta.Delta.TryPickText(out var piece))
+                {
+                    if (texts.Count == 0 || texts[^1].Index != delta.Index) continue;
+                    texts[^1].Text.Append(piece.Text);
+                    if (!fallback) stream.Append(piece.Text);
+                }
+                else if (streamEvent.TryPickDelta(out var messageDelta) && messageDelta.Delta.StopReason is { } reason)
+                {
+                    stopReason = reason.Raw();
+                }
+            }
+
+            if (stopReason == "refusal")
+            {
+                throw new TranslationException(TranslationFailureKind.ContentRefused,
+                    "Claude odmówił przetłumaczenia tekstu (filtr bezpieczeństwa).");
+            }
+            return FinalStreamedText(texts.Select(static t => t.Text.ToString()).ToList(), fallback);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+        {
+            throw new TranslationException(TranslationFailureKind.Timeout, "Claude nie odpowiedział w wyznaczonym czasie.");
+        }
+        catch (Exception ex) when (MapException(ex, cancellationToken) is { } mapped)
+        {
+            throw mapped;
+        }
+    }
+
+    private static string? FinalStreamedText(IReadOnlyList<string> texts, bool fallback)
+    {
+        if (texts.Count == 0) return null;
+        if (!fallback || texts.Count == 1 || IsJsonDocument(texts[^1])) return texts[^1];
+        return string.Concat(texts);
+    }
+
+    private static bool IsJsonDocument(string text)
+    {
+        try
+        {
+            using var _ = JsonDocument.Parse(text);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private MessageCreateParams BuildParameters(string model, string systemPrompt, string userMessage)
+    {
+        var outputConfig = SupportsEffort(model)
+            ? new BetaOutputConfig { Format = new BetaJsonOutputFormat { Schema = TranslationsSchema }, Effort = Effort.Low }
+            : new BetaOutputConfig { Format = new BetaJsonOutputFormat { Schema = TranslationsSchema } };
+
+        return UsesDefaultFallbacks(model)
+            ? new MessageCreateParams
+            {
+                Model = model,
+                MaxTokens = Options.MaxOutputTokens,
+                System = systemPrompt,
+                Messages = [new() { Role = Role.User, Content = userMessage }],
+                OutputConfig = outputConfig,
+                // Odmowa filtra bezpieczeństwa jest ponawiana po stronie serwera na modelu
+                // wybranym przez Anthropic dla danej kategorii — gracz nie traci tłumaczenia.
+                Fallbacks = new Default(),
+                Betas = [DefaultFallbacksBeta],
+            }
+            : new MessageCreateParams
+            {
+                Model = model,
+                MaxTokens = Options.MaxOutputTokens,
+                System = systemPrompt,
+                Messages = [new() { Role = Role.User, Content = userMessage }],
+                OutputConfig = outputConfig,
+            };
+    }
+
     /// <summary>
     /// Mapuje wyjątki SDK na <see cref="TranslationException"/>. Anulowanie przez użytkownika
     /// zwraca null (wyjątek leci dalej bez zmian). Treść błędów API nie jest dołączana —
@@ -181,6 +265,10 @@ public sealed class ClaudeTranslationProvider(
 
         return ex switch
         {
+            AnthropicSseException sse when sse.Message.Contains("rate_limit_error", StringComparison.OrdinalIgnoreCase) =>
+                new(TranslationFailureKind.RateLimited, "Anthropic przerwał odpowiedź — limit zapytań (rate limit)."),
+            AnthropicSseException => new(TranslationFailureKind.ServiceUnavailable,
+                "Claude przerwał odpowiedź w trakcie (przeciążenie albo błąd serwera)."),
             AnthropicUnauthorizedException => new(TranslationFailureKind.InvalidApiKey, "Anthropic odrzucił klucz API (HTTP 401)."),
             AnthropicForbiddenException => new(TranslationFailureKind.InvalidApiKey,
                 "Anthropic odmówił dostępu (HTTP 403) — sprawdź uprawnienia klucza i organizacji."),
@@ -202,6 +290,8 @@ public sealed class ClaudeTranslationProvider(
                 new(TranslationFailureKind.Timeout, "Claude nie odpowiedział w wyznaczonym czasie."),
             AnthropicIOException or HttpRequestException =>
                 new(TranslationFailureKind.NetworkError, "Nie udało się połączyć z Anthropic. Sprawdź połączenie z internetem.", ex),
+            IOException => new(TranslationFailureKind.NetworkError,
+                "Połączenie z Anthropic zostało przerwane w trakcie odpowiedzi.", ex),
             AnthropicInvalidDataException or JsonException => new(TranslationFailureKind.NetworkError,
                 "Anthropic zwrócił odpowiedź w nieoczekiwanym formacie (przechwycenie przez portal/proxy sieci?)."),
             FormatException => new(TranslationFailureKind.InvalidConfiguration,

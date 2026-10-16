@@ -164,8 +164,13 @@ a utrzymujący się problem daje `qa-final`. Limit: najwyżej 3 zapytania na tek
 językowych i 2 u pozostałych. Pusty wynik przy ponownym tłumaczeniu zostawia stary wynik
 jako ostateczny.
 
-`TranslationOutcome.QualityWarning` (polski opis bez treści tekstu) i `UsageTracker.QualityIssues`
-(liczniki) są dostępne, ale aplikacja jeszcze ich nie pokazuje.
+`TranslationOutcome.QualityIssues` (flagi; `QualityWarning` to polski opis z nich liczony),
+`TranslationQualityGate.ShortReason`/`Hint` (krótki powód i podpowiedź po polsku) i
+`UsageTracker.QualityIssues` (liczniki) zasilają widok w aplikacji: kafelki na Pulpicie,
+`QualityWarningLog` (do 20 ostatnich pozycji tylko w pamięci, z kontekstem profilu i języków dla
+ręcznej poprawki), chip w panelu wyniku oraz znacznik w dymkach nakładki (nigdy w trybie
+zakrywania) i na pasku napisów (przy każdym położeniu).
+Blok złożony z kilku jednostek (akapity, korpus) niesie sumę flag wszystkich części.
 
 ## Architektura: ITranslationProvider
 
@@ -324,6 +329,15 @@ Google Cloud Translation Basic (v2).
   dla pojedynczego tekstu przyjmuje też samą odpowiedź bez JSON-a,
 - nowe rodzaje błędów: `ModelNotFound` (literówka w nazwie modelu), `ContentRefused`
   (filtr treści), `InvalidConfiguration` (np. brak modelu lub zły adres serwera).
+- **strumieniowanie** (`IStreamingTranslationProvider`, od 0.8.0): w trybie live przy
+  `streamLlmResponses: true` odpowiedź jest czytana strumieniem, a `LlmTranslationStreamParser`
+  zgłasza element tablicy `translations`, gdy tylko domknie się jego cudzysłów (ucieczki, `\uXXXX`
+  z parami surogatów, kawałki cięte w dowolnym miejscu, blok `<think>`). Wynik końcowy to zawsze
+  parsowanie całej odpowiedzi jak bez strumienia; wszystko, czego `JsonDocument` by nie przyjął,
+  kończy wczesne zgłaszanie. Gdy całość ma złą liczbę elementów, dostawca zgłasza unieważnienie
+  (`PartialResults.Reset`) przed tłumaczeniem pojedynczym, a sesja live zdejmuje wczesne linie.
+  Pipeline przepuszcza wczesny element tylko po bramce jakości; cache, pamięć dialogu i liczniki
+  zmieniają się dopiero po wyniku końcowym.
 
 Koszty modeli liczą się w tokenach. Licznik aplikacji i limit sesji nadal mierzą znaki
 wysłanego tekstu — to przybliżenie, nie rozliczenie dostawcy.
@@ -343,8 +357,17 @@ lokalne Ollama (`http://localhost:11434/v1`) i LM Studio (`http://localhost:1234
 - Odpowiedź modelu jest przyjmowana tylko w jednoznacznej formie (cała odpowiedź, blok
   ```json albo obiekt z kluczem `translations`); echo wejścia (`texts`), elementy niebędące
   tekstem i puste tłumaczenia unieważniają odpowiedź, zanim trafi do cache.
-- Domyślnie zapytanie ma tylko `model`, `messages` i `stream: false` — część modeli
+- Bez strumienia zapytanie ma tylko `model`, `messages` i `stream: false` — część modeli
   i serwerów odrzuca dodatkowe parametry; format wymusza prompt i tolerancyjny parser.
+- **Strumień** (tryb live, `streamLlmResponses`): `stream: true` i `stream_options.include_usage`,
+  czytanie SSE (`data:` w jednej albo kilku liniach, komentarze `:`, `[DONE]`, `delta.content`
+  i `delta.refusal`, `finish_reason: content_filter` → odmowa, `{"error": …}` w strumieniu,
+  `usage` z ostatniego kawałka). Odpowiedź z innym typem treści niż `text/event-stream` jest
+  czytana jak zwykła odpowiedź JSON. Gdy serwer odrzuci zapytanie strumieniowe błędem (400, 405,
+  422 itp.; nie przy złym kluczu, limicie, nieznanym modelu ani złym adresie — 404), aplikacja
+  wysyła zwykłe zapytanie; jeśli ono się uda, host jest zapamiętany jako „bez
+  strumienia” do końca działania. Limit czasu obejmuje też czytanie strumienia i treści błędu.
+  Test połączenia idzie zawsze bez strumienia.
 - **Opcje serwera** (ADR-013, dopisek 2026-10-06): ustawienie `llmServerOptions`
   (`host`, `thinking`, `reasoningEffort`, `maxTokens`, `responseFormat`) dodaje do zapytania
   pola `thinking: {"type": …}`, `reasoning_effort`, `max_tokens`, `response_format: {"type": …}`
@@ -392,6 +415,15 @@ Claude przez **oficjalne SDK Anthropic dla C#** (pakiet `Anthropic`), beta Messa
 - SDK ponawia także timeouty, więc aplikacja ogranicza je do jednej powtórki (60 s na próbę).
 - Odpowiedź SDK jest czytana w tym samym bloku mapowania błędów: strona portalu Wi-Fi albo
   niepełny JSON dają błąd sieci zamiast surowego wyjątku.
+- **Strumień** (tryb live, `streamLlmResponses`): `client.Beta.Messages.CreateStreaming` z tymi
+  samymi parametrami co bez strumienia (structured outputs, effort, fallback). Tekst przychodzi
+  w zdarzeniach `content_block_delta` (`text_delta`). Blok `fallback` w strumieniu (odmowa
+  w trakcie odpowiedzi i kontynuacja na modelu zastępczym — częściowy tekst zostaje) zatrzymuje
+  wczesne linie; wynik końcowy to ostatni blok tekstu, a gdy po fallbacku nie jest samodzielnym
+  JSON-em — sklejone bloki tekstu. `stop_reason: refusal` na końcu daje `ContentRefused`
+  (wcześnie pokazane linie są zdejmowane). Błąd w strumieniu (`AnthropicSseException`) mapuje się
+  na limit zapytań albo niedostępność, zerwane połączenie na błąd sieci; cały strumień ma limit
+  czasu.
 
 ## MockTranslationProvider
 

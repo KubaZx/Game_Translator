@@ -113,6 +113,15 @@
                             VerticalAlignment="Top"
                             Click="OnSaveCorrectionClick" />
                   </Grid>
+                  <Border Background="#1AFBBF24" BorderBrush="#55FBBF24" BorderThickness="1" CornerRadius="9"
+                          Padding="7,2,9,3" Margin="0,8,0,0" HorizontalAlignment="Left"
+                          ToolTip="{Binding QualityHint}" ToolTipService.InitialShowDelay="200"
+                          AutomationProperties.Name="Ostrzeżenie kontroli jakości"
+                          Visibility="{Binding QualityReason, Converter={StaticResource PresentToVisible}}">
+                    <TextBlock FontSize="11.5" Foreground="#FFFCD34D" TextWrapping="Wrap">
+                      <Run Text="⚠ " /><Run Text="{Binding QualityReason, Mode=OneWay}" />
+                    </TextBlock>
+                  </Border>
                   <DockPanel Margin="0,9,0,0">
                     <Border Style="{StaticResource Chip}" Margin="0,0,10,0" Padding="8,2,9,2">
                       <TextBlock Text="{Binding OriginLabel}" Foreground="{StaticResource Brush.AccentText}" FontSize="11" />

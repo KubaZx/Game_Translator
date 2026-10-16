@@ -131,6 +131,8 @@ internal static class GalleryWriter
                 text = block.Text,
                 translation = block.Translation,
                 origin = block.Origin,
+                quality = block.Quality == Core.Translation.TranslationQualityFlags.None ? null : block.Quality.ToString(),
+                qualityMark = rendered?.QualityMark,
                 x = block.Box.X,
                 y = block.Box.Y,
                 width = block.Box.Width,

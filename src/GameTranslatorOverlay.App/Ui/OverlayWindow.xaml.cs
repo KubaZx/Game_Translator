@@ -7,6 +7,7 @@ using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.Core.Ocr;
 using GameTranslatorOverlay.Core.Profiles;
+using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Core.Usage;
 using GameTranslatorOverlay.Core.Vision;
 using GameTranslatorOverlay.Infrastructure.Settings;
@@ -31,7 +32,9 @@ public partial class OverlayWindow : Window
     private readonly Dictionary<string, string> _liveFit = [];
     private readonly Dictionary<string, GlyphCover> _liveCovers = [];
     private readonly List<Border> _manualElements = [];
+    private readonly Dictionary<Border, TranslationQualityFlags> _manualQuality = [];
     private Border? _subtitleElement;
+    private bool _subtitleQualityWarning;
     private MonitorArea? _monitor;
     private bool _hiddenByUser;
 
@@ -151,7 +154,9 @@ public partial class OverlayWindow : Window
             element, box, monitor, settings, VisualTreeHelper.GetDpi(this).PixelsPerDip, _liveFit, fitKey);
 
     /// <summary>Jednorazowe wyświetlenie bloków z tłumaczenia ręcznego (auto-ukrywane).</summary>
-    public void ShowBlocks(IReadOnlyList<(RectPx Box, string Text, int LineHeight, int ColorRgb)> blocks, AppSettings settings)
+    public void ShowBlocks(
+        IReadOnlyList<(RectPx Box, string Text, int LineHeight, int ColorRgb, TranslationQualityFlags QualityIssues)> blocks,
+        AppSettings settings)
     {
         if (blocks.Count == 0) return;
 
@@ -163,9 +168,11 @@ public partial class OverlayWindow : Window
         _hiddenByUser = false;
         RestoreContentLayer();
 
-        foreach (var (box, text, lineHeight, colorRgb) in blocks)
+        foreach (var (box, text, lineHeight, colorRgb, qualityIssues) in blocks)
         {
             var element = CreateBlockElement(text, settings, monitor.Scale, lineHeight, colorRgb);
+            SetQualityMark(element, settings.ShowsQualityMark(qualityIssues));
+            _manualQuality[element] = qualityIssues;
             PositionBlockElement(element, box, monitor, settings);
             _manualElements.Add(element);
             RootCanvas.Children.Add(element);
@@ -234,6 +241,7 @@ public partial class OverlayWindow : Window
                 _liveElements[block.Key].Tag = block.LineHeight;
                 if (block.Texture is not null) _liveTextures[block.Key] = block.Texture;
                 _liveColors[block.Key] = (block.ColorRgb, block.BackgroundRgb, block.OutlineRgb);
+                SetQualityMark(_liveElements[block.Key], settings.ShowsQualityMark(block.QualityIssues));
                 PositionBlockElement(_liveElements[block.Key], block.ScreenBox, monitor, settings, block.Key);
                 continue;
             }
@@ -279,6 +287,7 @@ public partial class OverlayWindow : Window
                 RootCanvas.Children.Add(element);
             }
 
+            SetQualityMark(element, settings.ShowsQualityMark(block.QualityIssues));
             PositionBlockElement(element, block.ScreenBox, monitor, settings, block.Key);
         }
 
@@ -361,8 +370,22 @@ public partial class OverlayWindow : Window
         _liveCovers.Remove(key);
     }
 
+    public void RefreshQualityMarks(AppSettings settings)
+    {
+        foreach (var block in _liveBlocksForLayout)
+        {
+            if (_liveElements.TryGetValue(block.Key, out var element)) SetQualityMark(element, settings.ShowsQualityMark(block.QualityIssues));
+        }
+        foreach (var element in _manualElements)
+        {
+            SetQualityMark(element, settings.ShowsQualityMark(_manualQuality.GetValueOrDefault(element)));
+        }
+        if (_subtitleElement is not null) SetQualityMark(_subtitleElement, settings.ShowsQualityMark(_subtitleQualityWarning, subtitleBar: true));
+    }
+
     /// <summary>Pasek napisów na dole okna gry (tryb Subtitle) — pokazuje najnowszy tekst.</summary>
-    public void ShowSubtitle(string text, RectPx gameWindowBounds, AppSettings settings, bool preserveLifetime = false)
+    public void ShowSubtitle(
+        string text, RectPx gameWindowBounds, AppSettings settings, bool preserveLifetime = false, bool qualityWarning = false)
     {
         text = GameTranslatorOverlay.Core.Vision.InlineIcons.Replace(text, GameTranslatorOverlay.Core.Vision.InlineIcons.SymbolReplacement);
         // Removing one source from an existing subtitle must neither restart its
@@ -377,25 +400,15 @@ public partial class OverlayWindow : Window
 
         if (_subtitleElement is null)
         {
-            var subtitleFontSize = settings.OverlayFontSize >= 9 ? settings.OverlayFontSize + 2 : 18;
-            var subtitleContent = CreateBlockText(string.Empty, settings, subtitleFontSize);
-            subtitleContent.TextAlignment = TextAlignment.Center;
-            _subtitleElement = new Border
-            {
-                Background = IsBackgroundless(settings)
-                    ? Brushes.Transparent
-                    : new SolidColorBrush(Color.FromArgb(
-                        (byte)Math.Clamp(settings.OverlayBackgroundOpacity * 255, 0, 255), 0x0B, 0x0E, 0x11)),
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(14, 8, 14, 8),
-                Child = subtitleContent,
-            };
+            _subtitleElement = CreateSubtitleElement(settings);
             RootCanvas.Children.Add(_subtitleElement);
         }
 
         var subtitleText = (TextBlock)_subtitleElement.Child;
         subtitleText.Text = text;
-        subtitleText.FontSize = settings.OverlayFontSize >= 9 ? settings.OverlayFontSize + 2 : 18;
+        subtitleText.FontSize = SubtitleFontSize(settings);
+        _subtitleQualityWarning = qualityWarning;
+        SetQualityMark(_subtitleElement, settings.ShowsQualityMark(qualityWarning, subtitleBar: true));
         PositionSubtitle(gameWindowBounds, monitor);
 
         CoverMonitor(monitor);
@@ -560,6 +573,7 @@ public partial class OverlayWindow : Window
             RootCanvas.Children.Remove(element);
         }
         _manualElements.Clear();
+        _manualQuality.Clear();
         HideIfEmpty();
     }
 
@@ -599,6 +613,7 @@ public partial class OverlayWindow : Window
         _liveFit.Clear();
         _liveCovers.Clear();
         _manualElements.Clear();
+        _manualQuality.Clear();
         _subtitleElement = null;
         if (!preserveUserHidden)
         {

@@ -70,7 +70,9 @@ Dla każdej klatki katalog `<rodzic>-<nazwa>`:
   (czcionka, wysokość linii oryginału, kolory, stosunek tekst/łatka),
 - `bloki.json` — dane bloków i wyrenderowanych elementów; `cover` to dane łatki z maski liter
   (kolor tekstu i obrysu, grubość obrysu, cień, wysokość liter w px), na których działają
-  reguły `overlay.fontRules` profilu, a `style` podaje użyty krój i grubość.
+  reguły `overlay.fontRules` profilu, a `style` podaje użyty krój i grubość. `quality` to flagi
+  kontroli jakości bloku (np. `NumbersChanged`), a `qualityMark` — czy element dostał bursztynowy
+  znacznik ostrzeżenia (tylko poza `--placement cover`, jak w aplikacji przy włączonym znaczniku).
 
 W katalogu głównym `galeria.md` zbiera wszystkie klatki w tabelach.
 
@@ -81,7 +83,11 @@ Wymagane pola: `text`, `x`, `y`, `width`, `height` (fizyczne piksele klatki). Op
 `lineHeight` (domyślnie wysokość boxu podzielona przez liczbę linii) i `translation` — gdy jest,
 pomija tłumaczenie (pochodzenie „JSON”); bez niej tekst idzie przez pipeline. Kolory zawsze są
 próbkowane z klatki. Pozwala sprawdzić długie tłumaczenia, przepełnienia i wieloliniowe bloki
-bez zmienności OCR.
+bez zmienności OCR. Opcjonalne `quality` ustawia flagi kontroli jakości bloku: nazwy
+`NumbersChanged`, `Untranslated`, `Runaway`, `Empty` (kilka po przecinku), `auto` albo `true`
+(sprawdza `translation` bramką `TranslationQualityGate`), `None`/`false`/brak pola = bez ostrzeżenia
+dla `translation`; tekst bez `translation` dostaje flagi z pipeline'u, chyba że `quality` je nadpisze.
+Dwa przebiegi tej samej klatki — z `quality` i bez — pozwalają porównać `warstwa.png` piksel po pikselu.
 
 ## Ograniczenia
 

@@ -78,11 +78,13 @@ public sealed record TranslationOutcome(
 {
     public bool IsTranslated => TranslatedText is not null;
 
+    public TranslationQualityFlags QualityIssues { get; init; }
+
     /// <summary>
     /// Opis problemu wykrytego przez kontrolę jakości (<see cref="TranslationQualityGate"/>)
     /// w pokazanym tłumaczeniu, np. zmienione liczby; null, gdy wynik przeszedł kontrolę.
     /// </summary>
-    public string? QualityWarning { get; init; }
+    public string? QualityWarning => TranslationQualityGate.Describe(QualityIssues);
 
     /// <summary>
     /// Rodzaj błędu dostawcy, gdy tekst nie został przetłumaczony przez jego wyjątek
@@ -208,21 +210,31 @@ public sealed class TranslationPipeline(
     /// nieaktualny) przechodzą pełną ścieżkę — w międzyczasie mogły trafić do cache.
     /// Lista o innej długości niż <paramref name="texts"/> jest ignorowana.
     /// </summary>
+    public Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        string targetLanguage,
+        IReadOnlyList<TranslationOutcome?>? knownLocal,
+        CancellationToken cancellationToken = default) =>
+        TranslateAsync(texts, sourceLanguage, targetLanguage, knownLocal, onPartial: null, cancellationToken);
+
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateAsync(
         IReadOnlyList<string> texts,
         string sourceLanguage,
         string targetLanguage,
         IReadOnlyList<TranslationOutcome?>? knownLocal,
+        Action<int, TranslationOutcome>? onPartial,
         CancellationToken cancellationToken = default)
     {
         if (texts.Count == 0) return [];
         if (knownLocal is not null && knownLocal.Count != texts.Count) knownLocal = null;
+        if (provider is not IStreamingTranslationProvider) onPartial = null;
 
         var inputs = NormalizeAll(texts);
         var plans = PlanAll(inputs);
         return plans is null
-            ? await TranslateCoreAsync(inputs, sourceLanguage, targetLanguage, knownLocal, cancellationToken).ConfigureAwait(false)
-            : await TranslatePlannedAsync(inputs, plans, sourceLanguage, targetLanguage, knownLocal, cancellationToken).ConfigureAwait(false);
+            ? await TranslateCoreAsync(inputs, sourceLanguage, targetLanguage, knownLocal, onPartial, cancellationToken).ConfigureAwait(false)
+            : await TranslatePlannedAsync(inputs, plans, sourceLanguage, targetLanguage, knownLocal, onPartial, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<IReadOnlyList<TranslationOutcome>> TranslateCoreAsync(
@@ -230,6 +242,7 @@ public sealed class TranslationPipeline(
         string sourceLanguage,
         string targetLanguage,
         IReadOnlyList<TranslationOutcome?>? knownLocal,
+        Action<int, TranslationOutcome>? onPartial,
         CancellationToken cancellationToken)
     {
         if (normalizedInputs.Length == 0) return [];
@@ -305,7 +318,8 @@ public sealed class TranslationPipeline(
             }
             else
             {
-                await TranslatePendingAsync(pending, sourceLanguage, targetLanguage, outcomes, staleFallbacks, cancellationToken)
+                await TranslatePendingAsync(pending, sourceLanguage, targetLanguage, outcomes, staleFallbacks,
+                        onPartial is null ? null : PartialByText(normalizedInputs, onPartial), cancellationToken)
                     .ConfigureAwait(false);
             }
         }
@@ -323,7 +337,7 @@ public sealed class TranslationPipeline(
                     ErrorMessage = null,
                     FailureKind = null,
                     Issue = OutcomeIssue.None,
-                    QualityWarning = TranslationQualityGate.Describe(stale.Context.QualityIssues),
+                    QualityIssues = stale.Context.QualityIssues,
                 };
             }
         }
@@ -336,6 +350,81 @@ public sealed class TranslationPipeline(
                 : new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, "Brak wyniku."));
         }
         return results;
+    }
+
+    private static Action<string, TranslationOutcome> PartialByText(
+        (string Source, string Normalized)[] normalizedInputs, Action<int, TranslationOutcome> onPartial)
+    {
+        var positions = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        for (var index = 0; index < normalizedInputs.Length; index++)
+        {
+            var normalized = normalizedInputs[index].Normalized;
+            if (!positions.TryGetValue(normalized, out var list)) positions[normalized] = list = [];
+            list.Add(index);
+        }
+        return (normalized, outcome) =>
+        {
+            if (normalized == PartialResults.ResetKey)
+            {
+                onPartial(PartialResults.Reset, outcome);
+                return;
+            }
+            if (!positions.TryGetValue(normalized, out var list)) return;
+            foreach (var index in list) onPartial(index, WithSource(outcome, normalizedInputs[index].Source));
+        };
+    }
+
+    private sealed class PlannedPartials(
+        (string Source, string Normalized)[] inputs, UnitPlan?[] plans, Action<int, TranslationOutcome> onPartial)
+    {
+        private readonly Lock _gate = new();
+        private readonly Dictionary<int, TranslationOutcome?[]> _units = [];
+        private readonly Dictionary<int, (int Input, int Unit)> _slots = [];
+        private readonly HashSet<int> _reported = [];
+        private bool _reset;
+
+        public void MapPlain(int coreIndex, int input) => _slots[coreIndex] = (input, -1);
+
+        public void MapUnit(int coreIndex, int input, int unit, TranslationOutcome? known)
+        {
+            _slots[coreIndex] = (input, unit);
+            if (!_units.TryGetValue(input, out var units)) _units[input] = units = new TranslationOutcome?[plans[input]!.Units.Count];
+            units[unit] = known is { TranslatedText: not null } ? known : null;
+        }
+
+        public void Report(int coreIndex, TranslationOutcome outcome)
+        {
+            if (coreIndex == PartialResults.Reset)
+            {
+                lock (_gate) _reset = true;
+                onPartial(PartialResults.Reset, outcome);
+                return;
+            }
+            lock (_gate)
+            {
+                if (_reset) return;
+            }
+            if (!_slots.TryGetValue(coreIndex, out var slot)) return;
+            if (slot.Unit < 0)
+            {
+                onPartial(slot.Input, WithSource(outcome, inputs[slot.Input].Source));
+                return;
+            }
+            TranslationOutcome? assembled = null;
+            lock (_gate)
+            {
+                var units = _units[slot.Input];
+                units[slot.Unit] = outcome;
+                var plan = plans[slot.Input]!;
+                for (var k = 0; k < units.Length; k++)
+                {
+                    if (!plan.Units[k].Literal && units[k] is null) return;
+                }
+                if (!_reported.Add(slot.Input)) return;
+                assembled = Assemble(inputs[slot.Input], plan, units);
+            }
+            if (assembled.TranslatedText is not null) onPartial(slot.Input, assembled);
+        }
     }
 
     private const int MaxRememberedPlans = 1024;
@@ -526,7 +615,7 @@ public sealed class TranslationPipeline(
         TranslationOutcome? failed = null;
         var anyProvider = false;
         var anyCache = false;
-        string? warning = null;
+        var issues = TranslationQualityFlags.None;
         for (var k = 0; k < parts.Length; k++)
         {
             var unit = plan.Units[k];
@@ -546,7 +635,7 @@ public sealed class TranslationPipeline(
             translations[k] = translated;
             anyProvider |= outcome.Origin == TranslationOrigin.Provider;
             anyCache |= outcome.Origin == TranslationOrigin.Cache;
-            warning ??= outcome.QualityWarning;
+            issues |= outcome.QualityIssues;
         }
 
         if (failed is not null)
@@ -562,7 +651,7 @@ public sealed class TranslationPipeline(
         var origin = anyProvider ? TranslationOrigin.Provider : anyCache ? TranslationOrigin.Cache : TranslationOrigin.Glossary;
         return new TranslationOutcome(input.Source, input.Normalized, TranslationUnitPlanner.Compose(plan, translations), origin)
         {
-            QualityWarning = warning,
+            QualityIssues = issues,
             Parts = parts,
             CacheKey = plan.CorrectionKey,
         };
@@ -609,7 +698,7 @@ public sealed class TranslationPipeline(
     private async Task<IReadOnlyList<TranslationOutcome>> TranslatePlannedAsync(
         (string Source, string Normalized)[] inputs, UnitPlan?[] plans,
         string sourceLanguage, string targetLanguage, IReadOnlyList<TranslationOutcome?>? knownLocal,
-        CancellationToken cancellationToken)
+        Action<int, TranslationOutcome>? onPartial, CancellationToken cancellationToken)
     {
         var stored = (knownLocal as LocalResults)?.Probes;
         var results = new TranslationOutcome?[inputs.Length];
@@ -648,12 +737,14 @@ public sealed class TranslationPipeline(
         var coreKnown = new List<TranslationOutcome?>(inputs.Length);
         var plainSlots = new int[inputs.Length];
         var unitSlots = new int[inputs.Length][];
+        var partials = onPartial is null ? null : new PlannedPartials(inputs, plans, onPartial);
         for (var i = 0; i < inputs.Length; i++)
         {
             plainSlots[i] = -1;
             if (plans[i] is not { } plan)
             {
                 plainSlots[i] = coreInputs.Count;
+                partials?.MapPlain(coreInputs.Count, i);
                 coreInputs.Add(inputs[i]);
                 coreKnown.Add(knownLocal?[i]);
                 continue;
@@ -673,6 +764,7 @@ public sealed class TranslationPipeline(
                 var unit = plan.Units[k];
                 if (unit.Literal) continue;
                 slots[k] = coreInputs.Count;
+                partials?.MapUnit(coreInputs.Count, i, k, probe.Units[k]);
                 coreInputs.Add((unit.Key, unit.Key));
                 coreKnown.Add(probe.Units[k]);
             }
@@ -682,7 +774,8 @@ public sealed class TranslationPipeline(
         var coreOutcomes = coreInputs.Count == 0
             ? []
             : await TranslateCoreAsync(coreInputs.ToArray(), sourceLanguage, targetLanguage,
-                coreKnown.Any(static k => k is not null) ? coreKnown : null, cancellationToken).ConfigureAwait(false);
+                coreKnown.Any(static k => k is not null) ? coreKnown : null,
+                partials is null ? null : partials.Report, cancellationToken).ConfigureAwait(false);
 
         var final = new List<TranslationOutcome>(inputs.Length);
         for (var i = 0; i < inputs.Length; i++)
@@ -712,7 +805,7 @@ public sealed class TranslationPipeline(
                         ErrorMessage = null,
                         FailureKind = null,
                         Issue = OutcomeIssue.None,
-                        QualityWarning = TranslationQualityGate.Describe(stale.Context.QualityIssues),
+                        QualityIssues = stale.Context.QualityIssues,
                         Parts = null,
                         CacheKey = null,
                     }
@@ -961,7 +1054,7 @@ public sealed class TranslationPipeline(
             if (!probeOnly) usage.RecordCacheHit();
             return new TranslationOutcome(source, normalized, cached.TranslatedText, TranslationOrigin.Cache)
             {
-                QualityWarning = TranslationQualityGate.Describe(TranslationCacheContext.Parse(cached.Context).QualityIssues),
+                QualityIssues = TranslationCacheContext.Parse(cached.Context).QualityIssues,
             };
         }
         if (degradedHit is not null)
@@ -989,6 +1082,7 @@ public sealed class TranslationPipeline(
         string targetLanguage,
         Dictionary<string, TranslationOutcome> outcomes,
         Dictionary<string, StaleEntry> staleFallbacks,
+        Action<string, TranslationOutcome>? onPartial,
         CancellationToken cancellationToken)
     {
         var mine = new List<(string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)>();
@@ -1034,7 +1128,7 @@ public sealed class TranslationPipeline(
                 }
                 if (toSend.Count > 0)
                     await TranslateChunkAsync(toSend.ToArray(), sourceLanguage, targetLanguage, outcomes, staleFallbacks,
-                            cancellationToken)
+                            onPartial, cancellationToken)
                         .ConfigureAwait(false);
             }
         }
@@ -1096,12 +1190,14 @@ public sealed class TranslationPipeline(
 
     private Task<IReadOnlyList<string>> SendToProviderAsync(
         IReadOnlyList<string> texts, TranslationContext context, string sourceLanguage, string targetLanguage,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken, Action<int, string>? onTranslation = null) =>
         // Dostawcy kontekstowi (modele językowe) dostają nazwę gry i terminy słownika
         // występujące w tej partii — spójne nazwy także wewnątrz dłuższych zdań.
-        provider is IContextualTranslationProvider contextual
-            ? contextual.TranslateWithContextAsync(texts, sourceLanguage, targetLanguage, context, cancellationToken)
-            : provider.TranslateBatchAsync(texts, sourceLanguage, targetLanguage, cancellationToken);
+        onTranslation is not null && provider is IStreamingTranslationProvider streaming
+            ? streaming.TranslateStreamingAsync(texts, sourceLanguage, targetLanguage, context, onTranslation, cancellationToken)
+            : provider is IContextualTranslationProvider contextual
+                ? contextual.TranslateWithContextAsync(texts, sourceLanguage, targetLanguage, context, cancellationToken)
+                : provider.TranslateBatchAsync(texts, sourceLanguage, targetLanguage, cancellationToken);
 
     private TranslationContext BuildContext(IReadOnlyList<string> texts)
     {
@@ -1156,6 +1252,7 @@ public sealed class TranslationPipeline(
         string targetLanguage,
         Dictionary<string, TranslationOutcome> outcomes,
         Dictionary<string, StaleEntry> staleFallbacks,
+        Action<string, TranslationOutcome>? onPartial,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -1198,9 +1295,25 @@ public sealed class TranslationPipeline(
         IReadOnlyList<string> translations;
         var context = provider is IContextualTranslationProvider ? BuildContext(textsToSend) : TranslationContext.Empty;
         var providerStarted = Stopwatch.GetTimestamp();
+        long firstLineAt = 0;
+        Action<int, string>? onTranslation = onPartial is null ? null : (index, raw) =>
+        {
+            if (index == PartialResults.Reset)
+            {
+                onPartial(PartialResults.ResetKey, PartialResults.ResetOutcome);
+                return;
+            }
+            if (index < 0 || index >= chunk.Length) return;
+            Interlocked.CompareExchange(ref firstLineAt, Stopwatch.GetTimestamp(), 0);
+            var result = TextReflow.Rewrap(raw ?? string.Empty, reflowed[index].Plan);
+            if (TranslationQualityGate.Check(textsToSend[index], result) != TranslationQualityFlags.None) return;
+            var (source, normalized, _, _) = chunk[index];
+            onPartial(normalized, new TranslationOutcome(source, normalized, result, TranslationOrigin.Provider));
+        };
         try
         {
-            translations = await SendToProviderAsync(textsToSend, context, sourceLanguage, targetLanguage, cancellationToken)
+            translations = await SendToProviderAsync(textsToSend, context, sourceLanguage, targetLanguage, cancellationToken,
+                    onTranslation)
                 .ConfigureAwait(false);
         }
         catch (TranslationException ex)
@@ -1240,6 +1353,9 @@ public sealed class TranslationPipeline(
         // Tylko udane odpowiedzi: błąd lub timeout zafałszowałby typowy czas dostawcy.
         usage.Latency.Record(LatencyStage.Provider,
             Stopwatch.GetElapsedTime(providerStarted).TotalMilliseconds);
+        if (Interlocked.Read(ref firstLineAt) is var firstLine and not 0)
+            usage.Latency.Record(LatencyStage.ProviderFirstLine,
+                Stopwatch.GetElapsedTime(providerStarted, firstLine).TotalMilliseconds);
 
         // Surowe wyniki (przed przywróceniem wierszy) trafiają do pamięci dialogu: model dostał
         // sklejony tekst, więc jako swoje wcześniejsze tłumaczenie widzi też sklejony wynik.
@@ -1318,7 +1434,7 @@ public sealed class TranslationPipeline(
             tcs.TrySetResult(translated);
             outcomes[normalized] = new TranslationOutcome(source, normalized, translated, TranslationOrigin.Provider)
             {
-                QualityWarning = TranslationQualityGate.Describe(quality),
+                QualityIssues = quality,
             };
 
             // Wynik z problemem jakości jest oznaczany, żeby następnym razem przetłumaczyć go

@@ -191,6 +191,39 @@ public class TranslationPipelineQualityTests
     }
 
     [Fact]
+    public async Task Flaga_jakosci_idzie_z_wynikiem_dostawcy_i_z_ostatecznego_wpisu_cache()
+    {
+        var provider = new ScriptedProvider((_, _) => "Masz 15 złota.");
+        var (pipeline, _, _) = Create(provider);
+        var log = new QualityWarningLog();
+
+        var fresh = Assert.Single(await pipeline.TranslateAsync([Gold], "en", "pl"));
+        await pipeline.TranslateAsync([Gold], "en", "pl");
+        var cached = Assert.Single(await pipeline.TranslateAsync([Gold], "en", "pl"));
+        var added = log.RecordAll([fresh, cached]);
+
+        Assert.Equal(TranslationQualityFlags.NumbersChanged, fresh.QualityIssues);
+        Assert.Equal(TranslationOrigin.Cache, cached.Origin);
+        Assert.Equal(TranslationQualityFlags.NumbersChanged, cached.QualityIssues);
+        Assert.Equal(1, added);
+        Assert.Equal(1, log.Total);
+        Assert.Equal("zmienione liczby", Assert.Single(log.Recent).Reason);
+    }
+
+    [Fact]
+    public async Task Blok_z_akapitow_niesie_sume_problemow_jakosci_swoich_czesci()
+    {
+        var provider = new ScriptedProvider((text, _) => text.Contains("150", StringComparison.Ordinal) ? "Masz złoto." : text);
+        var (pipeline, _, _) = Create(provider, new TranslationPipelineOptions { SplitParagraphs = true });
+
+        var outcome = Assert.Single(await pipeline.TranslateAsync(["You have 150 gold.\nTalk to the keeper now."], "en", "pl"));
+
+        Assert.Equal(2, outcome.Parts!.Count);
+        Assert.Equal(TranslationQualityFlags.NumbersChanged | TranslationQualityFlags.Untranslated, outcome.QualityIssues);
+        Assert.Equal("zmienione liczby, bez tłumaczenia", TranslationQualityGate.ShortReason(outcome.QualityIssues));
+    }
+
+    [Fact]
     public async Task Naprawiony_przy_ponownym_tlumaczeniu_wpis_dostaje_czysty_znacznik()
     {
         var provider = new ScriptedProvider((_, call) => call == 1 ? "Masz 15 złota." : "Masz 150 złota.");

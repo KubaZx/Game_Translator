@@ -1,4 +1,5 @@
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Translation;
 
 namespace GameTranslatorOverlay.Core.Vision;
 
@@ -19,10 +20,13 @@ public sealed record LiveOverlayBlock(
     string SourceText = "",
     int PendingBackgroundRgb = -1,
     KnownTextReference? Probe = null,
-    GlyphCover? Cover = null)
+    GlyphCover? Cover = null,
+    TranslationQualityFlags QualityIssues = TranslationQualityFlags.None)
 {
     public int ProbeTextRgb => Probe?.TextRgb ?? ColorRgb;
     public int ProbeBackgroundRgb => Probe?.BackgroundRgb ?? BackgroundRgb;
+
+    public bool Provisional { get; init; }
 }
 
 /// <summary>

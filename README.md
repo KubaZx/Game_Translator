@@ -11,7 +11,7 @@ gry, bez żadnej zmiany w plikach gry.
 [Instrukcja](docs/USER_GUIDE.md) · [Zmiany](CHANGELOG.md) ·
 [CI](https://github.com/KubaZx/Game_Translator/actions/workflows/ci.yml)
 
-**Wersja: 0.7.0** · Windows 10 2004+ / 11 · portable, bez instalacji
+**Wersja: 0.8.0** · Windows 10 2004+ / 11 · portable, bez instalacji
 
 ## Funkcje
 
@@ -19,6 +19,7 @@ gry, bez żadnej zmiany w plikach gry.
 |---|---|
 | Tłumaczenie fragmentu | `Ctrl+Shift+T` → zaznacz obszar |
 | Okno aplikacji | ciemne okno z sekcjami Pulpit, Gra, Tłumaczenie, Wygląd nakładki, Dane i słownik, O programie; minimalizacja do zasobnika, okno wykluczone z przechwytywania obrazu |
+| Profile i skróty w oknie | **Gra → Profil tej gry**: własny profil gry z okna (zapis w folderze danych, bez restartu); **O programie → Skróty klawiszowe**: zmiana skrótów z wykrywaniem kolizji (także AltGr) |
 | Tryb live | `Ctrl+Shift+L` w grze (start/stop) albo okno gry w sekcji **Gra** → **Start live** na **Pulpicie** |
 | Ukrycie nakładki | `Ctrl+Shift+H` |
 | Komunikaty w grze | brak klucza, limit, brak sieci, Cache-only, start/stop live, gra na pełnym ekranie — krótki pasek u góry okna gry |
@@ -30,10 +31,11 @@ gry, bez żadnej zmiany w plikach gry.
 | Dopasowanie do korpusu | odczyt OCR z błędami („Ihspect”, „11m”), innym zawinięciem albo WIELKIMI LITERAMI trafia w znany tekst gry i jego tłumaczenie; początek kwestii dialogu dostaje tłumaczenie całej kwestii; śmieci OCR z ikon i tekstur nie idą do dostawcy |
 | Kwestia pisana literami | z korpusem, w trybie zakrywania: zostaje po angielsku, dopóki gra ją dopisuje; całe tłumaczenie kwestii pojawia się po ostatniej literze |
 | Dostawcy | DeepL, Azure AI Translator, Google, Claude, serwer zgodny z OpenAI (gotowe adresy: OpenAI, DeepSeek bez rozumowania, lokalne Ollama i LM Studio), Mock |
+| Pierwsze linie od razu | Claude i serwer zgodny z OpenAI odsyłają odpowiedź strumieniem — w trybie live gotowe linie trafiają nad grę, zanim model skończy (w scenie testowej z symulowanym dostawcą pierwsza linia po ok. połowie czasu całej odpowiedzi); wynik końcowy rozstrzyga |
 | Słownik | własne terminy i poprawki, import/eksport; w DeepL jako glosariusz (terminy odmieniane także w środku zdań); liczba mnoga („Waystones”); zakres „Etykieta” dla przycisków i nagłówków |
 | Kontekst | do 6 poprzednich linii dialogu + nazwa gry + terminy słownika |
 | Pamięć dialogu (LLM) | Claude i serwer zgodny z OpenAI widzą swoje poprzednie tłumaczenia; **Postać gracza** (kobieta/mężczyzna) dla form „zrobiłaś”/„zrobiłeś” |
-| Kontrola jakości | pusty wynik nie trafia do cache; zgubione liczby, brak tłumaczenia i „rozgadany” wynik są oznaczane, modele językowe dostają jedno ponowienie |
+| Kontrola jakości | pusty wynik nie trafia do cache; zgubione liczby, brak tłumaczenia i „rozgadany” wynik są oznaczane, modele językowe dostają jedno ponowienie; ostrzeżenia widać na Pulpicie, w liście „Ostatnie ostrzeżenia”, w panelu wyniku i jako rożek w dymkach i na pasku napisów (w dymkach nigdy w trybie zakrywania) |
 | Cache | SQLite z pamięcią w RAM; ten sam tekst nie idzie drugi raz do API; błąd bazy nie zatrzymuje tłumaczenia |
 | Offline | Cache-only (bez API), lokalny model LLM, Mock (test bez klucza) |
 
@@ -149,7 +151,6 @@ Więcej: [PRIVACY.md](docs/PRIVACY.md), [SECURITY.md](docs/SECURITY.md).
 - `Ctrl+Shift+L` uruchamia live na **dowolnym** aktywnym oknie (także przeglądarce) — to jawna
   akcja użytkownika. Gry UWP / Microsoft Store / Game Pass nie są wybierane jako aktywne okno:
   wybierz je raz w sekcji **Gra** i kliknij **Start live**.
-- Ostrzeżenie kontroli jakości nie jest jeszcze pokazywane w oknie ani nakładce.
 - Wygląd **Na oryginale (zakrywa)** sprawdzono na zapisanych klatkach Escape Academy
   (OverlayPreview), w SceneReplay i na nagraniach (MotionLab), nie w grze na żywo. Przy szybkim
   ruchu tło łatki zostaje o ułamek sekundy za obrazem; kursywa i szerokość kroju gry nie są
@@ -175,7 +176,7 @@ dotnet run --project src/GameTranslatorOverlay.App
 - Linux: dodaj `-p:EnableWindowsTargeting=true` (testy DPAPI i OCR wymagają Windows).
 - Paczka portable: `./tools/package.ps1` → `dist/`.
 - Wydanie: tag `v*` → CI buduje zip i dodaje go do Releases.
-- Testy: 1697 (1251 Core + 280 Infrastructure + 166 CorpusTool; na Linuksie 3 testy DPAPI są
+- Testy: 2087 (1540 Core + 381 Infrastructure + 166 CorpusTool; na Linuksie 3 testy DPAPI są
   pomijane), bez kluczy API i bez gry — wyłącznie dane syntetyczne. CI sprawdza pokrycie kodu
   (Core ≥ 91%, Infrastructure ≥ 80%). Szczegóły: [TESTING.md](docs/TESTING.md).
 - Benchmarki BenchmarkDotNet: `benchmarks/` — [BENCHMARKS.md](docs/BENCHMARKS.md).

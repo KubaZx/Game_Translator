@@ -1,7 +1,7 @@
 # Testy i pomiary — GameTranslatorOverlay
 
-Stan sprawdzony 6 października 2026 (wydanie 0.5.0): **1697 testów xUnit** — **1251 Core**,
-**280 Infrastructure** i **166 CorpusTool** — oraz kompilacja całego rozwiązania (z aplikacją
+Stan sprawdzony 16 października 2026 (wydanie 0.8.0): **2087 testów xUnit** — **1540 Core**,
+**381 Infrastructure** i **166 CorpusTool** — oraz kompilacja całego rozwiązania (z aplikacją
 WPF, narzędziami i benchmarkami) bez ostrzeżeń. Ta runda była weryfikowana na Windows
 (.NET 10 SDK): testy DPAPI (`[WindowsFact]`) wykonane, 0 pominiętych; smoke test Windows OCR
 z Mockiem zakończony wynikiem OK. Projekty Infrastructure i CorpusTool uruchamiają klasy testów

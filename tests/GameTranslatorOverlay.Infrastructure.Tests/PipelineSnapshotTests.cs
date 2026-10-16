@@ -17,10 +17,12 @@ public class PipelineSnapshotTests
         s => s.LiveDisplayMode = "subtitle",
         s => s.ResultDisplayMode = "overlay",
         s => s.ShowOverlayNotices = false,
+        s => s.ShowQualityMarks = false,
         s => s.LiveToggleHotkey = "Ctrl+Alt+F9",
         s => s.LastGameProcess = "game.exe",
         s => s.LastGameTitle = "Gra",
         s => s.DisclaimerAcknowledged = true,
+        s => s.StreamLlmResponses = false,
     };
 
     public static TheoryData<Action<AppSettings>> PipelineChanges => new()

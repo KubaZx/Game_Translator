@@ -28,6 +28,11 @@ public sealed class ResultItem : ObservableObject
 
     private string _editText = string.Empty;
     public string EditText { get => _editText; set => SetField(ref _editText, value); }
+
+    private string? _qualityReason;
+    public string? QualityReason { get => _qualityReason; set => SetField(ref _qualityReason, value); }
+
+    public string? QualityHint { get; init; }
 }
 
 /// <summary>
@@ -100,6 +105,8 @@ public partial class ResultPanelWindow : Window
                 TranslatedText = block.Outcome.TranslatedText ?? "—",
                 OriginLabel = LabelFor(block.Outcome),
                 EditText = block.Outcome.TranslatedText ?? string.Empty,
+                QualityReason = block.Outcome.TranslatedText is null ? null : TranslationQualityGate.ShortReason(block.Outcome.QualityIssues),
+                QualityHint = TranslationQualityGate.Hint(block.Outcome.QualityIssues, block.Outcome.Parts is { Count: > 1 }),
             });
         }
 
@@ -206,6 +213,7 @@ public partial class ResultPanelWindow : Window
             await _saveCorrection(item, corrected);
             item.TranslatedText = corrected;
             item.OriginLabel = "Ręczna korekta ✔";
+            item.QualityReason = null;
             item.IsEditing = false;
             SetNoActivate(true);
             RestartAutoHide();

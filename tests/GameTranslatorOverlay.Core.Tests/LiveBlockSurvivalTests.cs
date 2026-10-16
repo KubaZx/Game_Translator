@@ -1,4 +1,5 @@
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Core.Vision;
 
 namespace GameTranslatorOverlay.Core.Tests;
@@ -24,6 +25,24 @@ public class LiveBlockSurvivalTests
 
         Assert.Equal(3, survivors.Count);
         Assert.All(survivors, static s => Assert.Equal(1, s.Value.Misses));
+    }
+
+    [Fact]
+    public void Podtrzymany_blok_zachowuje_klucz_i_flage_ostrzezenia_jakosci()
+    {
+        var displayed = new Dictionary<string, LiveOverlayBlock>(StringComparer.Ordinal)
+        {
+            ["warned"] = Block() with { QualityIssues = TranslationQualityFlags.NumbersChanged },
+            ["clean"] = Block(box: new RectPx(10, 60, 100, 20)),
+        };
+
+        var survivors = LiveBlockSurvival.Survivors(displayed, Keys(), [], sceneCut: false, missGrace: 2)
+            .ToDictionary(static s => s.Key, static s => s.Value);
+
+        Assert.Equal(["clean", "warned"], survivors.Keys.Order());
+        Assert.Equal(TranslationQualityFlags.NumbersChanged, survivors["warned"].QualityIssues);
+        Assert.Equal(TranslationQualityFlags.None, survivors["clean"].QualityIssues);
+        Assert.Equal(displayed["warned"] with { Misses = 1 }, survivors["warned"]);
     }
 
     [Fact]

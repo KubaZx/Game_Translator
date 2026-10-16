@@ -68,12 +68,12 @@ public sealed class CorpusCatalog(string corpusDirectory, ILogger<CorpusCatalog>
                 result = index.IsEmpty
                     ? new CorpusLoadResult(null, path, entries.Count, 0, "Korpus nie zawiera żadnego tekstu.")
                     : new CorpusLoadResult(new CorpusSnapper(index, options), path, entries.Count, index.TextCount, null);
-                _logger.LogInformation("Korpus profilu {Profile}: {Entries} wpisów, {Texts} tekstów", profileId, entries.Count, index.TextCount);
+                _logger.LogInformation("Korpus profilu: {Entries} wpisów, {Texts} tekstów", entries.Count, index.TextCount);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or System.Text.Json.JsonException)
             {
                 result = new CorpusLoadResult(null, path, 0, 0, $"Nie udało się wczytać korpusu: {ex.GetType().Name}.");
-                _logger.LogWarning("Nie udało się wczytać korpusu profilu {Profile} ({Error})", profileId, ex.GetType().Name);
+                _logger.LogWarning("Nie udało się wczytać korpusu profilu ({Error})", ex.GetType().Name);
             }
             _last = (path, info.Length, info.LastWriteTimeUtc, result);
             return result;

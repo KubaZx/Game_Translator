@@ -1,8 +1,16 @@
 # Roadmap — GameTranslatorOverlay
 
-## Obecny stan — 15 października 2026
+## Obecny stan — 16 października 2026
 
-Ostatnie wydanie to **0.7.0** (15 października 2026, rundy 2026-10-06 (8) i 2026-10-14 (9)):
+Ostatnie wydanie to **0.8.0** (16 października 2026, runda 2026-10-16 (10)): własny profil gry
+tworzony, przemianowany i usuwany z okna (tylko w folderze danych, przeładowanie bez restartu),
+edytor skrótów w oknie, ostrzeżenia kontroli jakości w oknie, panelu wyniku i nakładce,
+strumieniowanie odpowiedzi Claude i serwerów zgodnych z OpenAI (pierwsze linie nad grą przed końcem
+odpowiedzi) oraz łatka napisu na tabliczce z ramką i śledzenie przez „cięcie sceny” w szybkim
+ruchu. Okno sprawdzone na renderach (UiPreview), sesja w powtórkach (SceneReplay) i na nagraniach
+(MotionLab); w grze na żywo jeszcze nie oglądane (scenariusze M48–M51).
+
+Wcześniej **0.7.0** (15 października 2026, rundy 2026-10-06 (8) i 2026-10-14 (9)):
 przebudowane okno aplikacji (sekcje, karty, nowy znak), ikony klawiszy w polskim zdaniu w trybie
 zakrywania, imię mówiącego jako osobny napis z krojem z profilu (Zilla Slab w Escape Academy),
 śledzenie napisu na ścianie ze skalą (z poprawką łatki dla dużego tekstu) i przełączanie profilu
@@ -33,23 +41,26 @@ z korpusu pisana literami czeka w nim na koniec pisania. Dla deweloperów: Overl
 i `typing`, projekt testów CorpusTool. Linia 0.4 dała szybszy tryb live, komunikaty w nakładce,
 pamięć dialogu i glosariusze DeepL.
 
-Przeszło **1845 testów** (1384 Core + 295 Infrastructure + 166 CorpusTool) na Windows; build całego rozwiązania bez ostrzeżeń. Zachowanie sesji
+Przeszło **2087 testów** (1540 Core + 381 Infrastructure + 166 CorpusTool) na Windows; build całego rozwiązania bez ostrzeżeń. Zachowanie sesji
 live zmierzono w SceneReplay (callbacki sesji, nie fizyczna nakładka) i MotionLab (nagrania
 przez prawdziwą sesję i nakładkę), wygląd — na klatkach 4K z Escape Academy przez OverlayPreview, dopasowanie
 do korpusu — powtórkami bloków z kopii cache przez pipeline z Mockiem (CorpusEval).
 **W grze na żywo** była tylko krótka sesja Escape Academy rano 6 października na wersji
 z korpusem, przed rundami 2026-10-06 (4)–(6). Nie oglądano jeszcze w grze dopasowania etykiet
 i początków kwestii, odrzucania śmieci, nowego wyglądu napisów ani wstrzymywania kwestii pisanej
-literami ani niczego z linii 0.6–0.7 (ruch kamery, nowe okno, ikony, krój imion); w innych grach
-nic z linii 0.5–0.7 nie było sprawdzane na żywo. Scenariusze ręczne to M36–M40 (0.5.0), M41–M42
-(0.6.0) i M43–M47 (0.7.0) z [MANUAL_TESTING.md](MANUAL_TESTING.md); przejście scenariuszy
+literami ani niczego z linii 0.6–0.8 (ruch kamery, nowe okno, ikony, krój imion, edytory,
+ostrzeżenia, pierwsze linie od razu); w innych grach nic z linii 0.5–0.8 nie było sprawdzane na
+żywo, a strumieniowania nie sprawdzano na prawdziwym API ani serwerze lokalnym. Scenariusze ręczne
+to M36–M40 (0.5.0), M41–M42 (0.6.0), M43–M47 (0.7.0) i M48–M51 (0.8.0)
+z [MANUAL_TESTING.md](MANUAL_TESTING.md); przejście scenariuszy
 M23–M35 z linii 0.3–0.4 nie jest nigdzie odnotowane.
 
 Produkt jest rozwijany dla różnych gier. Escape Academy (profil z receptą korpusu i krojem) służy
 do pomiarów; PoE2 jest jednym z obsługiwanych przypadków z dodatkowym profilem, bez korpusu
-(Path of Exile 1/2 są na liście wykluczeń ADR-014). Aktualny priorytet: sprawdzić 0.7.0 w grze
-na żywo — nowe okno, wygląd i ikony w trybie zakrywania, napisy w ruchu kamery, kwestie pisane
-literami, etykiety i odrzucanie śmieci przy korpusie — i dopiero na tej podstawie wybierać kolejne kierunki; dalej stabilność i czytelność
+(Path of Exile 1/2 są na liście wykluczeń ADR-014). Aktualny priorytet: sprawdzić 0.7.0 i 0.8.0
+w grze na żywo — nowe okno, edytory profilu i skrótów, ostrzeżenia, pierwsze linie od razu, wygląd
+i ikony w trybie zakrywania, napisy w ruchu kamery, kwestie pisane literami, etykiety i odrzucanie
+śmieci przy korpusie — i dopiero na tej podstawie wybierać kolejne kierunki; dalej stabilność i czytelność
 w rozgrywce.
 Etapy poniżej zachowują historię powstawania produktu; status implementacji nie zastępuje testów
 wizualnych na kolejnych grach.
@@ -61,19 +72,25 @@ wizualnych na kolejnych grach.
    wszystkich układach nakładki od rundy (8) (poza zapasowym zrzutem ekranu).
 3. Lepsza czytelność i zakrywanie na wzorzystym oraz animowanym tle.
 4. Dostosowywanie tempa pracy do menu, dialogu i ruchu.
-5. Pokazanie ostrzeżenia kontroli jakości (`TranslationOutcome.QualityWarning`,
-   `UsageTracker.QualityIssues`) w oknie lub nakładce — dziś jest tylko w cache i licznikach.
+5. ✅ Ostrzeżenia kontroli jakości w oknie (Pulpit, „Ostatnie ostrzeżenia”), panelu wyniku
+   i nakładce (rożek w dymkach i na pasku, nigdy w zakrywaniu) — runda 2026-10-16 (10). Otwarte:
+   po „Popraw” w trakcie live dymek trzyma stare tłumaczenie do następnego odczytu tekstu.
 6. Przerywanie przygotowania glosariusza DeepL w tle po przełączeniu na Cache-only albo tryb
    prywatny (dziś kończy się samo po najwyżej 5 s).
 7. Klatka live anulowana przez zmianę ustawień czeka dziś na ponowne sprawdzenie co 4 s —
    powinna być odczytana od razu po przebudowie pipeline'u.
 8. Wpisy nieaktualne po zmianie formatu (`reflow`), dla których dostawca zwraca pusty wynik,
    są ponawiane przy każdym wystąpieniu — potrzebny znacznik ostateczności jak `qa-final`.
-9. Edytor skrótów w oknie (dziś tylko `settings.json`, m.in. `liveToggleHotkey`).
+9. ✅ Edytor skrótów w oknie (O programie → Skróty klawiszowe; kolizje, AltGr, zajęte przez inny
+   program) — runda 2026-10-16 (10). Otwarte: skrót zajęty globalnie przez inny program system
+   połyka bez powiadomienia (edytor podpowiada tylko tekstem).
 10. ✅ Publikacja dwufazowa: najpierw bloki znane lokalnie, potem tłumaczenia dostawcy w tej
     samej klatce — runda 2026-10-06 (8) (na nagraniach zysk w granicach rozrzutu).
 11. HTTP/2 i metryki połączeń (czas zestawienia, ponowne użycie) dla dostawców.
-12. Strumieniowanie odpowiedzi modeli językowych, żeby pierwsze linie pojawiały się wcześniej.
+12. ✅ Strumieniowanie odpowiedzi modeli językowych (Claude, OpenAI SSE): pierwsza linia w ok.
+    połowie czasu całej odpowiedzi w scenie testowej — runda 2026-10-16 (10). Otwarte: sprawdzenie na prawdziwych API
+    i serwerach lokalnych (Ollama, LM Studio, DeepSeek), kopia klatki w pełnej rozdzielczości przy
+    skalowanym OCR tylko na potrzeby potwierdzenia wczesnych linii.
 13. Pilotaż `paragraphCacheKeys` u prawdziwego dostawcy (najpierw PoE2: 21% znaków
     powtórzonych w innych blokach) i decyzja o włączeniu domyślnie — runda 2026-10-06 (3).
 14. Tryb prywatny: czytanie (bez zapisu) tłumaczeń korpusu z wyprzedzeniem z bazy na dysku.
@@ -132,14 +149,21 @@ wizualnych na kolejnych grach.
     linii, której OCR nie przeczytał jako słowa (dziś działa tylko ikona odczytana jako litera,
     np. „X Hint”), ikony w trybie ręcznym (Ctrl+Shift+T) i prawdziwy napis „[X]” w grze, który dziś
     jest brany za znacznik ikony (w dymkach i na pasku staje się ▢).
-32. Biegunowość łatki dla ciemnego napisu na jasnej tabliczce z ciemną ramką: pierścień tła leży
-    na ramce, więc jasne tło tabliczki jest brane za tekst (wzorzec „odwrócony”, słabe śledzenie
-    i zakrycie; 45 z 61 łatek tabliczki w prologu) — runda 2026-10-14 (9).
-33. Cięcie sceny w szybkim ruchu czyści stan śledzenia (prędkość i flagę ruchu bloku), więc blok
-    bywa zgubiony w następnym kroku — runda 2026-10-14 (9).
+32. Biegunowość łatki dla ciemnego napisu na jasnej tabliczce z ciemną ramką: ✅ tło kontenera
+    (pas wokół boxu w jednej jasności) i łatka bez ramki — runda 2026-10-16 (10); offline odwrócone
+    łatki tabliczki w prologu 44/108 → 1/108. Otwarte: znak z jasnymi literami, gdy box OCR dochodzi
+    do ramki, klatki w trakcie zanikania sceny — runda 2026-10-14 (9).
+33. Cięcie sceny w szybkim ruchu: ✅ gdy któryś blok był przesunięty, stan śledzenia bloków
+    potwierdzonych śledzeniem przetrwa „cięcie” — runda 2026-10-16 (10) (SceneReplay `pan-cut`: 6 zniknięć → 0); w nagraniach 10 kl./s
+    przypadek nie wystąpił, więc MotionLab zysku nie pokazuje — runda 2026-10-14 (9).
 34. Okno aplikacji na żywo: stany najechania i fokusu klawiatury, monitor 100% DPI, Windows 10
     (zapasowe czcionki i ikony), brak menu układów przyciągania przy `WindowChrome` na Windows 11 —
     runda 2026-10-14 (9).
+35. Własne profile: edytor w oknie tylko dla nazwy, procesu i języka; strojenie (OCR, słownik,
+    krój) nadal ręcznie w JSON-ie — runda 2026-10-16 (10).
+36. Wczesne linie przy złej liczbie wyników w jednej partii: unieważnienie zdejmuje wczesne linie
+    całej klatki (także z innych partii), a dla klatek powyżej 25 tekstów planowane partie i mapa
+    po tekście reagują na nie różnie — rzadkie, do ujednolicenia — runda 2026-10-16 (10).
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -222,7 +246,7 @@ Obsługa profili wg schematu `profiles/<id>/profile.json` (wykrywanie gry po naz
 
 **Kryterium ukończenia:** aplikacja wykrywa uruchomione PoE2 i proponuje profil; profil ustawia parametry i słownik; usunięcie profilu nie zmienia działania aplikacji dla innych gier.
 
-### Etap 12 — Dystrybucja portable (wydanie 0.7.0; pełna ocena ręczna według checklisty nadal osobna)
+### Etap 12 — Dystrybucja portable (wydanie 0.8.0; pełna ocena ręczna według checklisty nadal osobna)
 
 Release: `dotnet publish` win-x64, aplikacja portable. Instrukcje użytkownika, `MANUAL_TESTING.md` (testy wymagające pulpitu Windows: OCR na żywo, nakładka, skróty — wyłącznie ręczne), licencje zależności, polityka prywatności, disclaimer. Artefakt Release z CI na tag lub manualnie.
 
@@ -1791,3 +1815,115 @@ tabliczce (32); cięcie sceny czyści stan śledzenia (33); perspektywa i rzadki
 reguły kroju poza trybem zakrywania (19); ikona na początku linii nieczytana przez OCR i ikony
 w trybie ręcznym (31).
 
+### Runda 2026-10-16 (10) — edytory w oknie, ostrzeżenia jakości, pierwsze linie od razu, tabliczki
+
+**Cel.** Wydanie 0.8.0 bez udziału użytkownika w grze: własne profile gier i skróty zmieniane
+w oknie (kierunek 9 i część 35), ostrzeżenia kontroli jakości w oknie i nakładce (5),
+strumieniowanie odpowiedzi modeli językowych (12), biegunowość łatki na tabliczce z ramką (32)
+i stan śledzenia przez „cięcie sceny” (33). Cztery gałęzie robocze (`claude/r10-*`, po jednym
+autorze i jednym sprawdzającym na gałąź) scalone w `claude/r10`, potem jedna recenzja integracyjna.
+Wcześniej z kodu usunięto prawdziwy tytuł gry z testów i ścieżki z dysku autora z narzędzi.
+
+**Metoda.** Bez uruchamiania gier i aplikacji: UiPreview (prawdziwe `MainWindow` na prawdziwych
+plikach w tymczasowym folderze danych; teraz w zwykłym `Application`, nie w `App`), OverlayPreview
+na klatkach 4K, SceneReplay (nowe scenariusze `pan-cut`, `quality-mark(-clean)`, `stream`,
+`stream-refusal`, `stream-change` z `--stream on|off` i `--stream-provider llm|claude`), MotionLab
+na nagraniach z rundy (7) (Mock 500 ms), porównanie łatek offline na łatkach prawdy z nagrań.
+Strumienie dostawców sprawdzone na odpowiedziach SSE i zdarzeniach SDK z testów, bez płatnych
+zapytań.
+
+**Zmiany.**
+
+- Profile: `ProfileIds` (slug ASCII, unikalny wobec zestawu i folderu danych), `ProfileNames`
+  (nazwa z tytułu okna), `UserProfileStore` (tworzenie, zmiana nazwy i usuwanie wyłącznie
+  w `<dane>\profiles\`, zapis atomowy, profile z zestawu nietykalne), `ProfileCatalog.LoadEntries`
+  ze ścieżką pliku, `TranslationOrchestrator.ReloadProfiles`. Karta „Profil tej gry” w sekcji Gra
+  (`MainWindow.Profiles.cs`): aktywny profil ma pierwszeństwo przed dopasowaniem po oknie, w trakcie
+  live przyciski zablokowane, w trybie prywatnym tworzenie i zmiana nazwy zablokowane (nazwa gry
+  trafiłaby na dysk). Log nie zawiera nazw, identyfikatorów ani ścieżek własnych profili (tylko
+  typ wyjątku i HResult, przy błędnym pliku — „problem z własnym profilem”; ostrzeżenia o kroju,
+  słowniku i korpusie mówią „własny profil”).
+- Skróty: `HotkeyGesture`, `HotkeyCapture`, `HotkeyRules`, `HotkeyDefaults` (Core), edytor
+  w „O programie” (`MainWindow.Hotkeys.cs`), `HotkeyManager.TryRegister`/`Unregister`. Reguły:
+  duplikat, Esc, Alt+F4, skróty edycji, sam Shift i Ctrl+Alt z literą albo cyfrą (AltGr); skrót
+  zajęty przez inny program przywraca poprzedni; „Przywróć domyślne” wszystko albo nic.
+- Ostrzeżenia: `QualityWarningLog` (do 20 pozycji w pamięci, deduplikacja, kontekst profilu
+  i języków z chwili ostrzeżenia dla „Popraw”, pokolenie: wynik klatki rozpoczętej przed
+  przełączeniem trybu prywatnego nie wraca na listę), `TranslationOutcome.QualityIssues`,
+  `TranslationQualityGate.ShortReason`/`Hint` (przy bloku z kilku fragmentów: „co najmniej jednego”),
+  `OverlayBubble` (rożek; bez tła — kropka), `AppSettings.ShowQualityMarks`. W zakrywaniu znacznika
+  nie ma (sprawdzone pikselami na klatkach OverlayPreview).
+- Strumień: `IStreamingTranslationProvider`, `LlmTranslationStreamParser` (przyrostowy parser
+  tablicy `translations`), `PartialResults` (unieważnienie `Reset` przy złej liczbie wyników przed
+  tłumaczeniem linia po linii), `TranslationPipeline.TranslateAsync(…, onPartial)` z tą samą
+  kontrolą jakości dla wczesnych linii. Claude przez `Beta.Messages.CreateStreaming`; serwer
+  zgodny z OpenAI przez SSE (`stream: true`, `stream_options.include_usage`); przy błędzie
+  `InvalidRequest`/`Unknown` — zwykłe zapytanie, a po jego powodzeniu zapamiętanie hosta jako
+  „bez strumienia”; odpowiedź inna niż `text/event-stream` jest od razu czytana jako JSON. Sesja live (`LiveOverlayBlock.Provisional`, `StreamedOutcomes`) pokazuje
+  wczesne linie tylko po potwierdzeniu świeżym przechwyceniem na nieruchomej scenie i nigdy przy
+  zapasowym zrzucie ekranu; wynik końcowy potwierdza, podmienia albo zdejmuje linię, a klatka
+  porzucona (nowa scena, zmiana ustawień, błąd cyklu) zdejmuje swoje wczesne linie od razu.
+- Tabliczki: `GlyphCover.DetectFill` sprawdza, czy tekst stoi w kontenerze (pas wokół boxu OCR
+  w jednej jasności, pierścień tła częściowo na ramce), i wtedy liczy biegunowość względem tła
+  kontenera (przyjmowana tylko przy przeciwnym wyniku z wyraźną przewagą, ≤ 0,1); łatka nie
+  przemalowuje ramki (`ContainerMask`, `DropEdgeParts`). `SceneCutTracking.Retained`: gdy
+  któryś z pozostałych bloków był przesunięty, bloki potwierdzone śledzeniem zachowują stan
+  śledzenia przez „cięcie sceny”.
+
+**Pomiary.** Offline (łatki prawdy z nagrań): odwrócone łatki tabliczki w prologu 44/108 → 1/108
+(zostaje klatka w trakcie zanikania sceny), w pokoju 2/24 → 0/26; kontrast wzorca ok. 20–30 →
+ok. 110; czas budowy łatki bez zmian (mediana 2,9 ms). SceneReplay `pan-cut`: przed zmianą
+6 zniknięć napisu w panoramie w każdym z 3 przebiegów, po zmianie 0 (7/7 skoków, błąd 0 px).
+Strumień (SceneReplay `stream`, 5 linii, symulowany dostawca): pierwszy blok po 1,47–1,65 s,
+wszystkie po 2,83–3,03 s, bez strumienia 2,86–2,97 s (Claude i serwer zgodny z OpenAI, po dwa
+przebiegi). UiPreview: 0 obciętych i 0 zasłoniętych
+elementów w nowych kartach, także przy minimalnym rozmiarze okna.
+MotionLab (Mock 500 ms, po dwa przebiegi na nagranie, `r10`/`r10-b`, „Pod oryginałem”
+`r10-below`/`r10f-below`; w nawiasie wydanie 0.7.0 — `r9f`, „Pod oryginałem” `r9-below` — i zakres
+rund (8)–(9)). Zakrywanie, pokój: ruch kamery 75,3–76,1% (77,5%; 74,4–77,5%), HUD w ruchu
+79,1–79,6% (80,7%; 78,4–81,6%), tekst ruchomy 20,4–25,1% (31,3%; 15,5–31,8%), dziury 3,7–6,6 s
+(4,9 s; 3,5–4,9 s), utraty HUD 19–25 (23; 21–24). Zakrywanie, prolog-intro: pokrycie całości
+84,2–86,5% (85,7%), dziury 1,8–2,7 s (3,9 s), nieaktualne 15,9–17,1 s (15,9 s), utraty HUD 3–5 (4).
+Mediana opóźnienia w pokoju skacze (480–911 ms wobec 259–382 ms), bo ok. 15 zdarzeń dzieli się na
+dwa skupiska: start w ruchu (mediana 0–48 ms, jak wcześniej 0–95 ms) i start w spoczynku
+(2477–2512 ms, wcześniej 2465–2726 ms) — przesunięcie jednego zdarzenia między nimi zmienia medianę.
+„Pod oryginałem”: pokój 73,0–74,7% ruchu kamery (72,7%), dziury 3,6–9,8 s (5,2 s; 5,2–7,1 s),
+utraty HUD 20–30 (25); prolog pokrycie 86,8–87,8% (86,7%), nieaktualne 17,0–22,1 s (18,3 s; w jednym
+przebiegu „Accept” 1,8 s). Pasek napisów w prologu 87,6% (87,4%), dziury 2,8 s (2,5 s). Zysk z łatek
+tabliczek i „cięcia” nie wychodzi w MotionLab poza rozrzut: w nagraniach 10 kl./s cięcie w ruchu nie
+wystąpiło, a tabliczki zmieniają łatki na kilku klatkach. Nakładka OverlayPreview na 6 klatkach 4K
+(`wyglad/r10-final` wobec `r9-final`): piksel w piksel bez zmian.
+
+**Regresje.** 2087 testów (1540 Core + 381 Infrastructure + 166 CorpusTool), build bez ostrzeżeń.
+SceneReplay, dwa przebiegi (przed poprawkami z recenzji i po nich): podstawowe sceny — stary napis
+usunięty po 33–35 ms, local-occlusion* — 0 strat menu, moving-text/position-jitter — błąd 0 px,
+hud-motion* — 0 strat HUD, typing — 2 zapytania, typing-nohold — 3 (znany rozrzut 2–3), stale-*
+syntetyczne 201–435 ms, z prawdziwą etykietą 205–447 ms (raz `stale-busy` 48 ms: pierwszy OCR po
+zmianie wypadł 46 ms po niej, wcześniej 383–627 ms — faza odczytów), stale-dim i stale-present-junk
+bez zniknięcia, jak oczekiwano. Nowe: `quality-mark` — rożek na wszystkich 8 blokach z flagą
+i jedno ostrzeżenie, `quality-mark-clean` — żadnego; `stream-refusal` — wczesne linie zdjęte po
+odmowie po 1,37–1,40 s (w drugim przebiegu odmowa przyszła przed piątą linią, więc pokazały się
+cztery); `stream-change` — stare wczesne linie zdjęte 1,5–1,7 s po zmianie tekstu, bez żadnej
+aktualizacji mieszającej stare z nowymi.
+
+**Recenzja integracyjna** (1 agent na scalonej gałęzi; znaleziska sprawdzone w kodzie). Poprawione:
+wynik klatki sprzed przełączenia trybu prywatnego mógł wrócić na wyczyszczoną listę ostrzeżeń
+(pokolenie w `QualityWarningLog`, licznik też zerowany); klatka porzucona bez publikacji zostawiała
+wczesne linie nad grą; odczyt wyników i znacznika unieważnienia nie był atomowy (jedno `Take`
+pod blokadą); log zawierał ścieżkę i nazwę własnego profilu; `ModelNotFound` dawał drugie,
+zwykłe zapytanie do tego samego złego modelu; znaczniki bloków ręcznych zostawały w pamięci
+nakładki po wyczyszczeniu bloków;
+spójny komunikat o modyfikatorach (bez Ctrl+Alt); wariant UiPreview i scenariusze M48–M50.
+Potem jeszcze kontrola dokumentacji z kodem (1 agent): id własnego profilu w ostrzeżeniach treści
+i logu korpusu, komunikat „model pomylił liczbę linii” przy każdym zdjęciu wczesnych linii (teraz
+powód: zmiana widoku, zmiana ustawień, błąd klatki), „pusty wynik” opisany jako ostrzeżenie,
+znacznik paska napisów przy zakrywaniu, kod 404 na liście fallbacku, liczba testów w README.
+
+**Otwarte.** Wszystko z tej rundy — w grze na żywo nieoglądane (M48–M51); strumień na prawdziwych
+API i serwerach lokalnych (12); unieważnienie z jednej partii zdejmuje wczesne linie całej klatki,
+a klatki powyżej 25 tekstów reagują na nie różnie (36); `DropEdgeParts` bez trafień w geometriach
+testów; brak testu przywracania stanu sesji po „cięciu” na prawdziwej sesji poza SceneReplay;
+po „Popraw” dymek czeka na następny odczyt (5); skrót zajęty globalnie przez inny program (9);
+strojenie własnego profilu w oknie (35); w MotionLab zysk z tabliczek i „cięcia” nie wychodzi poza
+rozrzut — wynik ruchomego napisu zależy od tego, które klatki trafią do OCR (warto dodać losowanie
+fazy albo więcej przebiegów).

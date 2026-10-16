@@ -76,6 +76,15 @@
       <Setter Property="FontSize" Value="12" />
       <Setter Property="Margin" Value="0,7,0,0" />
     </Style>
+    <Style x:Key="Field.ReadOnly" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource Brush.SurfaceDeep}" />
+      <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="11,0" />
+      <Setter Property="MinHeight" Value="38" />
+      <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
     <Style x:Key="Live.Halo" TargetType="Ellipse">
       <Setter Property="Opacity" Value="0" />
       <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
@@ -319,6 +328,8 @@
       <UniformGrid Columns="3" Margin="0,0,-12,0" />
     </ItemsPanelTemplate>
     <ui:WidthToColumnsConverter x:Key="ProviderColumnCount" Threshold="720" Narrow="2" Wide="3" />
+    <ui:WidthToColumnsConverter x:Key="StatColumnCount" Threshold="720" Narrow="2" Wide="4" />
+    <ui:BoolToVisibilityConverter x:Key="BoolToCollapsed" Invert="True" />
     <ItemsPanelTemplate x:Key="ProviderColumns">
       <UniformGrid Margin="0,0,-10,0"
                    Columns="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ListBox}, Converter={StaticResource ProviderColumnCount}}" />
@@ -647,12 +658,13 @@
             </Grid>
 
             <Border Style="{StaticResource Card}" Margin="0,16,0,0">
-              <StackPanel>
+              <StackPanel x:Name="PnlStats">
                 <DockPanel Margin="0,0,0,14">
                   <TextBlock DockPanel.Dock="Right" Text="ta sesja" Foreground="{StaticResource Brush.TextFaint}" FontSize="12" VerticalAlignment="Center" />
                   <TextBlock Text="Statystyki" Style="{StaticResource Text.CardTitle}" />
                 </DockPanel>
-                <UniformGrid Columns="3" Margin="0,0,-10,-10">
+                <UniformGrid Margin="0,0,-10,-10"
+                             Columns="{Binding ActualWidth, ElementName=PnlStats, Converter={StaticResource StatColumnCount}}">
                   <Border Style="{StaticResource Card.Inset}" Margin="0,0,10,10" Padding="14,12">
                     <StackPanel>
                       <StackPanel Orientation="Horizontal">
@@ -705,6 +717,26 @@
                         <TextBlock Text="Błędy" Foreground="{StaticResource Brush.TextMuted}" FontSize="12" Margin="8,0,0,0" />
                       </StackPanel>
                       <TextBlock x:Name="TxtStatErrors" Text="0" Style="{StaticResource Text.StatValue}" Margin="0,6,0,0" />
+                    </StackPanel>
+                  </Border>
+                  <Border x:Name="TileQuality" Style="{StaticResource Card.Inset}" Margin="0,0,10,10" Padding="14,12"
+                          ToolTip="Różne tłumaczenia, które kontrola jakości oznaczyła w tej sesji (zmienione liczby, brak tłumaczenia, za długi wynik). Lista: Dane i słownik → Ostatnie ostrzeżenia.">
+                    <StackPanel>
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE7BA;" Style="{StaticResource Text.Icon}" FontSize="13" Foreground="{StaticResource Brush.AccentText}" />
+                        <TextBlock Text="Ostrzeżenia jakości" Foreground="{StaticResource Brush.TextMuted}" FontSize="12" Margin="8,0,0,0" />
+                      </StackPanel>
+                      <TextBlock x:Name="TxtStatQuality" Text="0" Style="{StaticResource Text.StatValue}" Margin="0,6,0,0" />
+                    </StackPanel>
+                  </Border>
+                  <Border Style="{StaticResource Card.Inset}" Margin="0,0,10,10" Padding="14,12"
+                          ToolTip="Drugie zapytania do modelu językowego, gdy pierwszy wynik nie przeszedł kontroli jakości — liczą się jak zwykłe zapytania.">
+                    <StackPanel>
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE72C;" Style="{StaticResource Text.Icon}" FontSize="13" Foreground="{StaticResource Brush.AccentText}" />
+                        <TextBlock Text="Ponowienia" Foreground="{StaticResource Brush.TextMuted}" FontSize="12" Margin="8,0,0,0" />
+                      </StackPanel>
+                      <TextBlock x:Name="TxtStatRetries" Text="0" Style="{StaticResource Text.StatValue}" Margin="0,6,0,0" />
                     </StackPanel>
                   </Border>
                 </UniformGrid>
@@ -788,7 +820,91 @@
                 </StackPanel>
               </Border>
 
-              <Border Grid.Column="2" Style="{StaticResource Card}" VerticalAlignment="Top">
+              <StackPanel Grid.Column="2" VerticalAlignment="Top">
+              <Border x:Name="CardGameProfile" Style="{StaticResource Card}">
+                <StackPanel>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource IconBadge}">
+                      <TextBlock Text="&#xE77B;" Style="{StaticResource Text.Icon}" FontSize="15" Foreground="{StaticResource Brush.AccentText}" HorizontalAlignment="Center" />
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                      <TextBlock Text="Profil tej gry" Style="{StaticResource Text.CardTitle}" />
+                      <TextBlock Text="Rozpoznaje grę po nazwie procesu i włącza się sam." Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,2,0,0" />
+                    </StackPanel>
+                  </Grid>
+
+                  <TextBlock x:Name="TxtProfileNoWindow" Text="Wybierz okno z listy — pokażę, czy ta gra ma profil." Style="{StaticResource Text.Hint}" Margin="0,14,0,0" />
+
+                  <StackPanel x:Name="PnlProfileMatched" Margin="0,14,0,0" Visibility="Collapsed">
+                    <Border Style="{StaticResource Card.Inset}" Padding="14,12">
+                      <StackPanel>
+                        <DockPanel>
+                          <Border x:Name="ChipProfileOwn" DockPanel.Dock="Right" Style="{StaticResource Chip}" Background="#1A7C5CFF" BorderBrush="#407C5CFF"
+                                  Margin="10,0,0,0" VerticalAlignment="Top">
+                            <TextBlock Text="własny" FontSize="11.5" Foreground="{StaticResource Brush.AccentText}" />
+                          </Border>
+                          <Border x:Name="ChipProfileBundled" DockPanel.Dock="Right" Style="{StaticResource Chip}" Margin="10,0,0,0" VerticalAlignment="Top">
+                            <TextBlock Text="z zestawu" FontSize="11.5" Foreground="{StaticResource Brush.TextMuted}" />
+                          </Border>
+                          <TextBlock x:Name="TxtMatchedProfileName" FontWeight="SemiBold" FontSize="14" TextWrapping="Wrap" />
+                        </DockPanel>
+                        <TextBlock x:Name="TxtMatchedProfileDetail" Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,5,0,0" />
+                        <TextBlock x:Name="TxtMatchedProfileActive" Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,3,0,0" />
+                      </StackPanel>
+                    </Border>
+                    <WrapPanel x:Name="PnlOwnProfileActions" Margin="0,12,0,-8">
+                      <Button x:Name="BtnRenameProfile" Content="Zmień nazwę" ui:Visuals.Glyph="&#xE8AC;" Click="OnRenameProfileClick" Margin="0,0,8,8" />
+                      <Button x:Name="BtnDeleteProfile" Content="Usuń profil" Style="{StaticResource Btn.Danger}" ui:Visuals.Glyph="&#xE74D;"
+                              Click="OnDeleteProfileClick" Margin="0,0,8,8" />
+                    </WrapPanel>
+                  </StackPanel>
+
+                  <StackPanel x:Name="PnlProfileRename" Margin="0,14,0,0" Visibility="Collapsed">
+                    <TextBlock Text="Nowa nazwa profilu" Style="{StaticResource Text.Label}" />
+                    <TextBox x:Name="TxtRenameProfile" MaxLength="80" AutomationProperties.Name="Nowa nazwa profilu" KeyDown="OnProfileEditorKeyDown" />
+                    <WrapPanel Margin="0,14,0,-8">
+                      <Button x:Name="BtnSaveRename" Content="Zapisz nazwę" Style="{StaticResource Btn.Primary}" ui:Visuals.Glyph="&#xE74E;"
+                              Click="OnSaveRenameClick" Margin="0,0,8,8" />
+                      <Button Content="Anuluj" Style="{StaticResource Btn.Ghost}" Click="OnCancelProfileEditClick" Margin="0,0,8,8" />
+                    </WrapPanel>
+                  </StackPanel>
+
+                  <StackPanel x:Name="PnlProfileMissing" Margin="0,14,0,0" Visibility="Collapsed">
+                    <TextBlock x:Name="TxtProfileMissing" Style="{StaticResource Text.Hint}"
+                               Text="Ta gra nie ma jeszcze profilu — tłumacz działa w trybie uniwersalnym. Własny profil zapamięta ją i włączy się sam przy jej oknie." />
+                    <Button x:Name="BtnCreateProfile" Content="Utwórz profil dla tej gry" Style="{StaticResource Btn.Primary}" ui:Visuals.Glyph="&#xE710;"
+                            HorizontalAlignment="Left" Margin="0,14,0,0" Click="OnCreateProfileClick" />
+                  </StackPanel>
+
+                  <StackPanel x:Name="PnlProfileCreate" Margin="0,14,0,0" Visibility="Collapsed">
+                    <TextBlock Text="Nazwa profilu" Style="{StaticResource Text.Label}" />
+                    <TextBox x:Name="TxtNewProfileName" MaxLength="80" AutomationProperties.Name="Nazwa profilu" KeyDown="OnProfileEditorKeyDown" />
+                    <TextBlock Text="Proces gry" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <Border Style="{StaticResource Field.ReadOnly}">
+                      <TextBlock x:Name="TxtNewProfileProcess" FontFamily="{StaticResource Font.Mono}" FontSize="12" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" Foreground="#FFC3C9D6" />
+                    </Border>
+                    <TextBlock Text="Odczytany z okna — po nim profil rozpozna grę." Style="{StaticResource Field.Hint}" />
+                    <TextBlock Text="Język gry" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <ComboBox x:Name="CmbNewProfileLanguage" AutomationProperties.Name="Język gry w nowym profilu" />
+                    <TextBlock x:Name="TxtNewProfileNote" Style="{StaticResource Field.Hint}" Margin="0,12,0,0" />
+                    <WrapPanel Margin="0,14,0,-8">
+                      <Button x:Name="BtnSaveNewProfile" Content="Utwórz profil" Style="{StaticResource Btn.Primary}" ui:Visuals.Glyph="&#xE74E;"
+                              Click="OnSaveNewProfileClick" Margin="0,0,8,8" />
+                      <Button Content="Anuluj" Style="{StaticResource Btn.Ghost}" Click="OnCancelProfileEditClick" Margin="0,0,8,8" />
+                    </WrapPanel>
+                  </StackPanel>
+
+                  <TextBlock x:Name="TxtProfileEditError" Style="{StaticResource Text.Status}" Foreground="#FFFCA5A5" Margin="0,12,0,0" />
+                  <TextBlock x:Name="TxtProfileLiveLock" Style="{StaticResource Text.Status}" Foreground="#FFFCD34D" Margin="0,12,0,0" />
+                </StackPanel>
+              </Border>
+
+              <Border Style="{StaticResource Card}" Margin="0,16,0,0">
                 <StackPanel>
                   <Grid>
                     <Grid.ColumnDefinitions>
@@ -830,6 +946,7 @@
                   </Border>
                 </StackPanel>
               </Border>
+              </StackPanel>
             </Grid>
           </StackPanel>
         </ScrollViewer>
@@ -925,6 +1042,16 @@
                   <TextBlock Text="Wybierz z listy albo wpisz nazwę modelu." Style="{StaticResource Field.Hint}" />
                 </StackPanel>
 
+                <CheckBox x:Name="ChkStreamLlm" AutomationProperties.Name="Pierwsze linie od razu" Margin="0,0,0,16" Visibility="Collapsed"
+                          ToolTip="Odpowiedź modelu przychodzi strumieniem: w trybie live gotowe linie trafiają nad grę, zanim model skończy całą odpowiedź."
+                          Checked="OnStreamLlmChanged" Unchecked="OnStreamLlmChanged">
+                  <StackPanel>
+                    <TextBlock Text="Pierwsze linie od razu" FontWeight="SemiBold" />
+                    <TextBlock Text="Tryb live pokazuje gotowe linie, zanim model skończy odpowiedź. Ten sam koszt; wynik końcowy i tak je sprawdza."
+                               Style="{StaticResource Text.Hint}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                  </StackPanel>
+                </CheckBox>
+
                 <TextBlock Text="Klucz API" Style="{StaticResource Text.Label}" />
                 <Grid>
                   <Grid.ColumnDefinitions>
@@ -973,7 +1100,7 @@
                 <StackPanel>
                   <TextBlock Text="Profil gry" Style="{StaticResource Text.Label}" />
                   <ComboBox x:Name="CmbProfile" SelectionChanged="OnSettingChanged" />
-                  <TextBlock Text="Bez profilu albo z profilem innej gry dobiera się sam po nazwie procesu; własny profil bez nazw procesów zostaje." Style="{StaticResource Field.Hint}" />
+                  <TextBlock Text="Bez profilu albo z profilem innej gry dobiera się sam po nazwie procesu; własny profil bez nazw procesów zostaje. Profil dla nowej gry utworzysz w sekcji Gra." Style="{StaticResource Field.Hint}" />
                 </StackPanel>
                 <StackPanel Grid.Column="2">
                   <TextBlock Text="Postać gracza" Style="{StaticResource Text.Label}"
@@ -1034,6 +1161,26 @@
             </Border>
 
             <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+              <CheckBox x:Name="ChkQualityMarks" AutomationProperties.Name="Znacznik ostrzeżeń w nakładce"
+                        Checked="OnQualityMarksChanged" Unchecked="OnQualityMarksChanged">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <Border Style="{StaticResource IconBadge}" Background="#1AFBBF24" BorderBrush="#40FBBF24">
+                    <TextBlock Text="&#xE7BA;" Style="{StaticResource Text.Icon}" FontSize="15" Foreground="{StaticResource Brush.Warning}" HorizontalAlignment="Center" />
+                  </Border>
+                  <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                    <TextBlock Text="Znacznik ostrzeżeń w nakładce" Style="{StaticResource Text.CardTitle}" />
+                    <TextBlock Text="Bursztynowy rożek w rogu dymka i paska napisów (przy samym tekście — kropka obok), gdy kontrola jakości ma wątpliwości: zmienione liczby, brak tłumaczenia, za długi wynik. Przy „Na oryginale (zakrywa)” nigdy — tam napis ma wyglądać jak w grze."
+                               Style="{StaticResource Text.Hint}" Margin="0,3,0,0" />
+                  </StackPanel>
+                </Grid>
+              </CheckBox>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,16,0,0">
               <StackPanel>
                 <TextBlock Text="Czcionka napisów" Style="{StaticResource Text.CardTitle}" Margin="0,0,0,14" />
                 <Grid>
@@ -1059,7 +1206,7 @@
             <Border Style="{StaticResource Card}" Margin="0,16,0,0">
               <StackPanel>
                 <DockPanel>
-                  <Border DockPanel.Dock="Right" Style="{StaticResource Kbd}">
+                  <Border x:Name="KbdHotkeyResult" DockPanel.Dock="Right" Style="{StaticResource Kbd}">
                     <TextBlock x:Name="TxtHotkeyResult" Text="Ctrl+Shift+T" />
                   </Border>
                   <TextBlock Text="Wyświetlanie wyniku" Style="{StaticResource Text.CardTitle}" />
@@ -1086,7 +1233,7 @@
               </Border>
               <StackPanel Grid.Column="1" Margin="16,0,0,0">
                 <TextBlock Text="Dane i słownik" Style="{StaticResource Text.PageTitle}" />
-                <TextBlock Text="Twój słownik, cache tłumaczeń, pomiary szybkości i folder z danymi aplikacji." Style="{StaticResource Text.PageSubtitle}" Margin="0,2,0,0" />
+                <TextBlock Text="Twój słownik, cache tłumaczeń, ostrzeżenia jakości, pomiary szybkości i folder z danymi aplikacji." Style="{StaticResource Text.PageSubtitle}" Margin="0,2,0,0" />
               </StackPanel>
             </Grid>
 
@@ -1143,6 +1290,84 @@
                 </DockPanel>
               </Border>
             </Grid>
+
+            <Border x:Name="CardQualityWarnings" Style="{StaticResource Card}" Margin="0,16,0,0">
+              <StackPanel>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <Border Style="{StaticResource IconBadge}" Background="#1AFBBF24" BorderBrush="#40FBBF24">
+                    <TextBlock Text="&#xE7BA;" Style="{StaticResource Text.Icon}" FontSize="15" Foreground="{StaticResource Brush.Warning}" HorizontalAlignment="Center" />
+                  </Border>
+                  <StackPanel Grid.Column="1" Margin="12,0,12,0" VerticalAlignment="Center">
+                    <TextBlock Text="Ostatnie ostrzeżenia" Style="{StaticResource Text.CardTitle}" />
+                    <TextBlock x:Name="TxtQualityWarningsSummary" Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,2,0,0"
+                               Text="Do 20 ostatnich tłumaczeń, które kontrola jakości oznaczyła w tej sesji — tylko w pamięci, nic nie trafia na dysk." />
+                  </StackPanel>
+                  <Button x:Name="BtnClearQualityWarnings" Grid.Column="2" Content="Wyczyść" Style="{StaticResource Btn.Ghost}" ui:Visuals.Glyph="&#xE74D;"
+                          VerticalAlignment="Top" IsEnabled="False" Click="OnClearQualityWarningsClick"
+                          ToolTip="Czyści listę; licznik ostrzeżeń sesji na Pulpicie zostaje." />
+                </Grid>
+                <Border x:Name="PnlQualityWarningsEmpty" Style="{StaticResource Card.Inset}" Margin="0,16,0,0" Padding="14,12">
+                  <TextBlock x:Name="TxtQualityWarningsEmpty" Style="{StaticResource Text.Hint}"
+                             Text="Brak ostrzeżeń. Gdy tłumaczenie zgubi liczbę z oryginału, zostanie po angielsku albo będzie podejrzanie długie, pojawi się tutaj — z przyciskiem „Popraw”." />
+                </Border>
+                <ItemsControl x:Name="ListQualityWarnings" Margin="0,16,0,-8" Visibility="Collapsed">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource Card.Inset}" Padding="14,11" Margin="0,0,0,8">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <StackPanel>
+                            <WrapPanel>
+                              <Border Background="#1AFBBF24" BorderBrush="#55FBBF24" BorderThickness="1" CornerRadius="9" Padding="7,2,9,3"
+                                      Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="{Binding Hint}" ToolTipService.InitialShowDelay="200">
+                                <TextBlock FontSize="11.5" Foreground="#FFFCD34D">
+                                  <Run Text="⚠ " /><Run Text="{Binding Reason, Mode=OneWay}" />
+                                </TextBlock>
+                              </Border>
+                              <Border Style="{StaticResource Chip}" Margin="0,0,8,0" Padding="8,2,9,2"
+                                      Visibility="{Binding IsCorrected, Converter={StaticResource BoolToVisible}}">
+                                <TextBlock Text="Poprawione ✔" Foreground="{StaticResource Brush.AccentText}" FontSize="11" />
+                              </Border>
+                              <TextBlock Text="{Binding Time}" Foreground="{StaticResource Brush.TextFaint}" FontSize="11.5" VerticalAlignment="Center" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding SourceText}" Foreground="{StaticResource Brush.TextMuted}" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,0" />
+                            <TextBlock Text="{Binding TranslatedText}" Foreground="{StaticResource Brush.Text}" FontFamily="{StaticResource Font.Display}" FontSize="14.5"
+                                       TextWrapping="Wrap" Margin="0,3,0,0"
+                                       Visibility="{Binding IsEditing, Converter={StaticResource BoolToCollapsed}}" />
+                            <TextBox Text="{Binding EditText, UpdateSourceTrigger=PropertyChanged}" TextWrapping="Wrap" AcceptsReturn="True"
+                                     VerticalContentAlignment="Top" Padding="10,8" Margin="0,8,0,0"
+                                     AutomationProperties.Name="Poprawione tłumaczenie"
+                                     Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisible}}"
+                                     IsVisibleChanged="OnQualityEditBoxVisibleChanged" />
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="12,0,0,0">
+                            <Button Content="Popraw" Style="{StaticResource Btn.Chip}" ui:Visuals.Glyph="&#xE70F;" Margin="0"
+                                    ToolTip="Własne tłumaczenie tego tekstu — ta sama ręczna poprawka co w panelu wyniku."
+                                    Visibility="{Binding IsEditing, Converter={StaticResource BoolToCollapsed}}"
+                                    Click="OnEditQualityWarningClick" />
+                            <Button Content="Zapisz" Style="{StaticResource Btn.Chip}" ui:Visuals.Glyph="&#xE74E;"
+                                    Background="{StaticResource Brush.Accent}" BorderBrush="#33FFFFFF" Foreground="White"
+                                    Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisible}}"
+                                    Click="OnSaveQualityWarningClick" />
+                            <Button Content="Anuluj" Style="{StaticResource Btn.Chip}" Margin="0"
+                                    Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisible}}"
+                                    Click="OnCancelQualityWarningClick" />
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
 
             <Border Style="{StaticResource Card}" Margin="0,16,0,0">
               <StackPanel>
@@ -1270,22 +1495,26 @@
 
             <Border Style="{StaticResource Card}" Margin="0,16,0,0">
               <StackPanel>
-                <Grid Margin="0,0,0,14">
+                <Grid Margin="0,0,0,16">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                   </Grid.ColumnDefinitions>
                   <Border Style="{StaticResource IconBadge}">
                     <TextBlock Text="&#xE765;" Style="{StaticResource Text.Icon}" FontSize="15" Foreground="{StaticResource Brush.AccentText}" HorizontalAlignment="Center" />
                   </Border>
-                  <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                  <StackPanel Grid.Column="1" Margin="12,0,12,0" VerticalAlignment="Center">
                     <TextBlock Text="Skróty klawiszowe" Style="{StaticResource Text.CardTitle}" />
-                    <TextBlock Text="Trzy pierwsze działają globalnie — także gdy to okno jest schowane w zasobniku." Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,2,0,0" />
+                    <TextBlock Text="Kliknij skrót i wciśnij nową kombinację — Esc anuluje. Trzy pierwsze działają globalnie, także gdy to okno jest schowane w zasobniku."
+                               Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,2,0,0" />
                   </StackPanel>
+                  <Button x:Name="BtnResetHotkeys" Grid.Column="2" Content="Przywróć domyślne" Style="{StaticResource Btn.Ghost}" ui:Visuals.Glyph="&#xE7A7;"
+                          VerticalAlignment="Top" Click="OnResetHotkeysClick" />
                 </Grid>
                 <Grid>
                   <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" MinWidth="140" />
+                    <ColumnDefinition Width="Auto" MinWidth="194" />
                     <ColumnDefinition Width="*" />
                   </Grid.ColumnDefinitions>
                   <Grid.RowDefinitions>
@@ -1294,22 +1523,40 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                   </Grid.RowDefinitions>
-                  <Border Grid.Row="0" Style="{StaticResource Kbd}" Margin="0,0,16,10">
+                  <ToggleButton x:Name="BtnHotkeyTranslate" Grid.Row="0" Style="{StaticResource Btn.HotkeyField}" Margin="0,0,16,12" VerticalAlignment="Top"
+                                AutomationProperties.Name="Skrót: przetłumacz region"
+                                Checked="OnHotkeyFieldChecked" Unchecked="OnHotkeyFieldUnchecked" LostKeyboardFocus="OnHotkeyFieldLostFocus"
+                                PreviewKeyDown="OnHotkeyFieldPreviewKeyDown" PreviewKeyUp="OnHotkeyFieldPreviewKeyUp">
                     <TextBlock x:Name="TxtHotkeyTranslate" Text="Ctrl+Shift+T" />
-                  </Border>
-                  <TextBlock Grid.Row="0" Grid.Column="1" Text="Zaznacz region ekranu i przetłumacz go" VerticalAlignment="Center" Margin="0,0,0,10" TextWrapping="Wrap" />
-                  <Border Grid.Row="1" Style="{StaticResource Kbd}" Margin="0,0,16,10">
+                  </ToggleButton>
+                  <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,8,0,12">
+                    <TextBlock Text="Zaznacz region ekranu i przetłumacz go" TextWrapping="Wrap" />
+                    <TextBlock x:Name="TxtHotkeyTranslateNote" Style="{StaticResource Text.Status}" FontSize="12" Margin="0,3,0,0" />
+                  </StackPanel>
+                  <ToggleButton x:Name="BtnHotkeyLive" Grid.Row="1" Style="{StaticResource Btn.HotkeyField}" Margin="0,0,16,12" VerticalAlignment="Top"
+                                AutomationProperties.Name="Skrót: start i stop trybu live"
+                                Checked="OnHotkeyFieldChecked" Unchecked="OnHotkeyFieldUnchecked" LostKeyboardFocus="OnHotkeyFieldLostFocus"
+                                PreviewKeyDown="OnHotkeyFieldPreviewKeyDown" PreviewKeyUp="OnHotkeyFieldPreviewKeyUp">
                     <TextBlock x:Name="TxtHotkeyLive" Text="Ctrl+Shift+L" />
-                  </Border>
-                  <TextBlock Grid.Row="1" Grid.Column="1" Text="Start / stop trybu live na aktywnej grze" VerticalAlignment="Center" Margin="0,0,0,10" TextWrapping="Wrap" />
-                  <Border Grid.Row="2" Style="{StaticResource Kbd}" Margin="0,0,16,10">
+                  </ToggleButton>
+                  <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,8,0,12">
+                    <TextBlock Text="Start / stop trybu live na aktywnej grze" TextWrapping="Wrap" />
+                    <TextBlock x:Name="TxtHotkeyLiveNote" Style="{StaticResource Text.Status}" FontSize="12" Margin="0,3,0,0" />
+                  </StackPanel>
+                  <ToggleButton x:Name="BtnHotkeyOverlay" Grid.Row="2" Style="{StaticResource Btn.HotkeyField}" Margin="0,0,16,12" VerticalAlignment="Top"
+                                AutomationProperties.Name="Skrót: ukryj albo pokaż nakładkę"
+                                Checked="OnHotkeyFieldChecked" Unchecked="OnHotkeyFieldUnchecked" LostKeyboardFocus="OnHotkeyFieldLostFocus"
+                                PreviewKeyDown="OnHotkeyFieldPreviewKeyDown" PreviewKeyUp="OnHotkeyFieldPreviewKeyUp">
                     <TextBlock x:Name="TxtHotkeyOverlay" Text="Ctrl+Shift+H" />
-                  </Border>
-                  <TextBlock Grid.Row="2" Grid.Column="1" Text="Ukryj albo pokaż nakładkę" VerticalAlignment="Center" Margin="0,0,0,10" TextWrapping="Wrap" />
+                  </ToggleButton>
+                  <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,8,0,12">
+                    <TextBlock Text="Ukryj albo pokaż nakładkę" TextWrapping="Wrap" />
+                    <TextBlock x:Name="TxtHotkeyOverlayNote" Style="{StaticResource Text.Status}" FontSize="12" Margin="0,3,0,0" />
+                  </StackPanel>
                   <Border Grid.Row="3" Style="{StaticResource Kbd}" Margin="0,0,16,0">
                     <TextBlock Text="Esc" />
                   </Border>
-                  <TextBlock Grid.Row="3" Grid.Column="1" Text="Anuluj zaznaczanie regionu" VerticalAlignment="Center" TextWrapping="Wrap" />
+                  <TextBlock Grid.Row="3" Grid.Column="1" Text="Anuluj zaznaczanie regionu (stały skrót)" VerticalAlignment="Center" TextWrapping="Wrap" />
                 </Grid>
               </StackPanel>
             </Border>
@@ -1328,7 +1575,7 @@
         <TextBlock Text="&#xE946;" Style="{StaticResource Text.Icon}" FontSize="13" Foreground="{StaticResource Brush.AccentText}" VerticalAlignment="Top" Margin="0,2,10,0" />
         <TextBlock x:Name="TxtStatus" Grid.Column="1" Text="Gotowy." TextWrapping="Wrap" Foreground="#FFC3C9D6" FontSize="12.5"
                    VerticalAlignment="Center" Margin="0,0,14,0" />
-        <WrapPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right" MaxWidth="560">
+        <WrapPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right" MaxWidth="640">
           <Border Style="{StaticResource Chip}" Background="#1AFBBF24" BorderBrush="#40FBBF24" Margin="6,2,0,2"
                   Visibility="{Binding IsChecked, ElementName=ChkCacheOnly, Converter={StaticResource BoolToVisible}}">
             <StackPanel Orientation="Horizontal">
@@ -1365,6 +1612,13 @@
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="&#xE783;" Style="{StaticResource Text.Icon}" FontSize="10" Foreground="{Binding Foreground, ElementName=TxtChipErrors}" />
               <TextBlock x:Name="TxtChipErrors" Text="Błędy 0" FontSize="11.5" Foreground="{StaticResource Brush.TextMuted}" Margin="6,0,0,0" />
+            </StackPanel>
+          </Border>
+          <Border x:Name="ChipQuality" Style="{StaticResource Chip}" Margin="6,2,0,2"
+                  ToolTip="Tłumaczenia z ostrzeżeniem kontroli jakości w tej sesji — lista w sekcji Dane i słownik">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE7BA;" Style="{StaticResource Text.Icon}" FontSize="10" Foreground="{Binding Foreground, ElementName=TxtChipQuality}" />
+              <TextBlock x:Name="TxtChipQuality" Text="Ostrzeżenia 0" FontSize="11.5" Foreground="{StaticResource Brush.TextMuted}" Margin="6,0,0,0" />
             </StackPanel>
           </Border>
         </WrapPanel>

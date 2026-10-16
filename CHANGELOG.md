@@ -2,12 +2,80 @@
 
 Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
-## [Niewydane]
+## [0.8.0] — 2026-10-16
 
+Wydanie „edytory i pierwsze linie od razu”: własne profile gier i skróty zmieniane w oknie,
+ostrzeżenia kontroli jakości widoczne w oknie i nakładce, strumieniowanie odpowiedzi modeli
+językowych oraz poprawki napisu na tabliczkach. Testy: 2087 xUnit (1540 Core + 381 Infrastructure + 166 CorpusTool), build bez ostrzeżeń.
+**W grze na żywo nikt jeszcze tego nie oglądał** — okno sprawdzone na renderach (UiPreview),
+zachowanie w powtórkach (SceneReplay) i na nagraniach (MotionLab).
+
+### Nowe w 0.8.0
+
+- **Własny profil gry z okna.** Karta **Profil tej gry** w sekcji **Gra**: gdy zaznaczone okno
+  nie ma profilu, **Utwórz profil dla tej gry** otwiera formularz z nazwą (domyślnie z tytułu
+  okna), procesem i językiem, a **Utwórz profil** zapisuje go w folderze danych
+  (`profiles\<id>\profile.json`) i od razu włącza, bez restartu. Gdy profil pasuje, karta
+  pokazuje, który i skąd („z zestawu” albo „własny”); własny można przemianować albo usunąć
+  (znika tylko jego folder). W trakcie live karta jest zablokowana, a w trybie prywatnym —
+  tworzenie i zmiana nazwy (zapisałyby nazwę gry na dysku).
+- **Edytor skrótów** w **O programie → Skróty klawiszowe**: kliknij pole i wciśnij kombinację,
+  zmiana działa od razu i zapisuje się w ustawieniach. Odrzucane: duplikat innej czynności, Esc,
+  Alt+F4, Ctrl+C/V/X/Z/A, sam Shift z literą lub cyfrą i Ctrl+Alt z literą lub cyfrą (AltGr —
+  blokowałby polskie znaki). Skrót zajęty przez inny program zostaje odrzucony, a poprzedni wraca;
+  **Przywróć domyślne** zmienia wszystkie trzy naraz albo żaden. Wszystkie napisy skrótów (Pulpit,
+  karta „Skrót live”, menu zasobnika, lista w „O programie”) aktualizują się od razu.
+- **Ostrzeżenia kontroli jakości** (zmienione liczby, brak tłumaczenia, za długi wynik): kafelki **Ostrzeżenia jakości** i **Ponowienia** na Pulpicie, chip na pasku stanu, karta
+  **Ostatnie ostrzeżenia** w „Dane i słownik” (do 20 pozycji tylko w pamięci, z **Popraw**
+  zapisującym ręczną korektę z profilem i językami z chwili ostrzeżenia), chip w panelu wyniku
+  i bursztynowy rożek w dymkach i na pasku napisów — w dymkach nigdy w trybie „Na oryginale
+  (zakrywa)”, bo napis ma wyglądać jak w grze.
+  Przełącznik **Znacznik ostrzeżeń w nakładce** w „Wygląd nakładki” (domyślnie włączony).
+- **Pierwsze linie od razu** przy modelach językowych: Claude (oficjalne SDK, strumień) i serwer
+  zgodny z OpenAI (SSE). W trybie live gotowe linie trafiają nad grę, zanim model skończy
+  odpowiedź (na prawdziwym API jeszcze niesprawdzone); wczesna linia przechodzi tę samą kontrolę jakości, do cache i liczników trafia tylko
+  wynik końcowy, a ten jest rozstrzygający (inny tekst podmienia linię, błąd albo odmowa ją zdejmuje,
+  zła liczba linii od modelu zdejmuje wczesne linie od razu). Przełącznik w panelu dostawcy
+  (`streamLlmResponses`, domyślnie włączony). Serwer, który odrzuci strumień błędem, dostaje
+  zwykłe zapytanie i po jego powodzeniu jest zapamiętany jako „bez strumienia”; odpowiedź bez
+  strumienia (zwykły JSON) jest czytana od razu.
+- **Napis na tabliczce z ramką**: ciemny tekst na jasnej tabliczce nie dostaje już „odwróconej”
+  łatki (kolor tabliczki zamiast koloru liter, przebijający oryginał) — biegunowość liczona względem
+  tła kontenera, łatka nie przemalowuje ramki. Napis jadący z kamerą nie gubi śledzenia na
+  „cięciu sceny” wywołanym szybkim skokiem obrazu.
+- Log nie zawiera identyfikatora własnego profilu gry (identyfikator to skrót nazwy gry) — także
+  w ostrzeżeniach o kroju, słowniku i korpusie profilu.
 - Porządki w kodzie źródłowym: testy używają fikcyjnej gry zamiast prawdziwego tytułu, a domyślne
   ścieżki narzędzia MotionLab nie zawierają już ścieżki z dysku autora — folder z nagraniami
   i kopiami bazy wskazuje zmienna `GTO_DIAGNOSTICS`, a bez niej folder `GTO Diagnostics` obok
-  repozytorium. Aplikacja bez zmian.
+  repozytorium. W zestawie profili zostają tylko ogólny, Escape Academy i PoE2 (pilnuje tego test).
+- Narzędzia: UiPreview nie uruchamia już klasy `App` (wcześniej przy włączonym tłumaczu pokazywało
+  okno „już działa” i wisiało 4 minuty, a bez niego weszłoby na prawdziwy folder danych); nowe
+  scenariusze SceneReplay `pan-cut`, `quality-mark(-clean)`, `stream`, `stream-refusal`,
+  `stream-change`; OverlayPreview przyjmuje flagę jakości w `--blocks`.
+
+### Pomiary i regresje
+
+MotionLab (te same nagrania Escape Academy, Mock 500 ms, po dwa przebiegi; w nawiasie 0.7.0):
+tryb zakrywania, pokój — tłumaczenie przez 75,3–76,1% czasu ruchu kamery (77,5%), HUD 79,1–79,6%
+(80,7%), tekst ruchomy 20,4–25,1% (31,3%; zakres poprzednich rund 15,5–31,8%), dziury 3,7–6,6 s
+(4,9 s); prolog z dialogiem — pokrycie całości 84,2–86,5% (85,7%), dziury 1,8–2,7 s (3,9 s).
+„Pod oryginałem”: pokój 73,0–74,7% ruchu kamery (72,7%), prolog — pokrycie 86,8–87,8% (86,7%).
+Pasek napisów w prologu 87,6% (87,4%). Wszystko w granicach rozrzutu między przebiegami; poprawka
+tabliczek i „cięcia sceny” działa na przypadkach, których w tych nagraniach prawie nie ma, więc
+mierzona jest osobno: odwrócone łatki tabliczek w prologu 44 ze 108 → 1 ze 108, SceneReplay
+`pan-cut` — 6 zniknięć napisu w panoramie → 0. Wygląd nakładki na 6 klatkach 4K — bez zmian
+co do piksela. Pierwsze linie od razu (SceneReplay, 5 linii, symulowany dostawca): pierwsza linia
+po 1,47–1,65 s, wszystkie po 2,83–3,03 s, bez strumienia 2,86–2,97 s. Okno (UiPreview): 0 uciętych
+napisów i 0 zasłoniętych kontrolek w 18 widokach sekcji.
+
+Regresje: SceneReplay (dwa przebiegi) — podstawowe sceny: stary napis usunięty po 33–35 ms,
+local-occlusion* — 0 strat menu, moving-text/position-jitter — błąd 0 px, hud-motion* — 0 strat
+HUD, stale-* — usunięcie po 201–435 ms, z prawdziwą etykietą z gry 205–447 ms, stale-dim
+i stale-present-junk bez zniknięcia, jak oczekiwano; typing — 2 zapytania, typing-nohold — 3
+(znany rozrzut 2–3). Nowe scenariusze: `pan-cut` (0 zniknięć, błąd 0 px), `quality-mark` (rożek na
+wszystkich 8 blokach z flagą), `quality-mark-clean` (żadnego), `stream-refusal` (wczesne linie
+zdjęte po odmowie), `stream-change` (żadnej aktualizacji mieszającej stare linie z nowymi).
 
 ## [0.7.0] — 2026-10-15
 

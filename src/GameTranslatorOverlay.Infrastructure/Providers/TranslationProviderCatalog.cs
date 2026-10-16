@@ -9,6 +9,7 @@ public enum ProviderSetting
     LlmEndpoint,
     LlmModel,
     ClaudeModel,
+    StreamResponses,
 }
 
 /// <summary>
@@ -71,7 +72,7 @@ public static class TranslationProviderCatalog
         KeyOptional: true,
         "Dowolny serwer zgodny z API OpenAI. Lokalna Ollama albo LM Studio działają bez klucza " +
         "i bez wysyłania tekstu poza komputer. Terminy ze słownika i nazwa gry trafiają do promptu.",
-        [ProviderSetting.LlmEndpoint, ProviderSetting.LlmModel]);
+        [ProviderSetting.LlmEndpoint, ProviderSetting.LlmModel, ProviderSetting.StreamResponses]);
 
     public static TranslationProviderInfo Claude { get; } = new(
         ClaudeTranslationProvider.ProviderName,
@@ -80,7 +81,7 @@ public static class TranslationProviderCatalog
         KeyOptional: false,
         "Klucz z console.anthropic.com. Claude tłumaczy z kontekstem całego ekranu, nazwą gry " +
         "i terminami ze słownika; odmowa filtra bezpieczeństwa jest ponawiana na modelu zastępczym.",
-        [ProviderSetting.ClaudeModel]);
+        [ProviderSetting.ClaudeModel, ProviderSetting.StreamResponses]);
 
     public static TranslationProviderInfo Mock { get; } = new(
         MockTranslationProvider.ProviderName,

@@ -88,7 +88,8 @@ internal sealed class OverlayHost
             {
                 if (update.SubtitleText is { Length: > 0 } subtitle)
                 {
-                    _overlay.ShowSubtitle(subtitle, update.WindowBounds, _settings, update.PreserveSubtitleLifetime);
+                    _overlay.ShowSubtitle(subtitle, update.WindowBounds, _settings, update.PreserveSubtitleLifetime,
+                        update.SubtitleQualityWarning);
                 }
                 else
                 {

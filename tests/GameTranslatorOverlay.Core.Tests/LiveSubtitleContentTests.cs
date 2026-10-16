@@ -122,6 +122,26 @@ public class LiveSubtitleContentTests
     }
 
     [Fact]
+    public void Pasek_z_ostrzezeniem_wie_o_nim_dopoki_oznaczony_napis_jest_na_pasku()
+    {
+        var content = new LiveSubtitleContent();
+        content.Replace([Text("inspect", "Zbadaj"), Text("dialog", "Masz złoto")], ["dialog"]);
+
+        Assert.True(content.HasFlagged);
+        Assert.Equal("Zbadaj", content.Remove(["dialog"]));
+        Assert.False(content.HasFlagged);
+        content.Restore([Text("dialog", "Masz złoto")], ["dialog"]);
+        Assert.True(content.HasFlagged);
+        content.Replace([Text("dialog", "Masz 150 złota")]);
+        Assert.False(content.HasFlagged);
+        content.Replace([Text("dialog", "Masz złoto")], ["dialog", "unrelated"]);
+        content.Clear();
+        Assert.False(content.HasFlagged);
+        content.Restore([Text("unrelated", "Inny napis")]);
+        Assert.False(content.HasFlagged);
+    }
+
+    [Fact]
     public void Napis_ktory_wrocil_po_zniknieciu_wraca_na_pusty_pasek()
     {
         var content = new LiveSubtitleContent();

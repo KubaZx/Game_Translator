@@ -5,11 +5,13 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using GameTranslatorOverlay.App;
 using GameTranslatorOverlay.App.Hotkeys;
+using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.App.Ocr;
 using GameTranslatorOverlay.App.Services;
 using GameTranslatorOverlay.App.Ui;
@@ -40,9 +42,9 @@ internal static class PreviewSession
             Provider = MockTranslationProvider.ProviderName,
             PrivateMode = true,
             DisclaimerAcknowledged = true,
-            TranslateHotkey = "Ctrl+Alt+Shift+F21",
-            ToggleOverlayHotkey = "Ctrl+Alt+Shift+F22",
-            LiveToggleHotkey = "Ctrl+Alt+Shift+F23",
+            TranslateHotkey = PreviewHotkeys.Translate,
+            ToggleOverlayHotkey = PreviewHotkeys.ToggleOverlay,
+            LiveToggleHotkey = PreviewHotkeys.LiveToggle,
         };
 
         using var loggerFactory = LoggerFactory.Create(static b => b.SetMinimumLevel(LogLevel.Warning));
@@ -94,6 +96,7 @@ internal static class PreviewSession
             Invoke(window, "UpdateHotkeyLabels");
 
             PreviewData.Fill(window, usage);
+            PreviewData.SeedQualityWarnings(orchestrator.QualityWarnings, usage);
             Invoke(window, "OnStatusTimerTick", null, EventArgs.Empty);
             await Task.Delay(500);
             await Waits.IdleAsync();
@@ -105,8 +108,12 @@ internal static class PreviewSession
             await RenderVariantsAsync(window, report);
             await RenderIconsAsync(window, report);
             await RenderTrayMenuAsync(window, report);
+            await RenderProfileEditorAsync(window, orchestrator, ocr, paths, report, loggerFactory.CreateLogger("UiPreview"));
+            await RenderHotkeyEditorAsync(window, settings, paths, report);
             await RenderGlossaryEditorAsync(userGlossary, orchestrator, report);
             await RenderResultPanelAsync(settings, report);
+            await RenderQualityWarningVariantsAsync(window, report);
+            RenderOverlayMarks(report);
         }
         catch (Exception ex)
         {
@@ -153,7 +160,7 @@ internal static class PreviewSession
                 report.CheckHitTesting(window, name);
                 report.Save(Renderer.Window(window, 1.0), name + "-100.png");
                 if (sizeName != "pelny-ekran") report.Save(Renderer.Window(window, 1.5), name + "-150.png");
-                if (sizeName == "domyslny" && Renderer.PageContent(window) is { } full)
+                if (sizeName is "domyslny" or "min" && Renderer.PageContent(window) is { } full)
                     report.Save(full, name + "-cala-strona.png");
             }
         }
@@ -357,7 +364,7 @@ internal static class PreviewSession
         await Waits.IdleAsync();
     }
 
-    private static async Task RenderTrayMenuAsync(MainWindow window, PreviewReport report)
+    private static async Task RenderTrayMenuAsync(MainWindow window, PreviewReport report, string name = "menu-zasobnika")
     {
         if (Field(window, "_trayIcon") is not FrameworkElement { ContextMenu: { } menu }) return;
         var work = SystemParameters.WorkArea;
@@ -367,10 +374,225 @@ internal static class PreviewSession
         menu.IsOpen = true;
         await Task.Delay(400);
         await Waits.IdleAsync();
-        report.Save(Renderer.Element(menu, 1.0, null), "menu-zasobnika-100.png");
-        report.Save(Renderer.Element(menu, 1.5, null), "menu-zasobnika-150.png");
+        report.Save(Renderer.Element(menu, 1.0, null), name + "-100.png");
+        report.Save(Renderer.Element(menu, 1.5, null), name + "-150.png");
+        report.Line($"[{name}] pozycje: {string.Join(" | ", menu.Items.OfType<MenuItem>().Select(static i => i.Header))}");
         menu.IsOpen = false;
         await Waits.IdleAsync();
+    }
+
+    private static async Task ShotAsync(MainWindow window, PreviewReport report, string name, bool fullPage = false)
+    {
+        await Waits.IdleAsync();
+        report.CheckClipping(window, name);
+        report.CheckHitTesting(window, name);
+        report.Save(Renderer.Window(window, 1.0), name + "-100.png");
+        report.Save(Renderer.Window(window, 1.5), name + "-150.png");
+        if (fullPage && Renderer.PageContent(window) is { } full) report.Save(full, name + "-cala-strona.png");
+    }
+
+    private static async Task NarrowShotAsync(MainWindow window, PreviewReport report, string name)
+    {
+        var (width, height) = (window.Width, window.Height);
+        window.Width = window.MinWidth;
+        window.Height = window.MinHeight;
+        await ShotAsync(window, report, name, fullPage: true);
+        window.Width = width;
+        window.Height = height;
+        await Waits.IdleAsync();
+    }
+
+    private static string Text(FrameworkElement scope, string name) => scope.FindName(name) switch
+    {
+        TextBlock block => block.Text,
+        TextBox box => box.Text,
+        _ => "(brak)",
+    };
+
+    private static string ProfileFiles(AppPaths paths) => Directory.Exists(paths.ProfilesDirectory)
+        ? string.Join(", ", Directory.GetFiles(paths.ProfilesDirectory, "profile.json", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(paths.RootDirectory, f)))
+        : "(brak folderu)";
+
+    private static async Task RenderProfileEditorAsync(
+        MainWindow window, TranslationOrchestrator orchestrator, GameTranslatorOverlay.Core.Ocr.IOcrProvider ocr, AppPaths paths, PreviewReport report, ILogger logger)
+    {
+        if (Find<FrameworkElement>(window, "CardGameProfile") is not { } card
+            || Find<Selector>(window, "WindowsList") is not { } list
+            || Find<ComboBox>(window, "CmbProfile") is not { } profiles) return;
+
+        await SelectPageContainingAsync(window, card);
+        var game = list.SelectedItem;
+        var noArgs = new object?[] { window, new RoutedEventArgs() };
+        string Selected() => profiles.SelectedItem as string ?? "(brak)";
+
+        await ShotAsync(window, report, "wariant-profil-brak", fullPage: true);
+
+        Invoke(window, "OnCreateProfileClick", noArgs);
+        await ShotAsync(window, report, "wariant-profil-blokada-prywatny");
+        report.Line($"Profil: tryb prywatny — tworzenie {(Find<Button>(window, "BtnCreateProfile")?.IsEnabled == true ? "DOSTĘPNE (błąd)" : "zablokowane")}, komunikat „{Text(window, "TxtProfileLiveLock")}”");
+        Invoke(window, "OnCancelProfileEditClick", noArgs);
+
+        var privateToggle = Find<ToggleButton>(window, "ChkPrivate");
+        if (privateToggle is not null) privateToggle.IsChecked = false;
+        await Waits.IdleAsync();
+        Invoke(window, "OnCreateProfileClick", noArgs);
+        await ShotAsync(window, report, "wariant-profil-tworzenie", fullPage: true);
+        await NarrowShotAsync(window, report, "wariant-profil-tworzenie-min");
+        report.Line($"Profil: formularz — nazwa „{Text(window, "TxtNewProfileName")}”, proces „{Text(window, "TxtNewProfileProcess")}”");
+
+        var bundled = orchestrator.Profiles.FirstOrDefault(static p => p.ProcessNames.Count > 0);
+        if (bundled is not null && Find<TextBox>(window, "TxtNewProfileName") is { } nameBox)
+        {
+            var suggested = nameBox.Text;
+            nameBox.Text = bundled.Name;
+            Invoke(window, "OnSaveNewProfileClick", noArgs);
+            await ShotAsync(window, report, "wariant-profil-blad-nazwy");
+            report.Line($"Profil: nazwa profilu z zestawu → „{Text(window, "TxtProfileEditError")}”; pliki: {ProfileFiles(paths)}");
+            nameBox.Text = suggested;
+        }
+
+        Invoke(window, "OnSaveNewProfileClick", noArgs);
+        await Waits.IdleAsync();
+        var created = orchestrator.ActiveProfile;
+        var createdFile = orchestrator.ProfileFile(created);
+        report.Line($"Profil: utworzony {created?.Id ?? "(brak)"} „{created?.Name}”; pliki: {ProfileFiles(paths)}; wybrany na liście: {Selected()}; status: {Text(window, "TxtStatus")}");
+        if (createdFile is not null) report.Line("Profil: zawartość pliku: " + File.ReadAllText(createdFile).ReplaceLineEndings(" "));
+        await ShotAsync(window, report, "wariant-profil-wlasny", fullPage: true);
+
+        profiles.IsDropDownOpen = true;
+        await Task.Delay(400);
+        await Waits.IdleAsync();
+        if (profiles.Template?.FindName("PART_Popup", profiles) is Popup { Child: FrameworkElement popup })
+        {
+            report.Save(Renderer.Element(popup, 1.0, null), "wariant-lista-cmbprofile-z-wlasnym-100.png");
+        }
+        profiles.IsDropDownOpen = false;
+        await SelectPageContainingAsync(window, card);
+
+        Invoke(window, "OnRenameProfileClick", noArgs);
+        if (Find<TextBox>(window, "TxtRenameProfile") is { } renameBox) renameBox.Text = "Mroczna Latarnia — mój profil";
+        await ShotAsync(window, report, "wariant-profil-zmiana-nazwy");
+        Invoke(window, "OnSaveRenameClick", noArgs);
+        await Waits.IdleAsync();
+        report.Line($"Profil: po zmianie nazwy aktywny „{orchestrator.ActiveProfile?.Name}”, wybrany na liście: {Selected()}; status: {Text(window, "TxtStatus")}");
+        await ShotAsync(window, report, "wariant-profil-po-zmianie-nazwy");
+
+        var session = new LiveTranslationSession(orchestrator, ocr, IntPtr.Zero, new LiveSessionOptions(), static _ => { }, logger);
+        SetField(window, "_liveSession", session);
+        Invoke(window, "UpdateLiveControls");
+        InvokeLiveIndicator(window, "Active");
+        await ShotAsync(window, report, "wariant-profil-live-blokada");
+        report.Line($"Profil: przy działającym live przyciski aktywne: zmień nazwę {Find<UIElement>(window, "BtnRenameProfile")?.IsEnabled}, usuń {Find<UIElement>(window, "BtnDeleteProfile")?.IsEnabled}");
+        SetField(window, "_liveSession", null);
+        session.Dispose();
+        Invoke(window, "UpdateLiveControls");
+        InvokeLiveIndicator(window, "Idle");
+
+        if (orchestrator.ActiveProfile is { } own && orchestrator.ProfileFile(own) is { } ownFile)
+        {
+            Invoke(window, "DeleteUserProfile", own, ownFile);
+        }
+        await Waits.IdleAsync();
+        report.Line($"Profil: po usunięciu pliki: {ProfileFiles(paths)}; aktywny: {orchestrator.ActiveProfile?.Id ?? "(brak)"}; wybrany na liście: {Selected()}; profili: {orchestrator.Profiles.Count}; status: {Text(window, "TxtStatus")}");
+        await ShotAsync(window, report, "wariant-profil-po-usunieciu");
+
+        if (bundled is not null && list.ItemsSource is IEnumerable<TargetWindow> windows)
+        {
+            var original = list.ItemsSource;
+            var withBundled = windows.ToList();
+            var bundledWindow = new TargetWindow(IntPtr.Zero, "Okno gry z profilem z zestawu", bundled.ProcessNames[0], 0) { Area = 1600L * 900 };
+            withBundled.Insert(1, bundledWindow);
+            list.ItemsSource = withBundled;
+            list.SelectedItem = bundledWindow;
+            await ShotAsync(window, report, "wariant-profil-z-zestawu");
+            report.Line($"Profil: okno procesu z zestawu → wybrany na liście: {Selected()}; usuń widoczne: {Find<UIElement>(window, "BtnDeleteProfile")?.IsVisible}");
+            list.ItemsSource = original;
+            list.SelectedItem = game;
+            await Waits.IdleAsync();
+        }
+        if (privateToggle is not null) privateToggle.IsChecked = true;
+        await Waits.IdleAsync();
+        report.Line(string.Empty);
+    }
+
+    private static void Press(UIElement target, Key key)
+    {
+        var source = PresentationSource.FromVisual(target) ?? throw new InvalidOperationException("Kontrolka nie ma okna.");
+        target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, key) { RoutedEvent = Keyboard.PreviewKeyUpEvent });
+    }
+
+    private static string SavedHotkey(AppPaths paths, string property)
+    {
+        if (!File.Exists(paths.SettingsPath)) return "(brak pliku)";
+        using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(paths.SettingsPath));
+        return json.RootElement.TryGetProperty(property, out var value) ? value.GetString() ?? "(null)" : "(brak pola)";
+    }
+
+    private static async Task RenderHotkeyEditorAsync(MainWindow window, AppSettings settings, AppPaths paths, PreviewReport report)
+    {
+        if (Find<ToggleButton>(window, "BtnHotkeyLive") is not { } live
+            || Find<ToggleButton>(window, "BtnHotkeyTranslate") is not { } translate
+            || Find<ToggleButton>(window, "BtnHotkeyOverlay") is not { } overlay) return;
+
+        settings.TranslateHotkey = PreviewHotkeys.Translate;
+        settings.ToggleOverlayHotkey = PreviewHotkeys.ToggleOverlay;
+        settings.LiveToggleHotkey = PreviewHotkeys.LiveToggle;
+        Invoke(window, "UpdateHotkeyLabels");
+        Invoke(window, "UpdateLiveControls");
+        await SelectPageContainingAsync(window, live);
+
+        live.IsChecked = true;
+        await ShotAsync(window, report, "wariant-skroty-wcisnij-skrot", fullPage: true);
+        await NarrowShotAsync(window, report, "wariant-skroty-wcisnij-skrot-min");
+        report.Line($"Skróty: edycja live — pole „{Text(window, "TxtHotkeyLive")}”, podpowiedź „{Text(window, "TxtHotkeyLiveNote")}”");
+
+        Press(live, Key.T);
+        await ShotAsync(window, report, "wariant-skroty-bledny-klawisz");
+        report.Line($"Skróty: goła litera T → „{Text(window, "TxtHotkeyLiveNote")}”, edycja trwa: {live.IsChecked}");
+
+        Press(live, Key.F20);
+        await Waits.IdleAsync();
+        report.Line($"Skróty: live → F20: ustawienia {settings.LiveToggleHotkey}, settings.json {SavedHotkey(paths, "liveToggleHotkey")}, " +
+                    $"zarejestrowany {Field(window, "_liveHotkeyRegistered")}, karta w nawigacji „{Text(window, "TxtNavLiveHotkey")}”, " +
+                    $"pod Start live „{Text(window, "TxtLiveHotkeyHint")}”, status „{Text(window, "TxtStatus")}”");
+        await ShotAsync(window, report, "wariant-skroty-zmieniony");
+
+        translate.IsChecked = true;
+        Press(translate, Key.F20);
+        await ShotAsync(window, report, "wariant-skroty-duplikat");
+        report.Line($"Skróty: F20 dla tłumaczenia regionu → „{Text(window, "TxtHotkeyTranslateNote")}”");
+        Press(translate, Key.Escape);
+        await Waits.IdleAsync();
+        report.Line($"Skróty: Esc → edycja trwa: {translate.IsChecked}, skrót {settings.TranslateHotkey}, status „{Text(window, "TxtStatus")}”");
+
+        var blocker = new Window
+        {
+            Width = 1, Height = 1, WindowStyle = WindowStyle.None, ShowActivated = false, ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.Manual, Left = Offscreen.Left, Top = Offscreen.Top,
+        };
+        blocker.Show();
+        var other = new HotkeyManager();
+        other.Attach(blocker);
+        var blocked = other.TryRegister("F19", static () => { }, out _);
+        overlay.IsChecked = true;
+        Press(overlay, Key.F19);
+        await ShotAsync(window, report, "wariant-skroty-zajety");
+        report.Line($"Skróty: F19 zajęty przez inne okno ({blocked}) → nakładka {settings.ToggleOverlayHotkey}, " +
+                    $"zarejestrowany {Field(window, "_overlayHotkeyRegistered")}, komunikat „{Text(window, "TxtHotkeyOverlayNote")}”");
+        other.Dispose();
+        blocker.Close();
+
+        if (Find<FrameworkElement>(window, "BtnTranslateRegion") is { } tile)
+        {
+            await SelectPageContainingAsync(window, tile);
+            await ShotAsync(window, report, "wariant-skroty-pulpit");
+            report.Line($"Skróty: kafelki — tłumaczenie {Visuals.GetCaption(tile)}, nakładka {(Find<FrameworkElement>(window, "BtnToggleOverlay") is { } t ? Visuals.GetCaption(t) : "?")}");
+        }
+        report.Line($"Skróty: Dane i słownik — „{Text(window, "TxtTimingHint")}”; Wygląd — „{Text(window, "TxtHotkeyResult")}”");
+        await RenderTrayMenuAsync(window, report, "menu-zasobnika-po-zmianie-skrotu");
+        report.Line(string.Empty);
     }
 
     private static async Task RenderGlossaryEditorAsync(UserGlossaryStore store, TranslationOrchestrator orchestrator, PreviewReport report)
@@ -407,6 +629,134 @@ internal static class PreviewSession
         await Waits.IdleAsync();
     }
 
+    private static async Task RenderQualityWarningVariantsAsync(MainWindow window, PreviewReport report)
+    {
+        if (Find<FrameworkElement>(window, "CardQualityWarnings") is not { } card) return;
+        if (Field(window, "_qualityWarnings") is System.Collections.ObjectModel.ObservableCollection<QualityWarningItem> { Count: > 0 } items)
+        {
+            var item = items[0];
+            item.EditText = item.TranslatedText;
+            item.IsEditing = true;
+            await SelectPageContainingAsync(window, card);
+            card.BringIntoView();
+            await Task.Delay(200);
+            await Waits.IdleAsync();
+            const string editing = "wariant-ostrzezenia-edycja";
+            report.CheckClipping(window, editing);
+            report.CheckHitTesting(window, editing);
+            report.Save(Renderer.Window(window, 1.0), editing + "-100.png");
+            report.Save(Renderer.Window(window, 1.5), editing + "-150.png");
+            item.IsEditing = false;
+            await Waits.IdleAsync();
+        }
+
+        Invoke(window, "OnClearQualityWarningsClick", window, new RoutedEventArgs());
+        await SelectPageContainingAsync(window, card);
+        card.BringIntoView();
+        await Task.Delay(200);
+        await Waits.IdleAsync();
+        const string empty = "wariant-ostrzezenia-puste";
+        report.CheckClipping(window, empty);
+        report.CheckHitTesting(window, empty);
+        report.Save(Renderer.Window(window, 1.0), empty + "-100.png");
+        if (Renderer.PageContent(window) is { } page) report.Save(page, empty + "-cala-strona.png");
+    }
+
+    private static void RenderOverlayMarks(PreviewReport report)
+    {
+        const double scale = 1.5;
+        var size = new Size(960, 540);
+        var dark = new AppSettings { OverlayPlacement = "below", OverlayBackgroundOpacity = 0.85 };
+        var soft = new AppSettings { OverlayPlacement = "below", OverlayBackgroundOpacity = 0.40 };
+        var bare = new AppSettings { OverlayPlacement = "below", OverlayBackgroundOpacity = 0 };
+        var cover = new AppSettings { OverlayPlacement = "cover", OverlayBackgroundOpacity = 0.85 };
+
+        var canvas = new Canvas { Width = size.Width, Height = size.Height };
+        VisualTreeHelper.SetRootDpi(canvas, new DpiScale(scale, scale));
+        canvas.Children.Add(new Image { Source = PreviewData.GameBackdrop(), Width = size.Width, Height = size.Height });
+        var samples = new List<(string Name, Border Element, bool Visible)>();
+        void Add(string name, Border element, double left, double top, bool visible)
+        {
+            Canvas.SetLeft(element, left);
+            Canvas.SetTop(element, top);
+            canvas.Children.Add(element);
+            samples.Add((name, element, visible));
+        }
+        Add("dymek ciemny", OverlayBlockRenderer.CreateBlockElement("Latarnik jest ci winien złoto.", dark, scale, 33, 0xF2EEE3),
+            40, 40, dark.ShowsQualityMark(warning: true));
+        Add("dymek delikatny", OverlayBlockRenderer.CreateBlockElement("Zapal latarnię przed 22:30.", soft, scale, 33, 0xF2EEE3),
+            40, 110, soft.ShowsQualityMark(warning: true));
+        Add("sam tekst", OverlayBlockRenderer.CreateBlockElement("Porozmawiaj z latarnikiem.", bare, scale, 33, 0xF2EEE3),
+            40, 180, bare.ShowsQualityMark(warning: true));
+        Add("na oryginale (zakrywa)", OverlayBlockRenderer.CreateBlockElement("Zbadaj latarnię", cover, scale, 33, 0xF2EEE3),
+            560, 40, cover.ShowsQualityMark(warning: true));
+        var subtitle = OverlayBlockRenderer.CreateSubtitleElement(cover);
+        ((TextBlock)subtitle.Child).Text = "Latarnik jest ci winien złoto za zapieczętowane listy.";
+        Add("pasek napisów (przy zakrywaniu też)", subtitle, 200, 440, cover.ShowsQualityMark(warning: true, subtitleBar: true));
+
+        Layout(canvas, size);
+        var off = RenderCanvas(canvas, size, scale);
+        foreach (var (_, element, visible) in samples) OverlayBlockRenderer.SetQualityMark(element, visible);
+        Layout(canvas, size);
+        var on = RenderCanvas(canvas, size, scale);
+        report.Save(off, "nakladka-bez-znacznika-150.png");
+        report.Save(on, "nakladka-znacznik-150.png");
+
+        var width = off.PixelWidth;
+        var height = off.PixelHeight;
+        var before = new int[width * height];
+        var after = new int[width * height];
+        off.CopyPixels(before, width * 4, 0);
+        on.CopyPixels(after, width * 4, 0);
+        var corners = samples.Select(s =>
+        {
+            var bounds = OverlayBubble.MarkBounds(s.Element.RenderSize, s.Element is OverlayBubble { IsBare: true });
+            bounds.Offset(Canvas.GetLeft(s.Element), Canvas.GetTop(s.Element));
+            var x = (int)Math.Floor(bounds.Left * scale) - 1;
+            var y = (int)Math.Floor(bounds.Top * scale) - 1;
+            return new Int32Rect(x, y, (int)Math.Ceiling(bounds.Right * scale) + 1 - x, (int)Math.Ceiling(bounds.Bottom * scale) + 1 - y);
+        }).ToList();
+        var changedIn = new int[samples.Count];
+        var outside = 0;
+        var mask = new int[width * height];
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var i = y * width + x;
+                if (before[i] == after[i]) continue;
+                mask[i] = unchecked((int)0xFFFBBF24);
+                var owner = corners.FindIndex(c => x >= c.X && x < c.X + c.Width && y >= c.Y && y < c.Y + c.Height);
+                if (owner >= 0) changedIn[owner]++;
+                else outside++;
+            }
+        }
+        var diff = BitmapSource.Create(width, height, 96 * scale, 96 * scale, PixelFormats.Pbgra32, null, mask, width * 4);
+        diff.Freeze();
+        report.Save(diff, "nakladka-znacznik-roznica-150.png");
+        report.Line($"Znacznik ostrzeżeń w nakładce (skala {scale:0.0}): zmienione piksele poza obszarami znaczników: {outside}");
+        for (var k = 0; k < samples.Count; k++)
+            report.Line($"  {samples[k].Name}: znacznik {(samples[k].Visible ? "tak" : "nie")}, zmienione piksele w obszarze znacznika {changedIn[k]} " +
+                        $"(obszar {corners[k].Width}×{corners[k].Height} px, element {samples[k].Element.ActualWidth * scale:0}×{samples[k].Element.ActualHeight * scale:0} px)");
+        report.Line(string.Empty);
+    }
+
+    private static void Layout(FrameworkElement root, Size size)
+    {
+        root.Measure(size);
+        root.Arrange(new Rect(size));
+        root.UpdateLayout();
+    }
+
+    private static BitmapSource RenderCanvas(FrameworkElement root, Size size, double scale)
+    {
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(size.Width * scale), (int)Math.Ceiling(size.Height * scale),
+            96 * scale, 96 * scale, PixelFormats.Pbgra32);
+        bitmap.Render(root);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
     private sealed record NavPage(string Slug, ToggleButton? Button);
 
     private static List<NavPage> NavigationPages(Window window)
@@ -420,7 +770,10 @@ internal static class PreviewSession
 
     private static async Task SelectAsync(ToggleButton? button)
     {
+        var switching = button is { IsChecked: not true };
         if (button is not null) button.IsChecked = true;
+        await Waits.IdleAsync();
+        if (switching) await Task.Delay(250);
         await Waits.IdleAsync();
     }
 
@@ -447,6 +800,8 @@ internal static class PreviewSession
 
     private static object? Field(object target, string name) => target.GetType().GetField(name, AnyInstance)?.GetValue(target);
 
+    private static void SetField(object target, string name, object? value) => target.GetType().GetField(name, AnyInstance)?.SetValue(target, value);
+
     private static void Invoke(object target, string method, params object?[] args) =>
         target.GetType().GetMethod(method, AnyInstance)?.Invoke(target, args);
 
@@ -470,6 +825,13 @@ internal static class PreviewSession
         public string? Load(string name) => _values.GetValueOrDefault(name);
         public void Delete(string name) => _values.Remove(name);
     }
+}
+
+internal static class PreviewHotkeys
+{
+    public const string Translate = "Ctrl+Alt+Shift+F21";
+    public const string ToggleOverlay = "Ctrl+Alt+Shift+F22";
+    public const string LiveToggle = "Ctrl+Alt+Shift+F23";
 }
 
 internal static class Offscreen

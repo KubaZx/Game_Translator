@@ -6,6 +6,8 @@ namespace GameTranslatorOverlay.Infrastructure.Content;
 
 public sealed record CatalogIssue(string FilePath, string Message);
 
+public sealed record CatalogProfile(GameProfile Profile, string FilePath);
+
 /// <summary>
 /// Wczytuje profile gier z folderów „profiles” (obok aplikacji oraz w danych użytkownika).
 /// Błędne pliki nie wysypują aplikacji — trafiają na listę problemów do diagnostyki.
@@ -15,14 +17,22 @@ public sealed class ProfileCatalog(IReadOnlyList<string> rootDirectories, Versio
     /// <summary>Wersja aplikacji do sprawdzania „minAppVersion” profili (domyślnie wersja tego wydania).</summary>
     private readonly Version? _appVersion = appVersion ?? typeof(ProfileCatalog).Assembly.GetName().Version;
 
+    public static string BundledDirectory => Path.Combine(AppContext.BaseDirectory, "profiles");
+
     public static ProfileCatalog CreateDefault(AppPaths paths) => new([
-        Path.Combine(AppContext.BaseDirectory, "profiles"),
-        Path.Combine(paths.RootDirectory, "profiles"),
+        BundledDirectory,
+        paths.ProfilesDirectory,
     ]);
 
     public (IReadOnlyList<GameProfile> Profiles, IReadOnlyList<CatalogIssue> Issues) LoadAll()
     {
-        var profiles = new List<GameProfile>();
+        var (entries, issues) = LoadEntries();
+        return (entries.Select(static e => e.Profile).ToList(), issues);
+    }
+
+    public (IReadOnlyList<CatalogProfile> Entries, IReadOnlyList<CatalogIssue> Issues) LoadEntries()
+    {
+        var profiles = new List<CatalogProfile>();
         var issues = new List<CatalogIssue>();
 
         foreach (var root in rootDirectories)
@@ -40,12 +50,12 @@ public sealed class ProfileCatalog(IReadOnlyList<string> rootDirectories, Versio
                         issues.AddRange(errors.Select(e => new CatalogIssue(file, e)));
                         continue;
                     }
-                    if (profiles.Any(p => p.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase)))
+                    if (profiles.Any(p => p.Profile.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase)))
                     {
                         issues.Add(new CatalogIssue(file, $"Profil o identyfikatorze „{profile.Id}” już istnieje — pomijam duplikat."));
                         continue;
                     }
-                    profiles.Add(profile);
+                    profiles.Add(new CatalogProfile(profile, Path.GetFullPath(file)));
                 }
                 catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException or IOException)
                 {

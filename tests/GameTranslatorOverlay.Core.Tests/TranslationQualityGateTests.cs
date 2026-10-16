@@ -66,6 +66,51 @@ public class TranslationQualityGateTests
         Assert.Contains("długie", description);
     }
 
+    [Theory]
+    [InlineData(TranslationQualityFlags.NumbersChanged, "zmienione liczby")]
+    [InlineData(TranslationQualityFlags.Untranslated, "bez tłumaczenia")]
+    [InlineData(TranslationQualityFlags.Runaway, "za długie")]
+    [InlineData(TranslationQualityFlags.NumbersChanged | TranslationQualityFlags.Runaway, "zmienione liczby, za długie")]
+    [InlineData(TranslationQualityFlags.Empty | TranslationQualityFlags.NumbersChanged, "pusty wynik")]
+    public void Krotki_powod_na_chip_nazywa_kazdy_sprawdzony_problem(TranslationQualityFlags flags, string expected)
+    {
+        Assert.Equal(expected, TranslationQualityGate.ShortReason(flags));
+    }
+
+    [Fact]
+    public void Podpowiedz_wyjasnia_kazdy_problem_w_osobnej_linii()
+    {
+        var hint = TranslationQualityGate.Hint(
+            TranslationQualityFlags.NumbersChanged | TranslationQualityFlags.Untranslated | TranslationQualityFlags.Runaway)!;
+
+        var lines = hint.Split('\n');
+        Assert.Equal(3, lines.Length);
+        Assert.Contains("liczby z oryginału", lines[0]);
+        Assert.Contains("angielski oryginał", lines[1]);
+        Assert.Contains("dłuższe od oryginału", lines[2]);
+        Assert.Equal(TranslationQualityGate.EmptyResultMessage, TranslationQualityGate.Hint(TranslationQualityFlags.Empty));
+    }
+
+    [Fact]
+    public void Wynik_bez_problemow_nie_ma_powodu_ani_podpowiedzi()
+    {
+        Assert.Null(TranslationQualityGate.ShortReason(TranslationQualityFlags.None));
+        Assert.Null(TranslationQualityGate.Hint(TranslationQualityFlags.None));
+        Assert.Null(new TranslationOutcome("Hello", "Hello", "Cześć", TranslationOrigin.Provider).QualityWarning);
+    }
+
+    [Fact]
+    public void Opis_ostrzezenia_wyniku_wynika_z_jego_flag()
+    {
+        var outcome = new TranslationOutcome("You have 150 gold.", "You have 150 gold.", "Masz złoto.", TranslationOrigin.Provider)
+        {
+            QualityIssues = TranslationQualityFlags.NumbersChanged,
+        };
+
+        Assert.Equal(TranslationQualityGate.Describe(TranslationQualityFlags.NumbersChanged), outcome.QualityWarning);
+        Assert.Equal(TranslationQualityFlags.NumbersChanged, (outcome with { SourceText = "you have 150 gold." }).QualityIssues);
+    }
+
     [Fact]
     public void Pusty_wynik_jest_zawsze_gorszy_od_innych_problemow()
     {

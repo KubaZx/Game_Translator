@@ -28,6 +28,24 @@ internal static class PreviewData
         store.AddTerm(new GlossaryTerm("Open", "Otwórz", CaseSensitive: true, Priority: 100, Scope: GlossaryScope.Label), "en", "pl");
     }
 
+    public static void SeedQualityWarnings(QualityWarningLog log, UsageTracker usage)
+    {
+        TranslationOutcome Warned(string source, string translated, TranslationQualityFlags issues) =>
+            new(source, source, translated, TranslationOrigin.Provider) { QualityIssues = issues };
+
+        log.Record(Warned("Talk to the keeper about the beacon", "Talk to the keeper about the beacon", TranslationQualityFlags.Untranslated));
+        log.Record(Warned("Light the beacon before 10:30 PM.", "Zapal latarnię przed 22:30.", TranslationQualityFlags.NumbersChanged));
+        log.Record(Warned("Yes", "Tak. (Uwaga tłumacza: w tym miejscu „yes” oznacza zgodę na zadanie latarnika, a nie zwykłe potwierdzenie.)",
+            TranslationQualityFlags.Runaway));
+        log.Record(Warned("The keeper owes you 150 gold for the 3 sealed notes.", "Latarnik jest ci winien złoto za zapieczętowane listy.",
+            TranslationQualityFlags.NumbersChanged | TranslationQualityFlags.Runaway));
+        log.MarkCorrected("Light the beacon before 10:30 PM.", "Zapal latarnię przed 22:30.");
+        usage.RecordQualityIssue(TranslationQualityFlags.NumbersChanged);
+        usage.RecordQualityIssue(TranslationQualityFlags.Untranslated);
+        usage.RecordQualityRetry();
+        usage.RecordQualityRetry();
+    }
+
     public static void Fill(Window window, UsageTracker usage)
     {
         var explorerPid = 0;
@@ -70,14 +88,17 @@ internal static class PreviewData
 
     public static RegionTranslationResult PanelResult()
     {
-        TranslatedBlock Block(string source, string? target, TranslationOrigin origin, int y) =>
-            new(new OcrTextBlock(source, new RectPx(-30000, y, 600, 40), []), new TranslationOutcome(source, source, target, origin));
+        TranslatedBlock Block(string source, string? target, TranslationOrigin origin, int y,
+            TranslationQualityFlags issues = TranslationQualityFlags.None) =>
+            new(new OcrTextBlock(source, new RectPx(-30000, y, 600, 40), []),
+                new TranslationOutcome(source, source, target, origin) { QualityIssues = issues });
         return new RegionTranslationResult(
             new RectPx(-30000, 300, 640, 160),
             [
                 Block(SourceLine, TargetLine, TranslationOrigin.Provider, 300),
                 Block("Open the drawer", "Otwórz szufladę", TranslationOrigin.Glossary, 350),
-                Block("Careful now! The floor creaks.", "Ostrożnie! Podłoga skrzypi.", TranslationOrigin.Cache, 400),
+                Block("Careful now! The 3rd step creaks.", "Ostrożnie! Stopień skrzypi.", TranslationOrigin.Cache, 400,
+                    TranslationQualityFlags.NumbersChanged),
             ],
             new PipelineTimings(14, 88, 402, 517),
             "Tryb Cache-only: tekst spoza cache zostanie pominięty.");

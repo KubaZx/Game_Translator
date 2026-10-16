@@ -85,6 +85,8 @@ public sealed class TranslationOrchestrator(
     /// <summary>Czasy etapów tej sesji aplikacji (live i ręczne tłumaczenie).</summary>
     public LatencyMonitor Latency => usage.Latency;
 
+    public QualityWarningLog QualityWarnings { get; } = new();
+
     /// <summary>
     /// Czy bieżący pipeline zgłosił błąd trwałego cache (wyniki tylko w pamięci) — UI
     /// pokazuje wtedy ostrzeżenie w nakładce. Nowy pipeline zaczyna bez tego stanu.
@@ -93,16 +95,41 @@ public sealed class TranslationOrchestrator(
 
     public ITranslationCache CurrentCache => _privateCache is { } inMemory ? inMemory : persistentCache;
 
+    public IReadOnlyList<CatalogProfile> ProfileEntries { get; private set; } = [];
+
     public void Initialize()
     {
-        var (profiles, issues) = profileCatalog.LoadAll();
-        Profiles = profiles;
+        QualityWarnings.ContextSource = () => new QualityWarningContext(ActiveProfile?.Id ?? string.Empty, settings.SourceLanguage, settings.TargetLanguage);
+        LoadProfiles();
+        RebuildPipeline();
+    }
+
+    public void ReloadProfiles()
+    {
+        LoadProfiles();
+        RebuildPipeline();
+    }
+
+    public string? ProfileFile(GameProfile? profile) =>
+        profile is null ? null : ProfileEntries.FirstOrDefault(e => ReferenceEquals(e.Profile, profile))?.FilePath;
+
+    private static bool IsBundledFile(string? file) =>
+        file is not null && System.IO.Path.GetFullPath(file).StartsWith(System.IO.Path.GetFullPath(ProfileCatalog.BundledDirectory), StringComparison.OrdinalIgnoreCase);
+
+    private string ProfileLogName(GameProfile? profile) => profile is null ? "(brak)"
+        : IsBundledFile(ProfileFile(profile)) ? profile.Id : "(własny)";
+
+    private void LoadProfiles()
+    {
+        var (entries, issues) = profileCatalog.LoadEntries();
+        ProfileEntries = entries;
+        Profiles = entries.Select(static e => e.Profile).ToList();
         ProfileIssues = issues;
         foreach (var issue in issues)
         {
-            _logger.LogWarning("Problem z profilem {File}: {Message}", issue.FilePath, issue.Message);
+            if (IsBundledFile(issue.FilePath)) _logger.LogWarning("Problem z profilem {File}: {Message}", issue.FilePath, issue.Message);
+            else _logger.LogWarning("Problem z własnym profilem w folderze danych — profil nie został wczytany");
         }
-        RebuildPipeline();
     }
 
     /// <summary>Przebudowuje pipeline po każdej zmianie ustawień (dostawca, profil, tryby, limity).</summary>
@@ -120,12 +147,13 @@ public sealed class TranslationOrchestrator(
         var warnings = new List<string>();
         var fonts = OverlayFontRuleSet.Validate(ActiveProfile?.Overlay, Ui.OverlayFonts.IsAvailable);
         ActiveFontRules = fonts.Rules;
-        warnings.AddRange(fonts.Warnings.Select(w => $"Profil „{ActiveProfile?.Id}”: {w}"));
+        var bundledProfile = ActiveProfile is not null && IsBundledFile(ProfileFile(ActiveProfile));
+        warnings.AddRange(fonts.Warnings.Select(w => bundledProfile ? $"Profil „{ActiveProfile?.Id}”: {w}" : $"Własny profil: {w}"));
         glossaryService.Clear();
         LoadGlossary("global", warnings);
         if (ActiveProfile?.Glossary is { Length: > 0 } profileGlossary)
         {
-            LoadGlossary(profileGlossary, warnings);
+            LoadGlossary(profileGlossary, warnings, hideName: !bundledProfile);
         }
         glossaryService.LoadDocument(userGlossaryStore.Load(settings.SourceLanguage, settings.TargetLanguage));
 
@@ -152,7 +180,8 @@ public sealed class TranslationOrchestrator(
         ActiveCorpus = ActiveProfile is { } profileWithCorpus && corpusCatalog is not null
             ? corpusCatalog.Load(profileWithCorpus.Id)
             : CorpusLoadResult.None;
-        if (ActiveCorpus.Issue is { } corpusIssue) warnings.Add($"Korpus profilu „{ActiveProfile?.Id}”: {corpusIssue}");
+        if (ActiveCorpus.Issue is { } corpusIssue)
+            warnings.Add(bundledProfile ? $"Korpus profilu „{ActiveProfile?.Id}”: {corpusIssue}" : $"Korpus własnego profilu: {corpusIssue}");
 
         // Glosariusz DeepL jest przechowywany na koncie DeepL — tryb prywatny go nie tworzy.
         deepLProvider.Options.UseGlossary = !settings.PrivateMode;
@@ -178,11 +207,11 @@ public sealed class TranslationOrchestrator(
         ContentWarnings = warnings;
         _logger.LogInformation(
             "Pipeline: dostawca={Provider}, profil={Profile}, słownik={Terms} terminów, cacheOnly={CacheOnly}, prywatny={Private}, korpus={CorpusTexts} tekstów, akapity={Paragraphs}",
-            ActiveProvider.Name, ActiveProfile?.Id ?? "(brak)", glossaryService.TermCount, settings.CacheOnlyMode, settings.PrivateMode,
+            ActiveProvider.Name, ProfileLogName(ActiveProfile), glossaryService.TermCount, settings.CacheOnlyMode, settings.PrivateMode,
             ActiveCorpus.Texts, ActiveCorpus.IsLoaded || settings.ParagraphCacheKeys);
     }
 
-    private void LoadGlossary(string glossaryId, List<string> warnings)
+    private void LoadGlossary(string glossaryId, List<string> warnings, bool hideName = false)
     {
         var (document, issue) = glossaryCatalog.TryLoad(glossaryId, settings.SourceLanguage, settings.TargetLanguage);
         if (document is not null)
@@ -191,6 +220,12 @@ public sealed class TranslationOrchestrator(
         }
         else if (issue is not null && glossaryId != "global")
         {
+            if (hideName)
+            {
+                warnings.Add("Słownik własnego profilu nie został wczytany — sprawdź jego plik w folderze danych.");
+                _logger.LogWarning("Problem ze słownikiem własnego profilu — słownik nie został wczytany");
+                return;
+            }
             warnings.Add($"Słownik „{glossaryId}”: {issue.Message}");
             _logger.LogWarning("Problem ze słownikiem {Glossary}: {Message}", glossaryId, issue.Message);
         }
@@ -200,6 +235,7 @@ public sealed class TranslationOrchestrator(
 
     public async Task<RegionTranslationResult> TranslateRegionAsync(RectPx region, CancellationToken externalToken = default)
     {
+        var warningGeneration = QualityWarnings.Generation;
         var pipeline = (Volatile.Read(ref _pipelineState)
             ?? throw new InvalidOperationException("Pipeline tłumaczenia nie został zbudowany.")).Pipeline;
 
@@ -305,6 +341,7 @@ public sealed class TranslationOrchestrator(
             translated.Add(new TranslatedBlock(blocks[i], outcomes[i], colorRgb));
         }
         var firstError = translated.FirstOrDefault(static t => t.Outcome.ErrorMessage is not null)?.Outcome.ErrorMessage;
+        QualityWarnings.RecordAll(outcomes, warningGeneration);
 
         return new RegionTranslationResult(
             region,
@@ -313,19 +350,28 @@ public sealed class TranslationOrchestrator(
             firstError);
     }
 
-    public Task SaveManualCorrectionAsync(TranslatedBlock block, string correctedText, CancellationToken cancellationToken = default)
+    public Task SaveManualCorrectionAsync(TranslatedBlock block, string correctedText, CancellationToken cancellationToken = default) =>
+        SaveManualCorrectionAsync(block.Block.Text, block.Outcome.NormalizedText, block.Outcome.CacheKey, correctedText, null, cancellationToken);
+
+    public Task SaveManualCorrectionAsync(QualityWarningEntry warning, string correctedText, CancellationToken cancellationToken = default) =>
+        SaveManualCorrectionAsync(warning.SourceText, warning.NormalizedText, warning.CacheKey, correctedText, warning.Context, cancellationToken);
+
+    private async Task SaveManualCorrectionAsync(
+        string sourceText, string normalizedText, string? cacheKey, string correctedText, QualityWarningContext? context,
+        CancellationToken cancellationToken)
     {
         var entry = new NewCacheEntry(
-            block.Outcome.CacheKey ?? block.Block.Text,
-            block.Outcome.CacheKey ?? block.Outcome.NormalizedText,
-            settings.SourceLanguage,
-            settings.TargetLanguage,
+            cacheKey ?? sourceText,
+            cacheKey ?? normalizedText,
+            context?.SourceLanguage ?? settings.SourceLanguage,
+            context?.TargetLanguage ?? settings.TargetLanguage,
             correctedText.Trim(),
             "manual",
-            ActiveProfile?.Id ?? string.Empty);
+            context?.ProfileId ?? ActiveProfile?.Id ?? string.Empty);
         // Pamięć dialogu (tylko w RAM) ma się trzymać poprawionej formy w kolejnych liniach.
         Volatile.Read(ref _pipelineState)?.Pipeline.RememberManualCorrection(entry.NormalizedText, entry.TranslatedText);
-        return CurrentCache.SaveManualCorrectionAsync(entry, cancellationToken);
+        await CurrentCache.SaveManualCorrectionAsync(entry, cancellationToken).ConfigureAwait(false);
+        QualityWarnings.MarkCorrected(normalizedText, entry.TranslatedText);
     }
 
     public Task AddGlossaryTermAsync(string source, string target)
@@ -405,9 +451,17 @@ public sealed class TranslationOrchestrator(
     /// do bazy (podwójny licznik użyć). Wynik próby innego pipeline'u (zmiana ustawień między
     /// próbą a tłumaczeniem) jest pomijany: mógłby pochodzić z innego cache albo reguł.
     /// </summary>
+    public Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
+        IReadOnlyList<string> texts, IReadOnlyList<TranslationOutcome?>? knownLocal,
+        CancellationToken cancellationToken = default) =>
+        TranslateTextsAsync(texts, knownLocal, onPartial: null, cancellationToken);
+
+    public bool StreamsPartialResults =>
+        settings.StreamLlmResponses && !settings.CacheOnlyMode && ActiveProvider is IStreamingTranslationProvider;
+
     public async Task<IReadOnlyList<TranslationOutcome>> TranslateTextsAsync(
         IReadOnlyList<string> texts, IReadOnlyList<TranslationOutcome?>? knownLocal,
-        CancellationToken cancellationToken = default)
+        Action<int, TranslationOutcome>? onPartial, CancellationToken cancellationToken = default)
     {
         // Token epoki: zmiana ustawień (np. włączenie trybu prywatnego/Cache-only)
         // przerywa także tłumaczenia live będące w locie — stary pipeline nie może
@@ -427,8 +481,15 @@ public sealed class TranslationOrchestrator(
             }
 
             var hint = knownLocal is LocalProbe probe && ReferenceEquals(probe.State, state) ? probe.Outcomes : null;
+            var token = linked.Token;
+            Action<int, TranslationOutcome>? partial = onPartial is not null && settings.StreamLlmResponses
+                ? (index, outcome) =>
+                {
+                    if (!token.IsCancellationRequested) onPartial(index, outcome);
+                }
+                : null;
             var outcomes = await state.Pipeline
-                .TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, hint, linked.Token)
+                .TranslateAsync(texts, settings.SourceLanguage, settings.TargetLanguage, hint, partial, token)
                 .ConfigureAwait(false);
             // A provider may finish despite cancellation. Never publish a result
             // belonging to settings that have already been replaced.

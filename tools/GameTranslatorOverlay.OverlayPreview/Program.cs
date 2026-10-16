@@ -13,7 +13,8 @@ internal static class Program
           --cache KOPIA_cache.db       kopia bazy tłumaczeń (czytana z kopii roboczej, oryginał nietknięty)
           --corpus KORPUS.jsonl        korpus gry dla aktywnego profilu
           --profile escape-academy     profil gry ("none" = bez profilu)
-          --blocks BLOKI.json          gotowe bloki zamiast OCR (format jak wyjściowy bloki.json; tylko z jedną klatką)
+          --blocks BLOKI.json          gotowe bloki zamiast OCR (format jak wyjściowy bloki.json; tylko z jedną klatką;
+                                       pole "quality": NumbersChanged|Untranslated|Runaway|Empty|auto = znacznik ostrzeżenia)
           --placement cover            cover | below
           --font-size 0                0 = auto (jak gracz)
           --font-family auto         auto = krój z profilu gry (jak gracz), inaczej nazwa czcionki

@@ -47,9 +47,11 @@ internal static class Program
         output = Path.GetFullPath(output);
         Directory.CreateDirectory(output);
 
-        var app = new GameTranslatorOverlay.App.App();
-        app.InitializeComponent();
-        app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        app.Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri("pack://application:,,,/GameTranslatorOverlay;component/Ui/Theme.xaml", UriKind.Absolute),
+        });
 
         var exitCode = 0;
         var watchdog = new Thread(() =>
