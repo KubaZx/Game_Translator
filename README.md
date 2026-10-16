@@ -13,15 +13,19 @@ gry, bez żadnej zmiany w plikach gry.
 
 **Wersja: 0.8.0** · Windows 10 2004+ / 11 · portable, bez instalacji
 
+**Nowe w 0.8.0:** własny profil gry i zmiana skrótów w oknie, ostrzeżenia kontroli jakości
+w oknie i nakładce, pierwsze linie od razu przy Claude i modelach językowych, poprawny napis na
+jasnych tabliczkach z ramką — [wszystkie zmiany](CHANGELOG.md).
+
 ## Funkcje
 
 | Funkcja | Jak |
 |---|---|
-| Tłumaczenie fragmentu | `Ctrl+Shift+T` → zaznacz obszar |
+| Tłumaczenie fragmentu | `Ctrl+Shift+T` (domyślnie) → zaznacz obszar |
 | Okno aplikacji | ciemne okno z sekcjami Pulpit, Gra, Tłumaczenie, Wygląd nakładki, Dane i słownik, O programie; minimalizacja do zasobnika, okno wykluczone z przechwytywania obrazu |
-| Profile i skróty w oknie | **Gra → Profil tej gry**: własny profil gry z okna (zapis w folderze danych, bez restartu); **O programie → Skróty klawiszowe**: zmiana skrótów z wykrywaniem kolizji (także AltGr) |
-| Tryb live | `Ctrl+Shift+L` w grze (start/stop) albo okno gry w sekcji **Gra** → **Start live** na **Pulpicie** |
-| Ukrycie nakładki | `Ctrl+Shift+H` |
+| Profile i skróty w oknie | **Gra → Profil tej gry**: własny profil gry z okna (nazwa, proces i język; zapis w folderze danych, bez restartu; potem włącza się sam po wybraniu okna gry); **O programie → Skróty klawiszowe**: zmiana trzech skrótów globalnych od razu, z odrzucaniem kolizji (inna czynność, AltGr, skrót zajęty przez inny program) |
+| Tryb live | skrót live w grze (domyślnie `Ctrl+Shift+L`, start/stop) albo okno gry w sekcji **Gra** → **Start live** na **Pulpicie** |
+| Ukrycie nakładki | `Ctrl+Shift+H` (domyślnie) |
 | Komunikaty w grze | brak klucza, limit, brak sieci, Cache-only, start/stop live, gra na pełnym ekranie — krótki pasek u góry okna gry |
 | Wygląd | bloki przy oryginale (pod tekstem albo zakrywające go) albo napisy na dole |
 | Wygląd jak w grze | **Na oryginale (zakrywa)** w trybie live: z obrazu znikają same litery oryginału (ich piksele są wypełniane tłem z otoczenia, reszta obrazu gry zostaje nietknięta), a polski tekst dostaje kolor, kontur, cień, wysokość liter i linię bazową napisu gry; ikony klawiszy ze środka zdania stoją w polskim zdaniu (obraz ikony z gry), a imię mówiącego nad dialogiem jest osobnym napisem; krój **Jak w grze (krój z profilu)** — w profilu Escape Academy dołączony Lexend Deca, a dla imion i tytułów Zilla Slab |
@@ -55,6 +59,7 @@ cache jest szukany pod tekstem z korpusu, więc różne odczyty tego samego zdan
 | Nowy tekst (pierwszy raz) | ~0,3–0,5 s + czas odpowiedzi dostawcy |
 | Nowy tekst z DeepL (Mock opóźniony o zmierzony czas DeepL) | ~0,50–0,59 s; model językowy bez rozumowania ~1,0–1,3 s |
 | Nowy tekst przy dostawcy odpowiadającym 2 s | ~2,3–2,5 s (było do 4,1 s) |
+| Pierwsza linia przy strumieniu modelu (5 linii; symulowany model: 0,9 s do pierwszej linii, potem 0,35 s na linię) | ~1,5 s, bez strumienia ~2,9 s |
 | Zniknięcie napisu, gdy tekst w grze się zmienił | ~12–170 ms |
 | Zniknięcie napisu przykrytego w grze panelem | ~14–18 ms (było ~0,3 s) |
 | Zniknięcie tłumaczenia, gdy napis zniknął z teksturowanego tła | 0,29–0,55 s (było ~0,9 s, ~6 s albo wcale) |
@@ -74,11 +79,14 @@ odświeżała się najwyżej ok. 10 razy na sekundę. Mierzą moment gotowości 
 Wiersz DeepL to SceneReplay z Mockiem opóźnionym o czasy odpowiedzi zmierzone 2026-10-05
 u prawdziwych dostawców (DeepL i DeepSeek bez rozumowania, mediana–p90;
 [ADR-014](docs/TECHNOLOGY_DECISIONS.md)); w grze czas odpowiedzi zależy od sieci i długości
-tekstu. Szczegóły: [ROADMAP.md](docs/ROADMAP.md).
+tekstu. Wiersz o strumieniu to SceneReplay z wydania 0.8.0 (Claude i serwer zgodny z OpenAI na
+symulowanych odpowiedziach; na prawdziwym API jeszcze niezmierzony). Szczegóły:
+[ROADMAP.md](docs/ROADMAP.md).
 
 Własne czasy z gry pokazuje panel **Szybkość** w oknie aplikacji: mediana i p90 dla
 **Zmiana → napis** (od zauważonej zmiany obrazu do gotowych napisów — czas, który widzi gracz),
-nowego i znanego tekstu, odpowiedzi dostawcy, OCR i przechwycenia. **Kopiuj raport** kopiuje je
+nowego i znanego tekstu, odpowiedzi dostawcy (przy strumieniu także pierwszej linii), OCR
+i przechwycenia. **Kopiuj raport** kopiuje je
 do schowka.
 
 Od 0.4.0 okno stabilności liczy się od zauważonej zmiany (do ~250 ms mniej czekania), a znany
@@ -96,15 +104,18 @@ na żywo.
    uruchom `GameTranslatorOverlay.exe`.
 2. W sekcji **Tłumaczenie** wybierz dostawcę, wklej klucz API → **Zapisz klucz** → **Testuj**.
 3. Uruchom grę w oknie bez ramki (borderless) albo w oknie i kliknij jej okno w sekcji **Gra**.
-4. **Start live** na **Pulpicie** (albo `Ctrl+Shift+L` w grze).
+   Opcjonalnie w karcie **Profil tej gry**: **Utwórz profil dla tej gry** → **Utwórz profil** —
+   przy następnych uruchomieniach profil włączy się sam
+   ([Instrukcja → Własne profile gier](docs/USER_GUIDE.md#własne-profile-gier)).
+4. **Start live** na **Pulpicie** (albo `Ctrl+Shift+L` w grze; skróty zmienisz w **O programie**).
 5. Opcjonalnie, dla napisów w stylu gry: **Położenie dymków → Na oryginale (zakrywa)**
    (krój **Jak w grze (krój z profilu)** jest domyślny) —
    [Instrukcja → Tryb „Na oryginale (zakrywa)”](docs/USER_GUIDE.md#tryb-na-oryginale-zakrywa--napis-jak-w-grze).
 6. Opcjonalnie (Escape Academy): przygotuj korpus gry i przetłumacz go z wyprzedzeniem narzędziem
    `CorpusTool` — [Instrukcja → Spolszczenie z wyprzedzeniem](docs/USER_GUIDE.md#spolszczenie-z-wyprzedzeniem-korpus-gry).
 
-Aktualizacja: rozpakuj nową wersję w miejsce starej. Ustawienia, klucze, cache i korpus gry są
-w `%LOCALAPPDATA%\GameTranslatorOverlay`, więc zostają. Ustawiony krój Segoe UI (dotychczas
+Aktualizacja: rozpakuj nową wersję w miejsce starej. Ustawienia (także skróty), klucze, cache,
+własne profile gier i korpus gry są w `%LOCALAPPDATA%\GameTranslatorOverlay`, więc zostają. Ustawiony krój Segoe UI (dotychczas
 domyślny) przechodzi raz na **Jak w grze (krój z profilu)**; inny wybrany krój zostaje.
 
 ## Wymagania
@@ -125,6 +136,9 @@ domyślny) przechodzi raz na **Jak w grze (krój z profilu)**; inny wybrany kró
   nie zawierają tekstu z ekranu.
 - Klucze API są szyfrowane DPAPI i wysyłane tylko do wybranego dostawcy.
 - Z lokalnym LLM tekst nie wychodzi z komputera.
+- Tryb prywatny: tłumaczenia i tekst z ekranu nie trafiają na dysk (cache i pamięć dialogu tylko
+  w RAM), a własnych profili gier nie da się tworzyć ani przemianowywać (zapisałyby nazwę gry).
+  Lista ostrzeżeń jakości jest zawsze tylko w pamięci, a log nie zawiera nazw własnych profili.
 - Aplikacja nie modyfikuje gry, nie czyta jej pamięci ani plików i nie wysyła do niej klawiszy.
 - Teksty z plików gry czyta wyłącznie osobne narzędzie `CorpusTool`, uruchamiane przez Ciebie
   przy wyłączonej grze (tylko odczyt, odmowa dla gier z anti-cheatem i online); korpus zostaje
@@ -136,8 +150,8 @@ Więcej: [PRIVACY.md](docs/PRIVACY.md), [SECURITY.md](docs/SECURITY.md).
 ## Ograniczenia
 
 - Ozdobne lub małe czcionki, słaby kontrast i animowane tło pogarszają OCR.
-- Przy ruchu kamery napis, którego nie da się śledzić (bez trybu zakrywania, przy podchodzeniu do
-  napisu na ścianie, zasłonięty), znika i wraca po kolejnym odczycie OCR; także śledzony HUD bywa
+- Przy ruchu kamery napis, którego nie da się śledzić (zasłonięty, w perspektywie, przy
+  zapasowym zrzucie ekranu), znika i wraca po kolejnym odczycie OCR; także śledzony HUD bywa
   gubiony przy szybkim obrocie z krokiem (na nagraniach ok. 20% czasu ruchu bez tłumaczenia HUD).
   Działanie w ruchu zmierzono na nagraniach Escape Academy (MotionLab), nie w grze na żywo.
 - Napis przygaszony poniżej ćwierci dawnej jasności może raz zniknąć z nakładki na ok. 0,6 s,
@@ -162,6 +176,17 @@ Więcej: [PRIVACY.md](docs/PRIVACY.md), [SECURITY.md](docs/SECURITY.md).
   tłumaczenie całej kwestii może pojawić się, zanim gra ją dopisze.
 - Komunikat o pełnym ekranie nie odróżnia wyłącznego pełnego ekranu od okna bez ramki, którego
   nie da się przechwycić jako okna (liczy się zajęcie całego monitora).
+- **Pierwsze linie od razu** działa w trybie live przy przechwytywaniu okna (przy zapasowym
+  zrzucie ekranu linie czekają na całą odpowiedź); na prawdziwych API i serwerach lokalnych
+  (Ollama, LM Studio, DeepSeek) jeszcze niesprawdzone.
+- Własny profil z okna ma tylko nazwę, proces i język; strojenie (OCR, słownik, krój) — ręcznie
+  w `profile.json` w folderze danych.
+- Skrót zajęty przez inny program Windows bywa połykany bez komunikatu — wtedy pole edytora się
+  nie zmienia i trzeba wybrać inną kombinację.
+- Po **Popraw** na liście ostrzeżeń dymek w trakcie live pokazuje stare tłumaczenie do następnego
+  odczytu tekstu.
+- Edytory profilu i skrótów oraz ostrzeżenia z 0.8.0 sprawdzono na renderach okna (UiPreview)
+  i w SceneReplay, nie w grze na żywo.
 
 ## Budowanie
 
@@ -192,7 +217,7 @@ w paczce aplikacji. Tam, gdzie zaznaczono Windows, potrzebny jest systemowy OCR 
 | [OverlayPreview](tools/GameTranslatorOverlay.OverlayPreview/README.md) | prawdziwa nakładka „Na oryginale (zakrywa)” na zapisanych klatkach gry → PNG i galeria do porównań przed/po, bez sieci (Windows) |
 | [MotionLab](tools/GameTranslatorOverlay.MotionLab/README.md) | nagrania gry (klatki) odtwarzane przez prawdziwą sesję live i nakładkę z Mockiem; pokrycie, dziury, opóźnienia i położenie napisów w ruchu kamery względem offline OCR każdej klatki (Windows) |
 | [UiPreview](tools/GameTranslatorOverlay.UiPreview/README.md) | prawdziwe okno aplikacji renderowane poza ekranem (tymczasowe dane, Mock, bez sieci) → PNG sekcji i wariantów oraz kontrole uciętych napisów i klikalności (Windows) |
-| [SceneReplay](tools/GameTranslatorOverlay.SceneReplay/README.md) | powtarzalne sceny trybu live we własnym oknie (m.in. `stale-*`, `typing`) z Mockiem; czasy callbacków sesji (Windows) |
+| [SceneReplay](tools/GameTranslatorOverlay.SceneReplay/README.md) | powtarzalne sceny trybu live we własnym oknie (m.in. `stale-*`, `typing`, `pan-cut`, `quality-mark`, `stream`) z Mockiem albo symulowanym strumieniem modelu; czasy callbacków sesji (Windows) |
 | [LiveDiag](tools/GameTranslatorOverlay.LiveDiag/README.md) | diagnostyka sesji live na scenie testowej albo oknie gry: capture, Windows OCR, Mock (Windows) |
 | [ProviderEval](tools/GameTranslatorOverlay.ProviderEval/README.md) | porównanie dostawców i promptów: chrF, czasy, kontrole EN→PL, opcje serwera LLM |
 | `GameTranslatorOverlay.OcrLab` | warianty wstępnej obróbki obrazu dla Windows OCR na klatce wskazanego okna (Windows) |
@@ -202,8 +227,8 @@ w paczce aplikacji. Tam, gdzie zaznaczono Windows, potrzebny jest systemowy OCR 
 
 | Katalog | Zawartość |
 |---|---|
-| `src/GameTranslatorOverlay.Core` | tekst, tłumaczenia, cache, stabilizacja live, dopasowanie do korpusu (`Corpus`), łatka liter (`Vision`) |
-| `src/GameTranslatorOverlay.Infrastructure` | dostawcy API, SQLite, DPAPI, wczytywanie korpusu |
+| `src/GameTranslatorOverlay.Core` | tekst, tłumaczenia, cache, stabilizacja live, dopasowanie do korpusu (`Corpus`), łatka liter (`Vision`), skróty (`Windows`), ostrzeżenia jakości (`Usage`) |
+| `src/GameTranslatorOverlay.Infrastructure` | dostawcy API (także strumień), SQLite, DPAPI, wczytywanie korpusu, własne profile gier |
 | `src/GameTranslatorOverlay.App` | WPF, przechwytywanie, OCR, nakładka, dołączone kroje (`Fonts`) |
 | `tests/` | testy xUnit: Core, Infrastructure, CorpusTool |
 | `tools/` | CorpusTool, CorpusEval, OverlayPreview, MotionLab, UiPreview, SceneReplay, LiveDiag, ProviderEval, OcrLab, SmokeTest |
