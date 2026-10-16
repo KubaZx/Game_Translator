@@ -2,11 +2,27 @@ using System.Globalization;
 
 internal static class LabDefaults
 {
-    public const string RecordingsRoot = @"C:\Users\szuch\Codex Projects\GTO Diagnostics\20261006-ruch\nagrania";
-    public const string Cache = @"C:\Users\szuch\Codex Projects\GTO Diagnostics\20261005-natywne-spolszczenie\sesja-2026-10-06\private\cache.db";
-    public const string Corpus = @"C:\Users\szuch\Codex Projects\GTO Diagnostics\20261005-natywne-spolszczenie\krok2\private\escape-academy.corpus.jsonl";
     public const string Profile = "escape-academy";
     public const string TruthFile = "truth.jsonl";
+
+    public static string DiagnosticsRoot { get; } = FindDiagnosticsRoot();
+
+    public static string RecordingsRoot => Path.Combine(DiagnosticsRoot, "20261006-ruch", "nagrania");
+
+    public static string Cache => Path.Combine(DiagnosticsRoot, "20261005-natywne-spolszczenie", "sesja-2026-10-06", "private", "cache.db");
+
+    public static string Corpus => Path.Combine(DiagnosticsRoot, "20261005-natywne-spolszczenie", "krok2", "private", "escape-academy.corpus.jsonl");
+
+    private static string FindDiagnosticsRoot()
+    {
+        if (Environment.GetEnvironmentVariable("GTO_DIAGNOSTICS") is { Length: > 0 } configured) return Path.GetFullPath(configured);
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "GameTranslatorOverlay.slnx")))
+                return Path.Combine(directory.Parent?.FullName ?? directory.FullName, "GTO Diagnostics");
+        }
+        return Path.Combine(AppContext.BaseDirectory, "GTO Diagnostics");
+    }
 }
 
 internal sealed record MotionStep(double StartMs, double EndMs, string Label)

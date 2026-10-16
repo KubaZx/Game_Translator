@@ -14,7 +14,7 @@ namespace GameTranslatorOverlay.Infrastructure.Tests;
 /// </summary>
 public sealed class SqliteStaleProfileLoopTests : IDisposable
 {
-    private const string Profile = "witcher";
+    private const string Profile = "latarnia";
     private static readonly string MultiLine = TextNormalizer.Normalize("Talk to the\nblacksmith about the sword.");
 
     private readonly string _databasePath;

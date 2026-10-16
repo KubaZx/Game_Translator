@@ -56,7 +56,7 @@ public sealed class SqliteBatchLookupTests : IDisposable
         await _cache.StoreAsync(Entry("Approved wins", "Z profilu", profile: "poe2"));
         await _cache.StoreAsync(Entry("Manual wins", "Z profilu", profile: "poe2"));
         await _cache.SaveManualCorrectionAsync(Entry("Manual wins", "Ręczna"));
-        await _cache.StoreAsync(Entry("Other profile", "Z innego profilu", profile: "witcher"));
+        await _cache.StoreAsync(Entry("Other profile", "Z innego profilu", profile: "latarnia"));
     }
 
     private static readonly string[] Texts =

@@ -12,7 +12,7 @@ namespace GameTranslatorOverlay.Core.Tests;
 /// </summary>
 public class TranslationPipelineLocalTests
 {
-    private const string Profile = "witcher";
+    private const string Profile = "latarnia";
 
     private sealed class CountingProvider(Func<string, string>? respond = null, TranslationException? failure = null)
         : ITranslationProvider

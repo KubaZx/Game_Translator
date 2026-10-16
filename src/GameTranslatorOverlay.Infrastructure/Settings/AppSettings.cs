@@ -39,7 +39,7 @@ public sealed class AppSettings
     public string LiveToggleHotkey { get; set; } = "Ctrl+Shift+L";
 
     /// <summary>
-    /// Proces gry (np. „witcher3.exe”) z ostatniego startu live — skrót wybiera go, gdy na
+    /// Proces gry (np. „latarnia.exe”) z ostatniego startu live — skrót wybiera go, gdy na
     /// pierwszym planie jest okno tłumacza, a lista okien zaznacza go po odświeżeniu.
     /// Nie jest zapisywany w trybie prywatnym.
     /// </summary>

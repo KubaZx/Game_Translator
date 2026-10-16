@@ -35,7 +35,7 @@ public class CacheExportContextTests
                 "targetLanguage": "pl",
                 "translatedText": "Cześć",
                 "provider": "DeepL",
-                "gameProfile": "witcher",
+                "gameProfile": "latarnia",
                 "isManual": false,
                 "isApproved": false
               }
@@ -44,7 +44,7 @@ public class CacheExportContextTests
         var cache = new InMemoryTranslationCache();
 
         Assert.Equal(1, await cache.ImportJsonAsync(oldJson));
-        var hit = await cache.LookupAsync("Hello", "en", "pl", "witcher");
+        var hit = await cache.LookupAsync("Hello", "en", "pl", "latarnia");
         Assert.Equal("Cześć", hit!.TranslatedText);
         Assert.Null(hit.Context);
     }

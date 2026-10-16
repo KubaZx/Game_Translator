@@ -21,7 +21,9 @@ internal static class Program
         MotionLab analyze KATALOG_REPLAY [--truth PLIK] [--worst 15]
           Metryki ruchu → metrics.json + RAPORT.md + sheets\*.jpg.
 
-        NAGRANIE = ścieżka katalogu albo nazwa w katalogu nagrań (domyślnie GTO Diagnostics\20261006-ruch\nagrania).
+        NAGRANIE = ścieżka katalogu albo nazwa w katalogu nagrań (<GTO Diagnostics>\20261006-ruch\nagrania).
+        <GTO Diagnostics> = zmienna środowiskowa GTO_DIAGNOSTICS albo folder „GTO Diagnostics” obok repozytorium;
+        z niego biorą się też domyślne --cache i --corpus.
         """;
 
     [STAThread]
@@ -129,8 +131,12 @@ internal static class Program
 
     private static string? ExistingFile(Dictionary<string, string> options, string name, string fallback)
     {
-        var path = Path.GetFullPath(options.TryGetValue(name, out var value) ? value : fallback);
-        return File.Exists(path) ? path : throw new ArgumentException($"{name}: nie ma pliku {path}");
+        var given = options.TryGetValue(name, out var value);
+        var path = Path.GetFullPath(given ? value! : fallback);
+        if (File.Exists(path)) return path;
+        throw new ArgumentException(given
+            ? $"{name}: nie ma pliku {path}"
+            : $"{name}: nie ma domyślnego pliku {path} — podaj {name} albo ustaw GTO_DIAGNOSTICS.");
     }
 
     private static string OneOf(Dictionary<string, string> options, string name, string fallback, params string[] allowed)

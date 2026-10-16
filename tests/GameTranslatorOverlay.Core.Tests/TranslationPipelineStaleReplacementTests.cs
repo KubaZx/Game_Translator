@@ -12,7 +12,7 @@ namespace GameTranslatorOverlay.Core.Tests;
 /// </summary>
 public class TranslationPipelineStaleReplacementTests
 {
-    private const string Profile = "witcher";
+    private const string Profile = "latarnia";
     private const string Gold = "You have 150 gold.";
     private static readonly string MultiLine = TextNormalizer.Normalize("Talk to the\nblacksmith about the sword.");
 

@@ -27,15 +27,15 @@ public sealed class LiveHotkeySettingsTests : IDisposable
         store.Save(new AppSettings
         {
             LiveToggleHotkey = "Ctrl+Alt+F9",
-            LastGameProcess = "witcher3.exe",
-            LastGameTitle = "The Witcher 3",
+            LastGameProcess = "latarnia.exe",
+            LastGameTitle = "Mroczna Latarnia",
         });
 
         var loaded = store.Load();
 
         Assert.Equal("Ctrl+Alt+F9", loaded.LiveToggleHotkey);
-        Assert.Equal("witcher3.exe", loaded.LastGameProcess);
-        Assert.Equal("The Witcher 3", loaded.LastGameTitle);
+        Assert.Equal("latarnia.exe", loaded.LastGameProcess);
+        Assert.Equal("Mroczna Latarnia", loaded.LastGameTitle);
         var json = File.ReadAllText(paths.SettingsPath);
         Assert.Contains("\"liveToggleHotkey\"", json);
         Assert.Contains("\"lastGameProcess\"", json);

@@ -22,8 +22,10 @@ MotionLab analyze KATALOG_REPLAY [--truth PLIK] [--worst 15]
 ```
 
 `NAGRANIE` to katalog z `f00000.jpg…` i `frames.jsonl` albo sama nazwa w katalogu nagrań
-(`LabDefaults.RecordingsRoot`). Domyślne `--cache` i `--corpus` wskazują lokalne kopie z rundy
-2026-10-05 (`LabDefaults`); na innej maszynie podaj je jawnie (`--cache none` = pusta baza w pamięci).
+`<GTO Diagnostics>\20261006-ruch\nagrania`. `<GTO Diagnostics>` to folder ze zmiennej środowiskowej
+`GTO_DIAGNOSTICS`, a bez niej — folder `GTO Diagnostics` obok katalogu repozytorium (`LabDefaults`).
+Z niego biorą się też domyślne `--cache` i `--corpus` (lokalne kopie z rundy 2026-10-05); gdy ich
+nie ma, podaj je jawnie (`--cache none` = pusta baza w pamięci).
 Ustawienia nakładki domyślnie jak u gracza: `cover`, `at-source`, krycie 0,4, czcionka auto (z profilu).
 
 Typowy pomiar (to samo dla każdego nagrania; nie uruchamiaj kilku replay naraz):

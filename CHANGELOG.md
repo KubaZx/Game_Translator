@@ -2,6 +2,13 @@
 
 Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
+## [Niewydane]
+
+- Porządki w kodzie źródłowym: testy używają fikcyjnej gry zamiast prawdziwego tytułu, a domyślne
+  ścieżki narzędzia MotionLab nie zawierają już ścieżki z dysku autora — folder z nagraniami
+  i kopiami bazy wskazuje zmienna `GTO_DIAGNOSTICS`, a bez niej folder `GTO Diagnostics` obok
+  repozytorium. Aplikacja bez zmian.
+
 ## [0.7.0] — 2026-10-15
 
 Wydanie „nowe okno i napisy jak w grze”: przebudowane od zera okno aplikacji, ikony klawiszy

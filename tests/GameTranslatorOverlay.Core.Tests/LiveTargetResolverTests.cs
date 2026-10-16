@@ -6,7 +6,7 @@ public class LiveTargetResolverTests
 {
     private const string Own = "GameTranslatorOverlay.App.exe";
 
-    private static readonly WindowCandidate Game = new(101, "Witcher 3", "witcher3.exe", 1920L * 1080);
+    private static readonly WindowCandidate Game = new(101, "Mroczna Latarnia", "latarnia.exe", 1920L * 1080);
     private static readonly WindowCandidate Browser = new(102, "Przepisy — Firefox", "firefox.exe", 1280L * 900);
     private static readonly WindowCandidate Desktop = new(103, "Program Manager", "explorer.exe", 2560L * 1440);
     private static readonly WindowCandidate Translator = new(104, "GameTranslatorOverlay", "GameTranslatorOverlay.App.exe", 1100L * 700);
@@ -23,7 +23,7 @@ public class LiveTargetResolverTests
     public void Aktywne_okno_wygrywa_z_zapamietana_gra_i_profilem()
     {
         var result = Resolve([Game, Browser], Browser.Handle,
-            rememberedProcess: "witcher3.exe", profileProcesses: ["witcher3.exe"]);
+            rememberedProcess: "latarnia.exe", profileProcesses: ["latarnia.exe"]);
 
         Assert.Same(Browser, result.Window);
         Assert.Equal(LiveTargetReason.Foreground, result.Reason);
@@ -52,7 +52,7 @@ public class LiveTargetResolverTests
     {
         var shell = new WindowCandidate(200, "Powłoka", shellProcess, 4000L * 4000);
 
-        var result = Resolve([shell, Game], shell.Handle, rememberedProcess: "witcher3.exe");
+        var result = Resolve([shell, Game], shell.Handle, rememberedProcess: "latarnia.exe");
 
         Assert.Same(Game, result.Window);
         Assert.Equal(LiveTargetReason.RememberedProcess, result.Reason);
@@ -72,7 +72,7 @@ public class LiveTargetResolverTests
     [Fact]
     public void Wlasne_okno_tlumacza_na_pierwszym_planie_przechodzi_do_zapamietanej_gry()
     {
-        var result = Resolve([Translator, Browser, Game], Translator.Handle, rememberedProcess: "witcher3.exe");
+        var result = Resolve([Translator, Browser, Game], Translator.Handle, rememberedProcess: "latarnia.exe");
 
         Assert.Same(Game, result.Window);
         Assert.Equal(LiveTargetReason.RememberedProcess, result.Reason);
@@ -91,7 +91,7 @@ public class LiveTargetResolverTests
     public void Aktywne_okno_spoza_listy_przechodzi_do_zapamietanej_gry()
     {
         // Np. okno narzędziowe albo okno, które zniknęło między skrótem a wyliczeniem okien.
-        var result = Resolve([Browser, Game], foreground: 999, rememberedProcess: "witcher3.exe");
+        var result = Resolve([Browser, Game], foreground: 999, rememberedProcess: "latarnia.exe");
 
         Assert.Same(Game, result.Window);
         Assert.Equal(LiveTargetReason.RememberedProcess, result.Reason);
@@ -100,7 +100,7 @@ public class LiveTargetResolverTests
     [Fact]
     public void Brak_aktywnego_okna_przechodzi_do_zapamietanej_gry()
     {
-        var result = Resolve([Browser, Game], foreground: 0, rememberedProcess: "witcher3.exe");
+        var result = Resolve([Browser, Game], foreground: 0, rememberedProcess: "latarnia.exe");
 
         Assert.Same(Game, result.Window);
     }
@@ -147,7 +147,7 @@ public class LiveTargetResolverTests
         var bigger = new WindowCandidate(402, "Inna gra — mapa", "othergame.exe", 1920L * 1080);
 
         var result = Resolve([Browser, other, bigger], Desktop.Handle,
-            rememberedProcess: "witcher3.exe", profileProcesses: ["nieistniejaca.exe", "OtherGame.exe"]);
+            rememberedProcess: "latarnia.exe", profileProcesses: ["nieistniejaca.exe", "OtherGame.exe"]);
 
         Assert.Same(bigger, result.Window);
         Assert.Equal(LiveTargetReason.ProfileProcess, result.Reason);
@@ -160,7 +160,7 @@ public class LiveTargetResolverTests
         var profiled = new WindowCandidate(401, "Inna gra", "othergame.exe", 4000L * 3000);
 
         var result = Resolve([profiled, Game], foreground: 0,
-            rememberedProcess: "witcher3.exe", profileProcesses: ["othergame.exe"]);
+            rememberedProcess: "latarnia.exe", profileProcesses: ["othergame.exe"]);
 
         Assert.Same(Game, result.Window);
         Assert.Equal(LiveTargetReason.RememberedProcess, result.Reason);
@@ -178,18 +178,18 @@ public class LiveTargetResolverTests
     [Fact]
     public void Pusta_lista_okien_daje_komunikat()
     {
-        var result = Resolve([], foreground: 5, rememberedProcess: "witcher3.exe", profileProcesses: ["witcher3.exe"]);
+        var result = Resolve([], foreground: 5, rememberedProcess: "latarnia.exe", profileProcesses: ["latarnia.exe"]);
 
         Assert.Equal(LiveTargetReason.None, result.Reason);
         Assert.Equal(LiveTargetResolver.NoTargetMessage, result.Message);
     }
 
     [Theory]
-    [InlineData("witcher3.exe")]
-    [InlineData("WITCHER3.EXE")]
-    [InlineData("witcher3")]
-    [InlineData("Witcher3.Exe")]
-    [InlineData("  witcher3.exe  ")]
+    [InlineData("latarnia.exe")]
+    [InlineData("LATARNIA.EXE")]
+    [InlineData("latarnia")]
+    [InlineData("Latarnia.Exe")]
+    [InlineData("  latarnia.exe  ")]
     public void Nazwa_procesu_bez_znaczenia_wielkosci_liter_i_sufiksu_exe(string remembered)
     {
         var result = Resolve([Browser, Game], foreground: 0, rememberedProcess: remembered);
@@ -199,8 +199,8 @@ public class LiveTargetResolverTests
     }
 
     [Theory]
-    [InlineData("WITCHER3")]
-    [InlineData("witcher3.EXE")]
+    [InlineData("LATARNIA")]
+    [InlineData("latarnia.EXE")]
     public void Profil_dopasowuje_proces_bez_znaczenia_wielkosci_liter_i_sufiksu_exe(string profileProcess)
     {
         var result = Resolve([Browser, Game], foreground: 0, profileProcesses: [profileProcess]);
