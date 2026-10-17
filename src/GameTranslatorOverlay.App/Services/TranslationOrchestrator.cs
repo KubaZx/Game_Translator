@@ -8,6 +8,7 @@ using GameTranslatorOverlay.Core.Profiles;
 using GameTranslatorOverlay.Core.Text;
 using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Core.Usage;
+using GameTranslatorOverlay.Core.Vision;
 using GameTranslatorOverlay.Infrastructure.Caching;
 using GameTranslatorOverlay.Infrastructure.Content;
 using GameTranslatorOverlay.Infrastructure.Providers;
@@ -60,13 +61,21 @@ public sealed class TranslationOrchestrator(
     /// wołający z wątku tła nie może skleić starego pipeline'u z nowym tokenem
     /// (wyścig groził np. zapisem na dysk już po włączeniu trybu prywatnego).
     /// </summary>
-    private sealed record PipelineState(TranslationPipeline Pipeline, CancellationToken EpochToken);
+    private sealed record PipelineState(TranslationPipeline Pipeline, CancellationToken EpochToken, long Version);
 
     private PipelineState? _pipelineState;
     private InMemoryTranslationCache? _privateCache;
     private CancellationTokenSource? _activeCts;
     private CancellationTokenSource _pipelineEpoch = new();
     private readonly List<GlossaryTerm> _privateSessionTerms = [];
+    private long _pipelineVersion;
+
+    public long PipelineVersion => Interlocked.Read(ref _pipelineVersion);
+
+    public bool PipelineReady => Volatile.Read(ref _pipelineState) is { EpochToken.IsCancellationRequested: false } state
+        && state.Version == Interlocked.Read(ref _pipelineVersion);
+
+    public event Action<LiveCorrection>? CorrectionSaved;
 
     public IReadOnlyList<GameProfile> Profiles { get; private set; } = [];
     public IReadOnlyList<CatalogIssue> ProfileIssues { get; private set; } = [];
@@ -99,7 +108,7 @@ public sealed class TranslationOrchestrator(
 
     public void Initialize()
     {
-        QualityWarnings.ContextSource = () => new QualityWarningContext(ActiveProfile?.Id ?? string.Empty, settings.SourceLanguage, settings.TargetLanguage);
+        QualityWarnings.ContextSource = () => new QualityWarningContext(ActiveProfile?.ContentId ?? string.Empty, settings.SourceLanguage, settings.TargetLanguage);
         LoadProfiles();
         RebuildPipeline();
     }
@@ -112,6 +121,8 @@ public sealed class TranslationOrchestrator(
 
     public string? ProfileFile(GameProfile? profile) =>
         profile is null ? null : ProfileEntries.FirstOrDefault(e => ReferenceEquals(e.Profile, profile))?.FilePath;
+
+    public IReadOnlyList<string> AvailableGlossaries() => glossaryCatalog.ListIds(settings.SourceLanguage, settings.TargetLanguage);
 
     private static bool IsBundledFile(string? file) =>
         file is not null && System.IO.Path.GetFullPath(file).StartsWith(System.IO.Path.GetFullPath(ProfileCatalog.BundledDirectory), StringComparison.OrdinalIgnoreCase);
@@ -139,6 +150,7 @@ public sealed class TranslationOrchestrator(
         // po zmianie np. trybu prywatnego nie może dokończyć zapisu na dysk.
         // Epoka pipeline'u obejmuje też wywołania z trybu live (TranslateTextsAsync).
         CancelActiveOperation();
+        Interlocked.Increment(ref _pipelineVersion);
         var previousEpoch = Interlocked.Exchange(ref _pipelineEpoch, new CancellationTokenSource());
         previousEpoch.Cancel();
 
@@ -178,13 +190,15 @@ public sealed class TranslationOrchestrator(
         usage.SessionCharacterLimit = settings.SessionCharacterLimit;
 
         ActiveCorpus = ActiveProfile is { } profileWithCorpus && corpusCatalog is not null
-            ? corpusCatalog.Load(profileWithCorpus.Id)
+            ? corpusCatalog.Load(profileWithCorpus.ContentId)
             : CorpusLoadResult.None;
         if (ActiveCorpus.Issue is { } corpusIssue)
             warnings.Add(bundledProfile ? $"Korpus profilu „{ActiveProfile?.Id}”: {corpusIssue}" : $"Korpus własnego profilu: {corpusIssue}");
 
         // Glosariusz DeepL jest przechowywany na koncie DeepL — tryb prywatny go nie tworzy.
         deepLProvider.Options.UseGlossary = !settings.PrivateMode;
+        if (settings.PrivateMode || settings.CacheOnlyMode || !ReferenceEquals(ActiveProvider, deepLProvider))
+            deepLProvider.CancelGlossaryPreparation();
 
         var pipeline = new TranslationPipeline(
             glossaryService,
@@ -194,15 +208,17 @@ public sealed class TranslationOrchestrator(
             new TranslationPipelineOptions
             {
                 CacheOnlyMode = settings.CacheOnlyMode,
-                GameProfile = ActiveProfile?.Id ?? string.Empty,
-                GameName = ActiveProfile?.Name,
+                GameProfile = ActiveProfile?.ContentId ?? string.Empty,
+                GameName = ActiveProfile is { BasedOn: { Length: > 0 } source } copy
+                    ? Profiles.FirstOrDefault(p => p.Id.Equals(source, StringComparison.OrdinalIgnoreCase))?.Name ?? copy.Name
+                    : ActiveProfile?.Name,
                 PlayerGender = PlayerGenders.Parse(settings.PlayerGender),
                 Corpus = ActiveCorpus.Snapper,
                 SplitParagraphs = ActiveCorpus.IsLoaded || settings.ParagraphCacheKeys,
             },
             loggerFactory.CreateLogger<TranslationPipeline>(),
             cacheWriteCancellationToken: _pipelineEpoch.Token);
-        Volatile.Write(ref _pipelineState, new PipelineState(pipeline, _pipelineEpoch.Token));
+        Volatile.Write(ref _pipelineState, new PipelineState(pipeline, _pipelineEpoch.Token, Interlocked.Read(ref _pipelineVersion)));
 
         ContentWarnings = warnings;
         _logger.LogInformation(
@@ -367,12 +383,18 @@ public sealed class TranslationOrchestrator(
             context?.TargetLanguage ?? settings.TargetLanguage,
             correctedText.Trim(),
             "manual",
-            context?.ProfileId ?? ActiveProfile?.Id ?? string.Empty);
+            context?.ProfileId ?? ActiveProfile?.ContentId ?? string.Empty);
         // Pamięć dialogu (tylko w RAM) ma się trzymać poprawionej formy w kolejnych liniach.
         Volatile.Read(ref _pipelineState)?.Pipeline.RememberManualCorrection(entry.NormalizedText, entry.TranslatedText);
         await CurrentCache.SaveManualCorrectionAsync(entry, cancellationToken).ConfigureAwait(false);
         QualityWarnings.MarkCorrected(normalizedText, entry.TranslatedText);
+        CorrectionSaved?.Invoke(new LiveCorrection(
+            TextNormalizer.Normalize(normalizedText), cacheKey, entry.GameProfile, entry.SourceLanguage, entry.TargetLanguage));
     }
+
+    public string TargetLanguage => settings.TargetLanguage;
+
+    public string ActiveContentId => ActiveProfile?.ContentId ?? string.Empty;
 
     public Task AddGlossaryTermAsync(string source, string target)
     {

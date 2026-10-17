@@ -24,5 +24,6 @@
 
   <ItemGroup>
     <Compile Include="..\..\tools\GameTranslatorOverlay.LiveDiag\LiveDiagOptions.cs" Link="Diagnostics\LiveDiagOptions.cs" />
+    <Compile Include="..\..\tools\GameTranslatorOverlay.MotionLab\Series\*.cs" Link="MotionLab\%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

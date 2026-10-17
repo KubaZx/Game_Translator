@@ -121,6 +121,22 @@ public class ProfileValidatorTests
         Assert.Equal(2, errors.Count);
     }
 
+    [Theory]
+    [InlineData("..", false)]
+    [InlineData("a/b", false)]
+    [InlineData("C:latarnia", false)]
+    [InlineData("latarnia ogólna", false)]
+    [InlineData("", true)]
+    [InlineData("path-of-exile-2", true)]
+    public void Pole_basedOn_przyjmuje_tylko_identyfikator_profilu(string basedOn, bool valid)
+    {
+        var profile = ValidProfile();
+        profile.BasedOn = basedOn;
+
+        Assert.Equal(valid, ProfileValidator.Validate(profile).Count == 0);
+        Assert.Equal(string.IsNullOrWhiteSpace(basedOn) ? profile.Id : basedOn, profile.ContentId);
+    }
+
     [Fact]
     public void Niedozwolone_znaki_w_id_zglaszaja_blad()
     {

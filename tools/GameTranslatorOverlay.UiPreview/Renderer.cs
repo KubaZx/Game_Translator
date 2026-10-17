@@ -22,7 +22,7 @@ internal static class Renderer
         }
         bitmap.Render(root);
         bitmap.Freeze();
-        return bitmap;
+        return GdiFallback.IsBlank(bitmap) ? GdiFallback.Render(root, width, height, scale, null) : bitmap;
     }
 
     public static BitmapSource Element(FrameworkElement element, double scale, Brush? background)
@@ -48,7 +48,7 @@ internal static class Renderer
         var bitmap = new RenderTargetBitmap(Px(width, scale), Px(height, scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
         bitmap.Render(visual);
         bitmap.Freeze();
-        return bitmap;
+        return GdiFallback.IsBlank(bitmap) ? GdiFallback.Render(element, width, height, scale, background) : bitmap;
     }
 
     public static BitmapSource? PageContent(Window window)
@@ -92,6 +92,11 @@ internal static class Renderer
         }
     }
 
+    public static string TextOf(TextBlock block) =>
+        string.IsNullOrEmpty(block.Text) && LogicalTreeHelper.GetChildren(block).OfType<System.Windows.Documents.Inline>().Any()
+            ? new System.Windows.Documents.TextRange(block.ContentStart, block.ContentEnd).Text
+            : block.Text;
+
     private static int Px(double dip, double scale) => Math.Max(1, (int)Math.Ceiling(dip * scale - 0.01));
 }
 
@@ -102,8 +107,9 @@ internal static class ClipChecker
         var findings = new List<(bool, string)>();
         foreach (var block in Renderer.VisualDescendants<TextBlock>(root))
         {
-            if (!block.IsVisible || block.ActualWidth < 1 || string.IsNullOrWhiteSpace(block.Text)) continue;
-            var formatted = new FormattedText(block.Text, CultureInfo.CurrentCulture, block.FlowDirection,
+            var content = Renderer.TextOf(block);
+            if (!block.IsVisible || block.ActualWidth < 1 || string.IsNullOrWhiteSpace(content)) continue;
+            var formatted = new FormattedText(content, CultureInfo.CurrentCulture, block.FlowDirection,
                 new Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch),
                 block.FontSize, Brushes.Black, VisualTreeHelper.GetDpi(block).PixelsPerDip);
             var innerWidth = block.ActualWidth - block.Padding.Left - block.Padding.Right;
@@ -133,7 +139,7 @@ internal static class ClipChecker
                 problem = "przycięty przez " + container;
                 clipped = true;
             }
-            if (problem is not null) findings.Add((clipped, $"{problem}: {Describe(block)} „{Short(block.Text)}”"));
+            if (problem is not null) findings.Add((clipped, $"{problem}: {Describe(block)} „{Short(content)}”"));
         }
         return findings;
     }

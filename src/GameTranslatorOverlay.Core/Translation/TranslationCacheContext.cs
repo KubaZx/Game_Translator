@@ -4,8 +4,10 @@ namespace GameTranslatorOverlay.Core.Translation;
 
 /// <summary>
 /// Znacznik kontekstu wpisu cache (<c>CachedTranslation.Context</c>): wersja formatu
-/// (<c>reflow-1</c>), opcjonalnie wynik kontroli jakości, np. <c>reflow-1;qa=numbers</c>, oraz płeć
-/// gracza, z którą tłumaczył dostawca świadomy płci (<c>;pg=f</c> / <c>;pg=m</c>).
+/// (<c>reflow-1</c>), opcjonalnie wynik kontroli jakości, np. <c>reflow-1;qa=numbers</c>, płeć
+/// gracza, z którą tłumaczył dostawca świadomy płci (<c>;pg=f</c> / <c>;pg=m</c>), oraz
+/// <c>reflow-final</c> — wpis sprzed sklejania wierszy, którego ponowienie dało pusty wynik
+/// (nie jest już nieaktualny z powodu formatu; jakość i płeć działają dalej).
 /// Całe parsowanie i składanie znacznika jest tutaj — pipeline nie operuje na napisach.
 /// </summary>
 /// <param name="Format">Wersja formatu (np. <c>reflow-1</c>); null we wpisach sprzed znacznika.</param>
@@ -30,12 +32,15 @@ public readonly record struct TranslationCacheContext(
     private const char Separator = ';';
     private const string QualityPrefix = "qa=";
     private const string QualityFinalTag = "qa-final";
+    private const string ReflowFinalTag = "reflow-final";
     private const string PlayerGenderPrefix = "pg=";
     private const string SourcePrefix = "src=";
 
     public const string CorpusSource = "corpus";
 
     public bool IsFromCorpus => string.Equals(Source, CorpusSource, StringComparison.OrdinalIgnoreCase);
+
+    public bool ReflowFinal { get; init; }
 
     public static TranslationCacheContext Parse(string? context)
     {
@@ -45,6 +50,7 @@ public readonly record struct TranslationCacheContext(
         var issues = TranslationQualityFlags.None;
         var hasQuality = false;
         var final = false;
+        var reflowFinal = false;
         var gender = PlayerGender.Unknown;
         string? source = null;
         var parts = context.Split(Separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -59,6 +65,10 @@ public readonly record struct TranslationCacheContext(
             else if (part.Equals(QualityFinalTag, StringComparison.OrdinalIgnoreCase))
             {
                 final = true;
+            }
+            else if (part.Equals(ReflowFinalTag, StringComparison.OrdinalIgnoreCase))
+            {
+                reflowFinal = true;
             }
             else if (part.StartsWith(PlayerGenderPrefix, StringComparison.OrdinalIgnoreCase))
             {
@@ -78,7 +88,14 @@ public readonly record struct TranslationCacheContext(
                 format = part;
             }
         }
-        return new TranslationCacheContext(format, issues, hasQuality, final, gender, source);
+        return new TranslationCacheContext(format, issues, hasQuality, final, gender, source) { ReflowFinal = reflowFinal };
+    }
+
+    public static string MarkReflowFinal(string? context)
+    {
+        if (string.IsNullOrWhiteSpace(context)) return ReflowFinalTag;
+        var trimmed = context.Trim();
+        return Parse(trimmed).ReflowFinal ? trimmed : $"{trimmed}{Separator}{ReflowFinalTag}";
     }
 
     /// <summary>
@@ -114,7 +131,7 @@ public readonly record struct TranslationCacheContext(
 
     /// <summary>
     /// Czy automatyczny wpis warto przetłumaczyć ponownie: wieloliniowy tekst sprzed sklejania
-    /// wierszy albo wynik z niesprawdzonym jeszcze problemem jakości.
+    /// wierszy (bez <c>reflow-final</c>) albo wynik z niesprawdzonym jeszcze problemem jakości.
     /// </summary>
     public static bool IsStale(string? context, string normalizedText) =>
         IsStale(context, normalizedText, PlayerGender.Unknown);
@@ -129,9 +146,15 @@ public readonly record struct TranslationCacheContext(
     {
         var parsed = Parse(context);
         if (parsed.NeedsQualityRetry) return true;
-        if (normalizedText.Contains('\n') && parsed.Format != TextReflow.FormatVersion) return true;
+        if (FormatOutdated(parsed, normalizedText)) return true;
         return DiffersInPlayerGender(parsed, normalizedText, currentGender);
     }
+
+    public static bool IsStaleForFormat(string? context, string normalizedText) =>
+        FormatOutdated(Parse(context), normalizedText);
+
+    private static bool FormatOutdated(TranslationCacheContext parsed, string normalizedText) =>
+        normalizedText.Contains('\n') && parsed.Format != TextReflow.FormatVersion && !parsed.ReflowFinal;
 
     /// <summary>
     /// Czy sama płeć gracza czyni wpis nieaktualnym (niezależnie od innych powodów) — pipeline

@@ -447,6 +447,24 @@ public static class OverlayBlockRenderer
         return (reference, referenceText);
     }
 
+    public static bool PrepareNativeWeights(
+        IReadOnlyList<GameTranslatorOverlay.App.Services.LiveDisplayBlock> blocks, AppSettings settings, string? profileFont, TimeSpan wait)
+    {
+        if (!IsCoverPlacement(settings) || blocks.Count == 0) return true;
+        var hideIdentical = HidesIdenticalText(settings);
+        var requests = new List<(string Family, string Text)>();
+        MonitorArea? monitor = null;
+        foreach (var block in blocks)
+        {
+            if ((hideIdentical && block.SameAsSource) || !UsesNativeCover(settings, block.Cover)) continue;
+            var cover = block.Cover!;
+            if (WeightReference(cover, StripIconToken(block.TranslatedText, cover)) is not { Text.Length: > 0 } reference) continue;
+            monitor ??= Displays.FromRect(blocks.Aggregate(default(RectPx), static (acc, b) => acc.Union(b.ScreenBox)));
+            requests.Add((OverlayFonts.CoverFamilyName(settings, profileFont, cover, monitor.Bounds.Height), reference.Text));
+        }
+        return requests.Count == 0 || OverlayFonts.PrepareMeasurements(requests, wait);
+    }
+
     public static void VoteNativeWeight(GlyphCover cover, string text, AppSettings settings, string? profileFont, MonitorArea monitor)
     {
         if (!UsesNativeCover(settings, cover) || WeightReference(cover, StripIconToken(text, cover)) is not { } reference) return;

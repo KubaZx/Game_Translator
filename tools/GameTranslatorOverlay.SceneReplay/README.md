@@ -1,6 +1,6 @@
 # SceneReplay
 
-Lokalny, powtarzalny pomiar rzeczywistej `LiveTranslationSession`: przechwytuje wyłącznie własne okno WPF, używa Mock (domyślnie 2000 ms) i świeżego cache w pamięci. Nie czyta ustawień, kluczy ani cache użytkownika; wszystkie żądania HTTP są blokowane. Nie obsługuje okna gry. Nie zapisuje pikseli ani treści OCR.
+Lokalny, powtarzalny pomiar rzeczywistej `LiveTranslationSession`: przechwytuje wyłącznie własne okno WPF, używa Mock (domyślnie 2000 ms) i świeżego cache w pamięci. Nie czyta ustawień, kluczy ani cache użytkownika; wszystkie żądania HTTP są blokowane (wyjątek: tryb `openai-local` łączy się wyłącznie ze wskazanym serwerem modelu na tym komputerze, bez klucza — opis na końcu). Nie obsługuje okna gry. Nie zapisuje pikseli ani treści OCR.
 
 ```
 dotnet run --project tools/GameTranslatorOverlay.SceneReplay -c Release -- --output C:\existing-folder\new-report.jsonl --scenario displayed
@@ -291,6 +291,36 @@ Skoki 110 px przekraczają zwykły promień śledzenia (72 px), więc blok przec
 wtedy, gdy zachował prędkość i flagę ruchu z poprzedniego skoku. Nie mierzy fizycznej nakładki ani
 ciągłego ruchu w grze.
 
+## Napis jadący chwilowo zgubiony przez śledzenie
+
+`motion-occlusion` i `motion-blur` w `MotionLossReplay.cs` (scripted OCR, Mock 200 ms, prywatny cache w pamięci, HTTP
+zablokowane): własne okno 1200×700 DIP z teksturowanym „światem” i tabliczką jak w `pan-cut`, ale panorama jest ciągła —
+64 kroki po 12 fizycznych pikseli co 50 ms (ok. 240 px/s, w prawo), więc po pierwszej próbce ruchu sesja widzi trwający
+ruch, a nie cięcie sceny. Trzy razy (kroki 18, 34 i 50) przez 150 ms, czyli na 1–2 przechwycenia, napis traci wygląd,
+który zna śledzenie: w `motion-occlusion` środek napisu zasłania nieprzezroczysta belka 100 DIP (jak słup albo postać
+przed tabliczką), w `motion-blur` napis jest rozmyty (`BlurEffect`, promień 4). OCR zwraca stały tekst z prostokątem
+białych glifów (wszystkie kanały ≥ 200) pełnej klatki, wycinka albo wycinka lokalnego odczytu: przy belce glify są po
+obu stronach, więc prostokąt obejmuje cały napis; przy rozmyciu białych pikseli może nie być i odczyt nic nie znajduje.
+`--lost-read on|off` (domyślnie `on`) ustawia `LiveSessionOptions.ReadLostBlocks` — `off` to zachowanie sprzed lokalnego
+odczytu zgubionego bloku i służy za pomiar „przed” na tym samym kodzie.
+
+Raport: `removalTransitionsDuringPan` (zniknięcia bloku z callbacków w trakcie panoramy), `firstRemovalAfterPanStartMs`,
+`trackingLossUpdates` (aktualizacje „napis zniknął albo odjechał”), `missingMsTotal` i `longestGapMs` (łączny i najdłuższy
+czas bez bloku), `visibleAfterGlitch` i `maxPositionErrorAfterGlitchPx` (stan 250 ms po końcu każdego zakłócenia wobec
+niezależnego przechwycenia własnego okna), `finalPositionErrorPx`, `relocationsDuringGlitch`, `ocrDuringGlitch`,
+`lostReads` / `lostRecovered` / `lostReadMs` / `lostReadTotalMs` (liczniki sesji z ostatniej diagnostyki; OCR wycinka
+i cały odczyt z budową łatki), `mockProviderRequests`. `fixtureValid` wymaga trzech zakłóceń, co najmniej jednego OCR,
+braku fallbacku i stopu; **exit 0 oznacza ważną próbę, a `desiredTrackingBehavior` wynik**: blok ani razu nie zniknął,
+bez czyszczenia i ukrycia nakładki, widoczny po każdym zakłóceniu z błędem położenia ≤ 24 px (`panTolerancePx`, dwa
+kroki panoramy — callback bywa krok za obrazem) i na końcu, po zatrzymaniu, ≤ 3 px. Pierwsze przechwycenie prawdy przed
+startem sesji czasem trafia na zapasowy zrzut ekranu — wtedy próba kończy się kodem 3 i trzeba ją powtórzyć. Nie mierzy
+fizycznej nakładki ani prawdziwego rozmycia ruchu w grze.
+
+```
+dotnet run --project tools/GameTranslatorOverlay.SceneReplay -c Release -- --output C:\folder\occl-off.jsonl --scenario motion-occlusion --lost-read off
+dotnet run --project tools/GameTranslatorOverlay.SceneReplay -c Release -- --output C:\folder\occl-on.jsonl --scenario motion-occlusion
+```
+
 ## Ostrzeżenie kontroli jakości w bloku nakładki
 
 `quality-mark` i `quality-mark-clean` w `QualityMarkReplay.cs` (scripted OCR): własne okno ze stałym
@@ -309,7 +339,7 @@ z cache). `expectedBehavior` to wynik regresji; kod 4 — za mało odczytów alb
 
 ## Strumieniowanie odpowiedzi modelu
 
-`stream`, `stream-refusal` i `stream-change` w `StreamReplay.cs` (zawsze Windows OCR): własne okno pokazuje pięć
+`stream`, `stream-refusal`, `stream-change` i `stream-partition` w `StreamReplay.cs` (zawsze Windows OCR): własne okno pokazuje pięć
 syntetycznych linii w osobnych wierszach, po 1,5 s od startu sesji naraz. Zamiast Mocka działa
 prawdziwy dostawca — `OpenAiCompatibleTranslationProvider` (adres `http://localhost:5799/v1`,
 bez klucza) albo `ClaudeTranslationProvider` — ale jego `HttpClient` ma skryptowany handler
@@ -338,6 +368,19 @@ stare bloki (`maxOldShownAfterChange`, `lastOldShownAfterChangeMs`) i kiedy poja
 (`changedFirstBlockMs`, `changedAllBlocksMs`, `mixedOldAndChangedUpdates`, `oldUpdatesAfterChangedAll`). Opcje Mocka (`--provider-delay-ms`, `--phase-ms`,
 `--ocr-delay-ms`, `--ocr scripted`) są tu odrzucane, a opcje strumienia — w pozostałych scenariuszach.
 
+`stream-partition` (wymaga `--stream on`, dostawca `llm` albo `claude`) dzieli odpowiedź na dwie
+partie: dostawca dostaje `MaxBatchSize = 3`, więc pięć linii idzie jako partia 3 + partia 2. Dla
+partii dwóch linii skryptowany model zwraca tylko jeden element (po `--line-ms` zamyka tablicę), więc
+dostawca unieważnia wczesne linie tej partii i tłumaczy ją pojedynczo (dwa zwykłe zapytania).
+Mierzy, czy wczesne linie pierwszej partii zostają na ekranie do wyniku końcowego, a wczesna linia
+drugiej partii znika. Zdarzenie `partition_summary`: `requestPattern` (oczekiwane `stream:3`,
+`stream:2`, `plain:1`, `plain:1`), `firstPartitionEarlyShown`, `firstPartitionFirstShownMs`,
+`firstPartitionDropsBeforeFinal` (zniknięcia linii pierwszej partii przed publikacją końcową — ma być 0),
+`secondPartitionEarlyShown`, `secondPartitionDropsBeforeFinal`, `finalPublishedMs`,
+`allLinesShownAtEnd`, `miscountStatusUpdates` (statusy „model pomylił liczbę linii”), `fixtureValid`
+i `expectedBehavior`. Niespełniony `fixtureValid` (inny układ zapytań albo brak wczesnych linii
+w którejś partii) daje kod 4.
+
 Podsumowanie: `firstBlockMs` i `allBlocksMs` (od renderu nowych linii do callbacku sesji
 z pierwszym / wszystkimi pięcioma blokami `PL `), `firstToAllMs`, `provisionalUpdates`
 (publikacje wczesnych linii), `textChangesOfShownBlocks` (zmiana tekstu już pokazanego bloku —
@@ -348,3 +391,143 @@ pierwszej linii i całej odpowiedzi od strony handlera) oraz mediany `LatencyMon
 przechwytywania, mniej niż dwa rozpoznane bloki albo nieudane zamknięcie; 3 — błąd albo timeout.
 To callbacki sesji, nie fizyczna nakładka, a czasy modelu są syntetyczne. JSONL nie zawiera
 pikseli ani rozpoznanych tekstów.
+
+## Prawdziwy serwer modelu na tym komputerze (`openai-local`)
+
+`--stream-provider openai-local` mierzy scenę `stream` (te same pięć syntetycznych linii, ta sama
+prawdziwa sesja, Windows OCR) na prawdziwym serwerze zgodnym z OpenAI — przez prawdziwy
+`OpenAiCompatibleTranslationProvider` (SSE albo zwykły JSON) i prawdziwe gniazdo TCP:
+
+```
+GameTranslatorOverlay.SceneReplay.exe --scenario stream --stream-provider openai-local --endpoint http://127.0.0.1:1234/v1 --model NAZWA_Z_LM_STUDIO --output C:\folder\lmstudio-on.jsonl
+GameTranslatorOverlay.SceneReplay.exe --scenario stream --stream-provider openai-local --endpoint http://127.0.0.1:1234/v1 --model NAZWA_Z_LM_STUDIO --stream off --output C:\folder\lmstudio-off.jsonl
+GameTranslatorOverlay.SceneReplay.exe --scenario stream --stream-provider openai-local --endpoint http://localhost:11434/v1 --model qwen3:8b --output C:\folder\ollama-on.jsonl
+GameTranslatorOverlay.SceneReplay.exe --scenario stream --stream-provider openai-local --endpoint http://localhost:11434/v1 --model qwen3:8b --stream off --output C:\folder\ollama-off.jsonl
+```
+
+Serwer uruchamia się samodzielnie (LM Studio: zakładka Developer → Start Server, domyślnie port 1234;
+Ollama: `ollama serve`, port 11434), z załadowanym modelem. Narzędzie niczego nie uruchamia
+i nie pobiera.
+
+Twarda blokada w kodzie (`LocalModelServer.cs`, testy w Infrastructure.Tests):
+
+- `--endpoint` musi wskazywać host `127.0.0.1`, `localhost` albo `[::1]` (dokładnie te trzy nazwy;
+  `127.0.0.2`, `0.0.0.0`, adres w sieci lokalnej czy `localhost.` są odrzucane z komunikatem
+  „odmowa”), bez loginu, parametrów i fragmentu;
+- każde zapytanie przechodzi przez strażnika: inny schemat, host albo port niż w `--endpoint`
+  oraz nagłówek `Authorization`, `Proxy-Authorization`, `x-api-key` albo `api-key` kończą przebieg
+  wyjątkiem, zanim cokolwiek wyjdzie; dostawca nie dostaje klucza (narzędzie nie czyta DPAPI ani
+  ustawień użytkownika), a połączenie TCP powstaje wyłącznie z adresem pętli zwrotnej (nazwa
+  rozwiązana na inny adres jest odrzucana), bez proxy systemowego i bez przekierowań;
+- najwyżej 12 zapytań na przebieg (rozgrzewka + scena + ewentualne tłumaczenie pojedyncze
+  i ponowienie jakości), potem odmowa.
+
+Blokada nie odróżni serwera modelu od lokalnego pośrednika, który sam przekazuje zapytania do
+płatnego API ze swoim kluczem (np. LiteLLM na `localhost:4000`) — wskazuj wyłącznie LM Studio,
+Ollamę albo inny serwer, który sam liczy model.
+
+Przed sceną idzie jedno zwykłe zapytanie rozgrzewające (to samo, co „Testuj połączenie”
+w aplikacji): ładuje model i ten sam prompt systemowy, więc pomiar sceny pokazuje pracę
+w trakcie gry, a nie wczytywanie modelu. Zdarzenie `warmup` ma `ok` i `ms`; nieudana rozgrzewka
+kończy przebieg kodem 3 (`warmup_failed`). Scena czeka na wszystkie pięć bloków do 180 s (limit
+zapytania dostawcy jak w aplikacji: 60 s). Opcje serwera (`reasoning_effort: none` dla Ollamy)
+dochodzą tak jak w aplikacji po wyborze gotowego serwera: tylko gdy host i port są dokładnie jak
+w presecie (`localhost:11434`), zdarzenie `provider_setup` podaje `serverOptions`. Uwaga: przy
+`localhost` Windows najpierw próbuje `[::1]`; serwer słuchający tylko na IPv4 kosztuje wtedy ok. 2 s
+na każde nowe połączenie (na atrapie: rozgrzewka 3034–3050 ms pod `localhost` wobec 975–994 ms pod
+`127.0.0.1`, kolejne zapytania używały tego samego połączenia) — widać to w `HeadersMs` pierwszego
+zapytania.
+
+Zdarzenia `provider_response` (po jednym na odpowiedź, także rozgrzewkę): `Stream`, `Status`,
+`MediaType`, `Texts` (linie w zapytaniu), `HeadersMs`, `FirstByteMs`, `FirstContentMs` (pierwszy
+niepusty `delta.content`), `FirstLineMs` (pierwszy kompletny element tablicy `translations` według
+parsera aplikacji), `TotalMs`, `Events`, `DoneMarker` (`[DONE]`), `Usage`, `FinishReason`,
+`ReasoningChars` (`reasoning_content`/`reasoning` w strumieniu), `Returned`, `Empty`,
+`QualityFlagged` (z podziałem `NumbersChanged`, `Untranslated`, `Runaway` według
+`TranslationQualityGate`), `AppAccepted` (czy aplikacja przyjęła odpowiedź bez tłumaczenia
+pojedynczego) i `translations` (odpowiedź modelu dla syntetycznych linii, do 200 znaków na linię).
+Zdarzenie `local_summary` sumuje odpowiedzi sceny (bez rozgrzewki): zapytania strumieniowe
+i zwykłe (np. po odrzuceniu `stream_options` przez serwer), błędy HTTP, linie zwrócone, puste,
+oznaczone przez bramkę jakości, odpowiedzi z inną liczbą linii, czasy pierwszego zapytania oraz
+`lineResults` — wynik każdej linii na ekranie (tłumaczenie końcowe, wczesne, czy się różniły,
+`QualityIssues`, `SameAsSource`). `summary` podaje jak w scenie skryptowanej `firstBlockMs`,
+`allBlocksMs` i mediany `LatencyMonitor`; `--stream off` daje porównanie bez strumienia.
+JSONL zawiera tłumaczenia syntetycznych linii z modelu, nie zawiera pikseli ani odczytów OCR.
+`--first-line-ms` i `--line-ms` są tu odrzucane, a `openai-local` działa tylko ze scenariuszem `stream`.
+
+## Reakcja na zmianę ustawień i ręczną poprawkę
+
+`settings-change` i `manual-correction` w `ReactionReplay.cs` (zawsze scripted OCR, prywatny cache
+w pamięci, HTTP zablokowane, domyślny bezpiecznik pełnego odczytu sesji 4 s). Własne okno ma
+500×300 DIP (mieści się także na małym ekranie): ciemne tło, panel z jasną etykietą i szary pas
+referencyjny. OCR znajduje glify w przechwyconych pikselach (wszystkie kanały R i G ≥ 240); który
+napis jest na ekranie, rozpoznaje po kanale B glifów (biały — „Unlock level 20 door”, żółtawy
+#FFFF96 — „Garden clue opens the next door”). Etykieta jest rysowana w skali szarości (bez
+ClearType), żeby kolorowe obwódki nie myliły odczytu. Odrzucane: `--provider-delay-ms`,
+`--phase-ms`, `--ocr-delay-ms` i `--ocr windows`.
+
+- `settings-change` (Mock 1500 ms): gdy pierwsza klatka czeka już na Mock (`ReservedApiCharacters`
+  > 0), po 300 ms woła `TranslationOrchestrator.RebuildPipeline()` — to samo, co zmiana ustawienia
+  wpływającego na tłumaczenie (ustawienia się nie zmieniają, liczy się anulowanie epoki). Mierzy
+  czas od tego wywołania do startu następnego OCR (`singleRereadStartMs`, czy była to pełna klatka
+  — `singleRereadFullFrame`), do jego końca i do pokazania tłumaczenia. Potem, tuż po kolejnym
+  pełnym odczycie (żeby bezpiecznik wypadł możliwie daleko), zmienia etykietę na drugi napis,
+  czeka na jego zapytanie do Mock i robi serię 8 przebudów co 40 ms (jak przesuwany suwak):
+  `ocrDuringBurst` (odczyty w trakcie serii — oczekiwane 0, bez pętli anulowanych klatek),
+  `burstRereadStartAfterLastMs` (od ostatniej zmiany do pełnego odczytu) i
+  `burstDisplayedAfterLastMs`. Przed poprawką odczyt po anulowanej klatce czekał na bezpiecznik
+  (do ok. 4 s, zależnie od fazy); po poprawce rusza po ustaleniu wersji pipeline'u (120 ms) i
+  najbliższym cyklu sesji. `expectedBehavior`: oba odczyty < 500 ms i pełne, 0 odczytów w serii,
+  oba napisy pokazane, bez czyszczenia i chowania nakładki. `fixtureValid` wymaga oczekującego
+  zapytania przy obu zmianach i co najmniej dwóch klatek anulowanych przez zmianę ustawień.
+- `manual-correction` (natychmiastowy dostawca testowy gubiący liczbę, więc kontrola jakości
+  zapisuje ostrzeżenie): po pokazaniu bloku i 1,5 s narzędzie bierze wpis z
+  `TranslationOrchestrator.QualityWarnings` (jak „Popraw” na liście „Ostatnie ostrzeżenia”) i woła
+  `SaveManualCorrectionAsync`. Mierzy czas od zapisu do pierwszego callbacku z poprawionym tekstem
+  (`correctedShownAfterSaveMs`), liczbę odczytów OCR przed nim (`ocrBeforeCorrectionShown`),
+  odstęp od ostatniego pełnego odczytu w chwili poprawki (`msSinceLastFullOcrAtCorrection` — tyle
+  mniej więcej czekał stary kod), czy blok zachował klucz, prostokąt i ten sam obiekt łatki
+  (`sameKey`, `sameBox`, `coverPreserved`), czy poprawka trafiła na pasek napisów
+  (`subtitleCorrectedAfterSaveMs`), czy stare tłumaczenie wróciło w ciągu kolejnych 4,5 s
+  (obejmuje następny pełny odczyt) i ile zapytań do dostawcy padło po poprawce (oczekiwane 0).
+  `expectedBehavior`: poprawka < 500 ms od zapisu i bez żadnego odczytu OCR przed nią (sesja
+  stosuje ją na początku najbliższego cyklu, więc czas to najwyżej jedno przechwycenie), ten sam
+  klucz, prostokąt i łatka, bez czyszczenia i powrotu starego tekstu, na pasku napisów i bez zapytań.
+
+Oba scenariusze używają tylko publicznego API, które istnieje także w kodzie bazowym, więc ten
+sam plik narzędzia można zbudować na starszej aplikacji do porównania przed/po. Czasy to callbacki
+sesji i wywołania OCR, nie fizyczna nakładka. JSONL nie zawiera pikseli ani rozpoznanych tekstów.
+
+## Przestój wątku UI przy starcie live i nowym napisie
+
+`ui-fonts` w `UiFontsReplay.cs` nie przechwytuje obrazu i nie uruchamia sesji live. Tworzy
+własny wątek UI (STA z dyspozytorem i małym oknem z tekstem, jak okno aplikacji przed startem
+live), na nim `TranslationOrchestrator.Initialize()` z dołączonym profilem `escape-academy`
+(krój Lexend Deca, reguła Zilla Slab) i ustawienie „Na oryginale (zakrywa)”. Wymaga
+`--font-path`, innych opcji nie przyjmuje:
+
+- `sync` — dawna ścieżka: `OverlayFonts.WarmUpProfile` na wątku UI przy starcie, a przy każdym
+  nowym napisie `VoteNativeWeight` (pomiar grubości: rasteryzacja tekstu w każdej grubości kroju)
+  i układ `CreateNativeElement` + `LayoutNativeElement` na wątku UI.
+- `background` — nowa ścieżka: `OverlayFonts.WarmUpProfileInBackground` (wątek roboczy krojów),
+  a przed przekazaniem napisu do wątku UI `OverlayBlockRenderer.PrepareNativeWeights` na wątku
+  „sesji” (jak w `MainWindow`), potem ten sam układ na wątku UI.
+
+Sześć nowych napisów (syntetyczne łatki z `GlyphCoverBuilder.Build`) przychodzi 150 ms po
+starcie, potem co 300 ms. Sonda z innego wątku co ok. 0,5 ms wysyła wywołanie dyspozytora
+o priorytecie Send i zapisuje jego opóźnienie — maksimum przybliża najdłuższy przestój wątku UI.
+Podsumowanie: `startCallMs` (czas wywołania przy starcie live na wątku UI), `warmUpDoneMs`,
+`firstUpdateUiMs` / `firstUpdateSessionMs`, mediany nowych napisów (`newTextUiMedianMs`,
+`newTextUiVoteMedianMs` — sam pomiar grubości, `newTextSessionMedianMs`), `uiThreadBusyTotalMs`,
+`maxProbeLatencyStartMs` (do pierwszego napisu) i `maxProbeLatencyWholeMs`, a także grubości
+i rozmiary krojów każdego napisu (`weights`, `emSizes`) — w obu ścieżkach muszą być takie same
+(pierwsze rysowanie z właściwym krojem). Kroje i JIT są wspólne dla procesu, więc każdy tryb
+trzeba uruchamiać w osobnym procesie, kilka razy na przemian:
+
+```powershell
+GameTranslatorOverlay.SceneReplay.exe --scenario ui-fonts --font-path sync --output C:\pomiary\ui-sync-1.jsonl
+GameTranslatorOverlay.SceneReplay.exe --scenario ui-fonts --font-path background --output C:\pomiary\ui-bg-1.jsonl
+```
+
+Wynik zależy od DPI monitora i od tego, co proces zdążył już narysować; nie obejmuje rysowania
+przez kompozytor ani łatek zbudowanych z prawdziwej klatki gry.

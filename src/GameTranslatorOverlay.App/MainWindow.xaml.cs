@@ -32,6 +32,8 @@ public partial class MainWindow : Window
 
     private const string NoProfileLabel = "— brak profilu (tryb uniwersalny) —";
 
+    private static readonly string[] OverlayFontChoices = ["Segoe UI", "Georgia", "Palatino Linotype", "Cambria", "Book Antiqua", "Times New Roman"];
+
     private readonly TranslationOrchestrator _orchestrator;
     private readonly AppSettings _settings;
     private readonly JsonSettingsStore _settingsStore;
@@ -166,7 +168,7 @@ public partial class MainWindow : Window
             _ => 0,
         };
 
-        CmbFont.ItemsSource = new[] { AutoFontLabel, "Segoe UI", "Georgia", "Palatino Linotype", "Cambria", "Book Antiqua", "Times New Roman" };
+        CmbFont.ItemsSource = OverlayFontChoices.Prepend(AutoFontLabel).ToArray();
         CmbFont.SelectedItem = Ui.OverlayFonts.IsAuto(_settings.OverlayFontFamily) ? AutoFontLabel : _settings.OverlayFontFamily;
         if (CmbFont.SelectedItem is null) CmbFont.SelectedIndex = 0;
 
@@ -1170,7 +1172,7 @@ public partial class MainWindow : Window
         var current = _orchestrator.Profiles.FirstOrDefault(p => p.Name == selected);
         if (current is null && selected != NoProfileLabel) return;
 
-        if (ProfileProcessMatcher.AutoSelect(_orchestrator.Profiles, current, window.ProcessName) is { } match)
+        if (ProfileProcessMatcher.AutoSelect(_orchestrator.Profiles, current, window.ProcessName, IsOwnProfile) is { } match)
         {
             CmbProfile.SelectedItem = match.Name;
             SetStatus($"Wykryto grę „{match.Name}” — profil włączony automatycznie.");
@@ -1337,10 +1339,10 @@ public partial class MainWindow : Window
         var upscale = OcrScaling.ResolvePreference(profile?.Ocr?.Upscale, _settings.OcrUpscale);
         var options = new LiveSessionOptions
         {
-            Fps = profile?.ChangeDetection?.Fps ?? 6,
+            Fps = profile?.ChangeDetection?.Fps ?? ChangeDetectionProfileSettings.AppDefaultFps,
             // Domyślnie 0: każda mocna zmiana komórki budzi przetwarzanie — krótkie
             // linijki dialogów w grach ze statycznym obrazem zmieniają ledwie kilka komórek.
-            ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.0,
+            ChangeThreshold = profile?.ChangeDetection?.Threshold ?? ChangeDetectionProfileSettings.AppDefaultThreshold,
             OcrUpscale = upscale.Preferred,
             AllowAutoUpscale = upscale.AllowAuto,
             NoticeEcho = _noticeEcho,
@@ -1356,7 +1358,10 @@ public partial class MainWindow : Window
         ApplyProfileFonts();
         if (_settings.OverlayPlacement == "cover")
         {
-            Ui.OverlayFonts.WarmUpProfile(_settings);
+            _ = Ui.OverlayFonts.WarmUpProfileInBackground(_settings).ContinueWith(
+                t => _logger.LogDebug("Rozgrzanie krojów nakładki w tle nie powiodło się ({Type})",
+                    t.Exception?.GetBaseException().GetType().Name),
+                CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
             _ = Task.Run(GameTranslatorOverlay.Core.Vision.GlyphCoverBuilder.WarmUp);
         }
         if (!_overlay.IsCaptureExclusionActive)
@@ -1367,15 +1372,27 @@ public partial class MainWindow : Window
         _orchestrator.WarmUpActiveProvider();
 
         LiveTranslationSession? session = null;
+        var overlayGate = new object();
+        var overlayChain = Task.CompletedTask;
         session = new LiveTranslationSession(
             _orchestrator, _ocr, window.Handle, options,
-            update => Dispatcher.BeginInvoke(() =>
+            update =>
             {
-                // Aktualizacje nieaktywnej (zatrzymanej/wymienionej) sesji nie mogą
-                // malować po nakładce ani ubijać nowej sesji.
-                if (!ReferenceEquals(session, _liveSession)) return;
-                HandleLiveUpdate(update);
-            }),
+                lock (overlayGate)
+                {
+                    overlayChain = overlayChain.ContinueWith(_ =>
+                    {
+                        PrepareOverlayFonts(update);
+                        Dispatcher.BeginInvoke(() =>
+                        {
+                            // Aktualizacje nieaktywnej (zatrzymanej/wymienionej) sesji nie mogą
+                            // malować po nakładce ani ubijać nowej sesji.
+                            if (!ReferenceEquals(session, _liveSession)) return;
+                            HandleLiveUpdate(update);
+                        });
+                    }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+                }
+            },
             _logger);
         _liveSession = session;
         _liveWindowHandle = window.Handle;
@@ -1489,6 +1506,21 @@ public partial class MainWindow : Window
                 ApplyProfileFonts();
                 _overlay.UpdateLiveBlocks(blocks, _settings);
             }
+        }
+    }
+
+    private static readonly TimeSpan OverlayFontsWait = TimeSpan.FromMilliseconds(600);
+
+    private void PrepareOverlayFonts(LiveUpdate update)
+    {
+        if (update.Blocks is not { Count: > 0 } blocks || update.Stopped || _settings.LiveDisplayMode == "subtitle") return;
+        try
+        {
+            Ui.OverlayBlockRenderer.PrepareNativeWeights(blocks, _settings, Ui.OverlayFonts.ProfileFont, OverlayFontsWait);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Pomiar grubości krojów poza wątkiem UI nie powiódł się ({Type})", ex.GetType().Name);
         }
     }
 

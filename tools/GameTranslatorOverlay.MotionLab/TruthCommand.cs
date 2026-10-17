@@ -8,7 +8,7 @@ using GameTranslatorOverlay.Core.Text;
 using GameTranslatorOverlay.Core.Vision;
 using Microsoft.Extensions.Logging;
 
-internal sealed record TruthOptions(int Every, int Workers, bool Force, string Corpus, string Profile);
+internal sealed record TruthOptions(int Every, int Workers, bool Force, string Corpus, string Profile, bool SplitLabels = true);
 
 internal static class TruthCommand
 {
@@ -25,18 +25,19 @@ internal static class TruthCommand
         var maxDimension = AngleAwareOcr.MaxImageDimension;
         var downscale = OcrScaling.ComputeDownscale(recording.Width, recording.Height, maxDimension);
         var expected = new TruthHeaderDto("header", FormatVersion, recording.Frames.Count, options.Every, options.Profile,
-            corpusInfo.Name, corpusInfo.Length, language.LanguageTag, maxDimension, downscale, true, DateTime.Now);
+            corpusInfo.Name, corpusInfo.Length, language.LanguageTag, maxDimension, downscale, true, DateTime.Now, options.SplitLabels);
+        var truthPath = recording.TruthPath(options.SplitLabels);
 
-        if (!options.Force && IsComplete(recording, expected))
+        if (!options.Force && IsComplete(truthPath, expected))
         {
-            Console.WriteLine($"truth: używam gotowego {recording.TruthPath}");
+            Console.WriteLine($"truth: używam gotowego {truthPath}");
             return 0;
         }
 
         var watch = Stopwatch.StartNew();
         var indices = Enumerable.Range(0, recording.Frames.Count).Where(i => i % options.Every == 0).ToList();
         Console.WriteLine($"truth: {recording.Name} — {indices.Count} klatek {recording.Width}×{recording.Height}, OCR {language.LanguageTag}, " +
-            $"limit silnika {maxDimension} px, skala {downscale:0.###}, {options.Workers} wątki");
+            $"limit silnika {maxDimension} px, skala {downscale:0.###}, {options.Workers} wątki, {(options.SplitLabels ? "imiona osobno jak w aplikacji" : "bez dzielenia imion")}");
 
         var raw = new RawFrame?[recording.Frames.Count];
         var engines = new ConcurrentBag<AngleAwareOcr>();
@@ -62,7 +63,7 @@ internal static class TruthCommand
                             lines = lines.Select(l => new OcrLine(l.Text, l.Box.Scale(back),
                                 l.Words.Select(w => new OcrWord(w.Text, w.Box.Scale(back))).ToList())).ToList();
                         }
-                        raw[index] = new RawFrame(index, angle, ocrMs, grid, TextBlockGrouper.Group(lines));
+                        raw[index] = new RawFrame(index, angle, ocrMs, grid, Blocks(lines, bitmap, downscale, options.SplitLabels));
                     }
                     finally
                     {
@@ -87,7 +88,7 @@ internal static class TruthCommand
             new WindowsOcrProvider(), loggers, keep: false);
         var orchestrator = environment.Orchestrator;
 
-        var temp = recording.TruthPath + ".tmp";
+        var temp = truthPath + ".tmp";
         using (var writer = new JsonlWriter(temp))
         {
             writer.Write(expected);
@@ -125,9 +126,9 @@ internal static class TruthCommand
                 writer.Write(new TruthFrameDto(index, Json.R(recording.RelativeMs(index)), frame.Angle is { } angle ? Math.Round(angle, 2) : null,
                     Json.R3(changed), Json.R3(strong), Json.R(meanDiff), Json.R(frame.OcrMs), blocks));
             }
-            Console.WriteLine($"truth: {indices.Count} klatek, z kątem tekstu {angled}, {watch.Elapsed.TotalSeconds:0} s → {recording.TruthPath}");
+            Console.WriteLine($"truth: {indices.Count} klatek, z kątem tekstu {angled}, {watch.Elapsed.TotalSeconds:0} s → {truthPath}");
         }
-        File.Move(temp, recording.TruthPath, overwrite: true);
+        File.Move(temp, truthPath, overwrite: true);
         return 0;
     }
 
@@ -175,18 +176,27 @@ internal static class TruthCommand
         return (Imaging.ToOcrBitmap(scaled), grid);
     }
 
-    public static bool IsComplete(Recording recording, TruthHeaderDto expected)
+    public static IReadOnlyList<TextBlock> Blocks(IReadOnlyList<OcrLine> lines, OcrBitmap bitmap, double downscale, bool splitLabels)
     {
-        if (!File.Exists(recording.TruthPath)) return false;
+        var grouped = TextBlockGrouper.Group(lines);
+        if (!splitLabels) return grouped;
+        var scaleBack = 1.0 / downscale;
+        return TextBlockSplitter.SplitLabels(grouped, box => BlockColorSampler.SampleColors(bitmap.PixelsBgra32, bitmap.Width, bitmap.Height,
+            bitmap.Stride, GlyphCoverBuilder.ToSampleBox(box, default, scaleBack)).TextRgb);
+    }
+
+    public static bool IsComplete(string truthPath, TruthHeaderDto expected)
+    {
+        if (!File.Exists(truthPath)) return false;
         try
         {
-            using var reader = new StreamReader(recording.TruthPath);
+            using var reader = new StreamReader(truthPath);
             var first = reader.ReadLine();
             if (first is null) return false;
             var header = System.Text.Json.JsonSerializer.Deserialize<TruthHeaderDto>(first, Json.Options);
             if (header is null || header.Version != expected.Version || header.Frames != expected.Frames || header.Every != expected.Every
                 || header.Profile != expected.Profile || header.CorpusFile != expected.CorpusFile || header.CorpusLength != expected.CorpusLength
-                || !header.AngleCorrected)
+                || !header.AngleCorrected || header.SplitLabels != expected.SplitLabels)
                 return false;
             var lines = 0;
             while (reader.ReadLine() is { Length: > 0 }) lines++;

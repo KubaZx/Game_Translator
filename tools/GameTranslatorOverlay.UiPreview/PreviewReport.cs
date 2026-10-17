@@ -106,6 +106,11 @@ internal sealed class PreviewReport(string folder)
             Line($"Glify ikon użyte w oknie: {_iconGlyphs.Count}; brak w Segoe MDL2 Assets (zapas dla Windows 10): " +
                  (missing.Count == 0 ? "0" : string.Join(", ", missing)));
         }
+        if (GdiFallback.Count > 0)
+        {
+            Line($"Rendery zastępcze GDI: {GdiFallback.Count} — RenderTargetBitmap dał pusty obraz (np. rozłączona sesja pulpitu zdalnego bez monitora). " +
+                 "Te PNG pokazują tylko układ (tło, ramki, tekst), bez efektów, obrazów i dokładnego kerningu.");
+        }
         Line($"Pliki ({_files.Count}):");
         foreach (var file in _files) Line("  " + file);
         File.WriteAllText(Path.Combine(Folder, "raport.txt"), _text.ToString(), new UTF8Encoding(false));

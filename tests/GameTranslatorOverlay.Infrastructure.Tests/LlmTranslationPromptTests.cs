@@ -7,6 +7,29 @@ namespace GameTranslatorOverlay.Infrastructure.Tests;
 
 public class LlmTranslationPromptTests
 {
+    [Theory]
+    [InlineData("{\"translations\": [\"Spakuj swoje rzeczy.\"]}}")]
+    [InlineData("{\"translations\": [\"Spakuj swoje rzeczy.\"}]")]
+    [InlineData("{\"translations\": [\"Spakuj swoje rzeczy.\"")]
+    public void Zepsute_domkniecie_jsona_z_pelnym_elementem_jest_przyjmowane(string content)
+    {
+        Assert.Equal(["Spakuj swoje rzeczy."], LlmTranslationPrompt.ParseTranslations(content, 1));
+    }
+
+    [Theory]
+    [InlineData("{\"translations\": [\"Raz\", \"Dwa\", \"Trzy\"]}}")]
+    [InlineData("{\"translations\": [\"Raz\", \"\"]}}")]
+    public void Zepsute_domkniecie_nie_przepuszcza_zlej_liczby_ani_pustego_tekstu(string content)
+    {
+        Assert.Null(LlmTranslationPrompt.ParseTranslations(content, 2));
+    }
+
+    [Fact]
+    public void Zepsute_domkniecie_z_dopiskiem_po_nawiasach_jest_odrzucane()
+    {
+        Assert.Null(LlmTranslationPrompt.ParseTranslations("{\"translations\": [\"Raz\"]}} i jeszcze komentarz", 1));
+    }
+
     [Fact]
     public void Prompt_systemowy_zawiera_jezyki_gre_i_terminy_slownika()
     {

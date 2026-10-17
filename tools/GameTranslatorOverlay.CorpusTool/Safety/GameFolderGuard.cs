@@ -29,7 +29,8 @@ public static class GameFolderGuard
     public static IReadOnlyList<GuardViolation> CheckProfile(GameProfile profile)
     {
         var violations = new List<GuardViolation>();
-        if (ExcludedProfileIds.Contains(profile.Id, StringComparer.OrdinalIgnoreCase))
+        if (ExcludedProfileIds.Contains(profile.Id, StringComparer.OrdinalIgnoreCase)
+            || ExcludedProfileIds.Contains(profile.ContentId, StringComparer.OrdinalIgnoreCase))
         {
             violations.Add(new GuardViolation(ExcludedGame,
                 $"Profil „{profile.Id}” jest na liście wykluczeń: regulamin tej gry zabrania programów, które czytają jej pliki."));

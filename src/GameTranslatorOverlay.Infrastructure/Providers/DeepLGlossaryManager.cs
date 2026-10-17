@@ -100,6 +100,7 @@ internal sealed class DeepLGlossaryManager(
             }
             else
             {
+                if (cancellationToken.IsCancellationRequested || !options.UseGlossary) return null;
                 // Zmiana słownika, konta albo pary języków — stare przygotowanie jest już
                 // niepotrzebne; przerywamy jego zapytania, żeby nie zajmowało kolejki.
                 _pending?.Cancellation.Cancel();
@@ -116,6 +117,16 @@ internal sealed class DeepLGlossaryManager(
         }
 
         return await WaitUntilDeadlineAsync(preparation, deadline, cancellationToken).ConfigureAwait(false);
+    }
+
+    public void CancelPending()
+    {
+        lock (_state)
+        {
+            if (_pending is not { } pending) return;
+            _pending = null;
+            pending.Cancellation.Cancel();
+        }
     }
 
     private static TimeSpan NonNegative(TimeSpan value) => value > TimeSpan.Zero ? value : TimeSpan.Zero;
@@ -158,6 +169,7 @@ internal sealed class DeepLGlossaryManager(
                 var glossaryId = reusable?.GlossaryId
                     ?? await CreateAsync(request.ApiKey, request.BaseUrl, request.Name, request.Source, request.Target,
                         request.Tsv, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
 
                 _ready = new Ready(request.Key, glossaryId);
                 logger.LogInformation("Glosariusz DeepL gotowy ({Entries} wpisów, {Mode})",
@@ -171,7 +183,7 @@ internal sealed class DeepLGlossaryManager(
                                 && Same(g.SourceLang, request.Source) && Same(g.TargetLang, request.Target))
                     .Select(static g => g.GlossaryId!)
                     .ToList();
-                if (stale.Count > 0)
+                if (stale.Count > 0 && !cancellationToken.IsCancellationRequested)
                 {
                     _ = Task.Run(async () =>
                     {
@@ -187,7 +199,7 @@ internal sealed class DeepLGlossaryManager(
                 _remote.Release();
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
             // Słownik zmienił się w trakcie — nowsze przygotowanie przejęło sprawę.
             return null;

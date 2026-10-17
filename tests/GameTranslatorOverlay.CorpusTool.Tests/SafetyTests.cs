@@ -22,6 +22,14 @@ public class GameFolderGuardTests
     }
 
     [Fact]
+    public void Wlasna_kopia_profilu_z_listy_wykluczen_tez_jest_blokowana()
+    {
+        var copy = new GameProfile { Id = "path-of-exile-2-wlasny", Name = "Path of Exile 2 (własny)", BasedOn = "path-of-exile-2" };
+
+        Assert.Equal(GameFolderGuard.ExcludedGame, Assert.Single(GameFolderGuard.CheckProfile(copy)).Code);
+    }
+
+    [Fact]
     public void Profil_oznaczony_online_jest_blokowany_a_zwykly_przechodzi()
     {
         Assert.Equal(GameFolderGuard.OnlineGame, Assert.Single(GameFolderGuard.CheckProfile(Profile("some-game", online: true))).Code);

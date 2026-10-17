@@ -12,6 +12,7 @@ public enum LiveReadingDecision { Keep, Confirm, Replace }
 public sealed class LiveReadingStabilizer
 {
     private const double SimilarityThreshold = 0.5;
+    public const double SameTextSimilarity = 0.8;
     private const double CleanQuality = 0.9;
     private const double QualityTolerance = 0.1;
     public const double PlausibleQuality = 0.75;
@@ -85,6 +86,21 @@ public sealed class LiveReadingStabilizer
 
     public static bool IsVariantOf(string displayed, string candidate) =>
         TextSimilarity.Ratio(TextNormalizer.Normalize(candidate), TextNormalizer.Normalize(displayed)) >= SimilarityThreshold;
+
+    public static bool IsSameText(string displayed, string candidate)
+    {
+        displayed = TextNormalizer.Normalize(displayed);
+        candidate = TextNormalizer.Normalize(candidate);
+        if (candidate.Length == 0 || displayed.Length == 0) return false;
+        if (string.Equals(candidate, displayed, StringComparison.OrdinalIgnoreCase)) return true;
+        if (TextSimilarity.Ratio(candidate, displayed) < SameTextSimilarity || IsWholeWordFragment(candidate, displayed)) return false;
+        var candidateDigits = new string(candidate.Where(char.IsDigit).ToArray());
+        var displayedDigits = new string(displayed.Where(char.IsDigit).ToArray());
+        if (candidateDigits == displayedDigits) return true;
+        var sameLetters = string.Equals(new string(candidate.Where(char.IsLetter).ToArray()),
+            new string(displayed.Where(char.IsLetter).ToArray()), StringComparison.OrdinalIgnoreCase);
+        return !sameLetters && (candidateDigits.Length == 0 || displayedDigits.Length == 0);
+    }
 
     public void Reset(string key) => _pending.Remove(key);
     public void Clear() => _pending.Clear();

@@ -7,10 +7,20 @@ i wyświetla tłumaczenie nad grą — **nie dotykając plików ani procesu gry*
 `CorpusTool`, które uruchamiasz sam — patrz [Spolszczenie z wyprzedzeniem](#spolszczenie-z-wyprzedzeniem-korpus-gry).
 
 Projekt jest przeznaczony do różnych gier; nie wymaga profilu konkretnego tytułu.
-Instrukcja opisuje wydanie 0.8.0 — szczegóły w
+Instrukcja opisuje wydanie 0.9.0 — szczegóły w
 [historii zmian](https://github.com/KubaZx/Game_Translator/blob/main/CHANGELOG.md).
 
-**Nowe w 0.8.0** (w skrócie):
+**Nowe w 0.9.0** (w skrócie):
+
+- **„Popraw” od razu** — poprawka z panelu wyniku albo z listy ostrzeżeń zmienia napis nad grą
+  w trakcie live bez czekania ([opis](#kontrola-jakości-tłumaczeń)),
+- **napisy wracają po ułamku sekundy po zmianie ustawień**, która przerwała tłumaczenie w toku, a start live nie
+  przycina okna,
+- **napis zgubiony w ruchu kamery** jest odczytywany lokalnie w przewidywanym miejscu i zostaje,
+  jeśli to ten sam tekst ([opis](#tryb-live-automatyczny)),
+- **pełny edytor własnego profilu** i **kopia profilu z zestawu** ([opis](#własne-profile-gier)).
+
+**W 0.8.0**:
 
 - **własny profil gry z okna** — karta **Profil tej gry** w sekcji **Gra**
   ([opis](#własne-profile-gier)),
@@ -25,9 +35,10 @@ Instrukcja opisuje wydanie 0.8.0 — szczegóły w
 Poprzednie wydanie (0.7.0) przyniosło nowe okno aplikacji, ikony klawiszy w polskim zdaniu,
 imię mówiącego w kroju gry i śledzenie napisów w ruchu kamery we wszystkich trybach.
 
-Zmian z 0.7.0 i 0.8.0 nikt jeszcze nie sprawdzał w grze na żywo: nakładkę sprawdzono na klatkach
-4K i nagraniach z Escape Academy (narzędzia OverlayPreview i MotionLab), zachowanie w powtórkach
-syntetycznych (SceneReplay), a okno aplikacji na renderach (UiPreview). Uwagi z gry zgłaszaj
+Wydanie 0.7 autor sprawdził ręcznie w grze — da się wygodnie grać. Zmian z 0.8.0 i 0.9.0 w grze
+na żywo jeszcze nie oglądano: nakładkę sprawdzono na klatkach 4K i nagraniach z Escape Academy
+(narzędzia OverlayPreview i MotionLab), zachowanie w powtórkach syntetycznych (SceneReplay), a okno
+aplikacji na renderach (UiPreview). Uwagi z gry zgłaszaj
 według [ostatniej sekcji](#jak-zgłosić-problem-jakości).
 
 ## Instalacja
@@ -124,6 +135,13 @@ klucz ponownie. Mały model
 lokalny tłumaczy wolniej i słabiej niż usługi w chmurze — sprawdza się najlepiej
 w trybie ręcznym i przy dialogach.
 
+Sprawdzony wybór na polski: **Bielik 11B v3.0 Instruct** (SpeakLeash) w LM Studio, wersja
+Q5_K_M (ok. 8 GB, mieści się na karcie z 16 GB pamięci). Na korpusie testowym projektu dał
+jakość między DeepL a DeepSeekiem (chrF 73–77 wobec 70,7 i 80,0) przy ok. 0,45 s na linię,
+a z **Pierwszymi liniami od razu** pierwsza linia pojawia się po ok. 1 s zamiast 1,7 s. W LM
+Studio nie ustawiaj formatu odpowiedzi `json_object` (opcja `responseFormat`) — serwer go nie
+obsługuje i odrzuca każde zapytanie.
+
 Pod polem **Adres serwera** (w wierszu **Gotowe:**) są przyciski **OpenAI**, **DeepSeek**, **Ollama** i **LM Studio**.
 **DeepSeek** (usługa w chmurze, potrzebny klucz) wpisuje adres `https://api.deepseek.com/v1`,
 model `deepseek-flash` i wyłącza „myślenie” modelu — bez tego model zawsze najpierw rozumował,
@@ -152,9 +170,10 @@ strumienia; na prawdziwym API tego jeszcze nie mierzono. Koszt zapytania się ni
 - Wczesna linia przechodzi tę samą kontrolę jakości co wynik końcowy; linia z problemem czeka na
   zwykłe ponowienie. Do cache, pamięci dialogu i liczników trafia tylko wynik końcowy.
 - Wynik końcowy decyduje: inny tekst podmienia linię w miejscu, a błąd albo odmowa modelu zdejmuje
-  wcześnie pokazane linie. Gdy model zwróci złą liczbę linii, wczesne linie znikają od razu,
-  a partia od 2 do 12 linii jest tłumaczona linia po linii (dłuższa kończy się błędem tłumaczenia
-  — jak bez strumienia).
+  wcześnie pokazane linie. Gdy model zwróci złą liczbę linii, znikają od razu wczesne linie tej
+  jednej partii (inne partie zostają), a partia jest tłumaczona ponownie: od 2 do 12 linii —
+  linia po linii, dłuższa — w dwóch mniejszych częściach (dodatkowe zapytania, jak bez strumienia;
+  połowa nadal za duża albo pojedyncza linia z nieczytelną odpowiedzią kończy się błędem).
 - Na nieruchomej scenie linia pojawia się tylko wtedy, gdy świeże przechwycenie potwierdza, że
   tekst w tym miejscu się nie zmienił. Przy przechwytywaniu zrzutem ekranu (pełny ekran bez obsługi
   okna) linie czekają na całą odpowiedź.
@@ -221,6 +240,14 @@ W panelu wyniku możesz:
 4. **Stop live** (albo ponownie **Ctrl+Shift+L**) kończy tryb live. Minimalizacja gry chowa
    nakładkę automatycznie.
 
+W ruchu kamery tłumaczenie jedzie razem z napisem. Gdy śledzenie na chwilę zgubi napis (np.
+przysłonięty przez postać albo rozmyty przy szybkim obrocie), aplikacja czyta lokalnie mały
+wycinek w przewidywanym miejscu: ten sam tekst — tłumaczenie zostaje i jedzie dalej (bez zapytania
+do dostawcy), inny albo brak — znika jak dotąd. Do rozstrzygnięcia (zwykle ok. 0,1 s) napis stoi
+w miejscu. Zmiana ustawień tłumaczenia w trakcie live (dostawca, słownik, profil) przebudowuje
+tłumaczenie; jeśli przerwała tłumaczenie w toku, ekran jest odczytany od nowa po ułamku sekundy,
+a w innym razie nowe ustawienia działają od kolejnej zmiany obrazu (najpóźniej po 4 s).
+
 Jeżeli aplikacja rozpozna profil gry (z zestawu albo własny), może dobrać go do wybranego okna.
 Pozostałe gry działają na ustawieniach ogólnych. Profil PoE2 w zestawie jest
 opcjonalnym dodatkiem ze słownikiem terminów. Profil Escape Academy rozpoznaje grę po nazwie
@@ -247,17 +274,35 @@ Najprościej z okna: w sekcji **Gra** zaznacz okno gry, a w karcie **Profil tej 
 **Utwórz profil dla tej gry**. Nazwa podpowiada się z tytułu okna (możesz ją zmienić), proces
 `.exe` bierze się z okna, a język — z bieżących ustawień. Profil zapisuje się w folderze danych
 (`%LOCALAPPDATA%\GameTranslatorOverlay\profiles\<id>\profile.json`, `id` to nazwa bez polskich
-znaków, np. `mroczna-latarnia`) i od razu się włącza, bez restartu. Zawiera tylko nazwę, proces
-i język — nie zmienia ustawień OCR ani wykrywania zmian.
+znaków, np. `mroczna-latarnia`) i od razu się włącza, bez restartu. Na start zawiera tylko nazwę,
+proces i język — nie zmienia ustawień OCR ani wykrywania zmian; resztę ustawisz przyciskiem
+**Dostosuj profil**.
+
+**Dostosuj profil** (tylko własne profile) otwiera w karcie edytor: nazwa, procesy (przycisk
+**Dodaj proces okna** bierze proces zaznaczonego okna), tytuły okien (tylko opis — grę rozpoznaje
+proces), język (na razie tylko zapisywany — tłumaczenie bierze język z ustawień), słownik
+profilu (z zestawu albo z folderu danych, dla bieżącej pary języków),
+powiększenie OCR (Automatycznie / 1× / 2× / 3×), minimalna wysokość tekstu (na razie tylko
+zapisywana), analizy na sekundę (1–30, puste = 6), próg zmiany obrazu (0–0,5, puste = 0), krój
+nakładki (działa przy kroju „Jak w grze”), zalecany tryb (tylko podpowiedź), pomijane obszary trybu live (ułamki
+okna 0–1, np. zegar w rogu) i opis. Puste pole = ustawienia aplikacji. **Zapisz profil** zmienia
+w pliku tylko ruszone pola i nie gubi pól spoza edytora (np. reguł kroju; komentarze dopisane
+ręcznie znikają), a zmiana działa od razu;
+Esc anuluje. Gdy plik zmienił się na dysku od otwarcia edytora, zapis jest przerywany.
 
 Gdy okno ma już profil, karta pokazuje, który i skąd (**z zestawu** albo **własny**) i czy jest
 włączony. Własny profil można **przemianować** (zmienia się tylko jego nazwa; komentarze dopisane
 ręcznie w pliku znikają) albo **usunąć** po potwierdzeniu — znika wyłącznie jego folder w folderze
-danych. Profili z zestawu nie da się zmienić ani usunąć. W trakcie trybu live karta jest zablokowana
-(przeładowanie profili przerwałoby tłumaczenia w locie), a w **trybie prywatnym** nie da się tworzyć
-ani przemianowywać profili, bo zapisałyby nazwę gry na dysku.
+danych. Profili z zestawu nie da się zmienić ani usunąć — karta pokazuje ich ustawienia, a **Utwórz
+własną kopię** robi z nich własny profil („X (własny)”, bez recepty korpusu), który od razu się
+włącza, przy autodetekcji wygrywa z oryginałem i korzysta z tych samych tłumaczeń w cache, poprawek
+i korpusu gry co oryginał (pole `basedOn`). W trakcie trybu live karta jest zablokowana
+(przeładowanie profili przerwałoby tłumaczenia w locie), a w **trybie prywatnym** nie da się
+tworzyć, przemianowywać ani kopiować profili ani zapisać w edytorze nazwy, procesów, tytułów okien
+i opisu, bo zapisałyby nazwę gry na dysku — strojenie OCR, kroju, słownika i wykrywania zmian
+działa (to liczby i nazwy wybrane z list).
 
-Ręcznie (np. żeby dopisać słownik albo ustawienia OCR): utwórz folder
+Ręcznie (droga zaawansowana, np. dla reguł kroju): utwórz folder
 `%LOCALAPPDATA%\GameTranslatorOverlay\profiles\<id>\` i zapisz w nim `profile.json`, np.:
 
 ```json
@@ -686,7 +731,9 @@ Gdzie widać ostrzeżenia:
   tłumaczeniem i powodem (chip z powodem: „zmienione liczby”, „bez tłumaczenia”, „za długie”;
   podpowiedź po najechaniu go wyjaśnia, a przy bloku z kilku akapitów zaczyna się od „Dotyczy co
   najmniej jednego z fragmentów bloku.”).
-  **Popraw** zapisuje ręczną korektę tak samo jak panel wyniku, z profilem i językami z chwili
+  **Popraw** zapisuje ręczną korektę tak samo jak panel wyniku (w trakcie live napis nad grą
+  zmienia się od razu, a gdy aplikacja czeka na tłumaczenie nowego tekstu — zaraz po nim),
+  z profilem i językami z chwili
   ostrzeżenia. **Wyczyść** opróżnia listę (licznik na Pulpicie zostaje). Lista jest tylko w pamięci —
   nigdy na dysku — i czyści się przy włączeniu albo wyłączeniu trybu prywatnego.
 - **Panel wyniku** (Ctrl+Shift+T): bursztynowy chip „⚠ powód” przy linii z ostrzeżeniem.
@@ -728,11 +775,13 @@ W Cache-only przy niedziałającej bazie nic nie jest wysyłane.
 - **Tryb prywatny**: nic nie zapisuje się na dysku — cache działa tylko w pamięci,
   a termin dodany przyciskiem **Słownik** w panelu wyniku obowiązuje do końca sesji. Glosariusz DeepL nie jest wtedy tworzony, a terminy
   dodane w tym trybie nigdy do niego nie trafiają. Ostatnia gra nie jest zapisywana
-  w `settings.json`, a tworzenie i przemianowywanie własnych profili gier jest zablokowane.
+  w `settings.json`, a tworzenie, przemianowywanie i kopiowanie własnych profili gier oraz zapis
+  nazwy, procesów, tytułów okien i opisu w edytorze są zablokowane (strojenie OCR, kroju, słownika
+  i wykrywania zmian działa).
 - **Lista ostrzeżeń jakości** (Dane i słownik) jest tylko w pamięci programu i czyści się przy
   przełączeniu trybu prywatnego.
-- **Własne profile gier** zapisane w folderze danych zawierają nazwę gry (domyślnie z tytułu okna)
-  i nazwę procesu.
+- **Własne profile gier** zapisane w folderze danych zawierają nazwę gry (domyślnie z tytułu okna),
+  nazwę procesu i to, co ustawisz w edytorze (np. tytuły okien, opis).
 - **Tryb Cache-only**: tłumaczenie korzysta z lokalnych wyników i nie wysyła brakującego tekstu do dostawcy.
 - **Korpus gry**: plik korpusu i baza tłumaczeń nie są nigdzie wysyłane. Gdy odczyt z ekranu
   zostanie dopasowany do tekstu korpusu, do dostawcy może trafić pełne zdanie z korpusu — także

@@ -93,6 +93,21 @@ public static class ProfileNames
         return (lastSpace > MaxLength / 2 ? cut[..lastSpace] : cut).TrimEnd(' ', '-', '—', ':', ',');
     }
 
+    public static string SuggestCopy(string? sourceName, IEnumerable<string> existingNames)
+    {
+        ArgumentNullException.ThrowIfNull(existingNames);
+        var taken = new HashSet<string>(existingNames.Select(Clean), StringComparer.OrdinalIgnoreCase);
+        var source = Clean(sourceName);
+        if (source.Length == 0) source = "Profil";
+        for (var number = 1; ; number++)
+        {
+            var suffix = number == 1 ? " (własny)" : $" (własny {number.ToString(CultureInfo.InvariantCulture)})";
+            var head = source.Length + suffix.Length > MaxLength ? source[..(MaxLength - suffix.Length)].TrimEnd() : source;
+            var candidate = head + suffix;
+            if (!taken.Contains(candidate)) return candidate;
+        }
+    }
+
     public static string? Validate(string? name, IEnumerable<string> existingNames)
     {
         ArgumentNullException.ThrowIfNull(existingNames);

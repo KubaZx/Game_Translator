@@ -274,6 +274,23 @@ public static class ScreenCapture
         bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
     }
 
+    public static OcrBitmap Rescale(OcrBitmap source, double factor)
+    {
+        using var bitmap = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+        var data = bitmap.LockBits(new Rectangle(0, 0, source.Width, source.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            for (var row = 0; row < source.Height; row++)
+                System.Runtime.InteropServices.Marshal.Copy(source.PixelsBgra32, row * source.Stride, data.Scan0 + row * data.Stride, source.Width * 4);
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+        using var scaled = Rescale(bitmap, factor);
+        return ToOcrBitmap(scaled);
+    }
+
     public static Bitmap Rescale(Bitmap source, double factor)
     {
         var width = Math.Max(1, (int)Math.Round(source.Width * factor));

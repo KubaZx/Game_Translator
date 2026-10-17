@@ -1176,3 +1176,57 @@ trybu prywatnego czyści listę. Zapisz fałszywe alarmy (np. zmiana zapisu godz
 bez migania i bez linii przypisanych do złego napisu. Bez przełącznika wszystkie linie pojawiają
 się naraz. Serwer, który nie obsługuje strumienia, tłumaczy dalej (po pierwszym zapytaniu bez
 strumienia). Zapisz model, serwer i czasy z karty Szybkość.
+
+## M52 — Edytor własnego profilu i kopia profilu z zestawu (0.9.0)
+
+**Kroki:**
+1. W sekcji **Gra** zaznacz okno gry z własnym profilem (M48) → **Dostosuj profil**. Zmień
+   powiększenie OCR na 2×, analizy na sekundę na 8, dodaj pomijany obszar (np. zegar w rogu),
+   **Zapisz profil**. Uruchom live.
+2. Wpisz 45 w analizach na sekundę i spróbuj zapisać; popraw na 10.
+3. Włącz **Prywatny**, otwórz edytor: spróbuj zmienić nazwę; zmień krój nakładki i zapisz.
+4. Zaznacz okno gry z profilem z zestawu (Escape Academy) → **Utwórz własną kopię**. Uruchom live
+   w scenie z korpusem (np. menu) i porównaj z oryginałem.
+
+**Oczekiwany wynik:** po kroku 1 live pracuje z 2× i 8 analizami/s bez restartu, a napis w pomijanym
+obszarze nie jest tłumaczony; w pliku `profile.json` zmieniły się tylko te pola. W kroku 2 pojawia
+się komunikat o zakresie 1–30 i znika po poprawieniu pola. W kroku 3 nazwa, procesy, tytuły i opis
+są zablokowane, a krój się zapisuje. W kroku 4 kopia „Escape Academy (własny)” jest wybrana, korpus
+działa (etykiety z korpusu jak w oryginale), znane teksty idą z cache (licznik API nie rośnie).
+
+## M53 — „Popraw” w trakcie live (0.9.0)
+
+**Kroki:**
+1. Tryb live, dostawca DeepL albo model językowy, scena z napisem, który ma ostrzeżenie jakości
+   (albo dowolny napis przetłumaczony ręcznie przez Ctrl+Shift+T).
+2. **Dane i słownik → Ostatnie ostrzeżenia → Popraw** (albo **Popraw** w panelu wyniku), wpisz
+   poprawkę, **Zapisz**. Patrz na napis w grze.
+3. Powtórz w trybie „Na oryginale (zakrywa)” i przy pasku napisów.
+
+**Oczekiwany wynik:** napis nad grą zmienia się na poprawkę w ułamku sekundy, bez mignięcia
+i w tym samym miejscu (w zakrywaniu — na tej samej łatce), także na pasku napisów; licznik API
+nie rośnie. Zapisz, jeśli poprawka pojawia się dopiero po kilku sekundach (np. w trakcie długiego
+tłumaczenia modelem).
+
+## M54 — Napis przysłonięty w ruchu kamery (0.9.0)
+
+**Kroki:**
+1. Tryb live, scena z napisem na ścianie albo tabliczce. Szybka panorama tak, żeby napis na chwilę
+   zasłoniła postać, słup albo ramka drzwi.
+2. W ruchu otwórz i zamknij panel HUD, którego etykieta się zmienia.
+
+**Oczekiwany wynik:** tłumaczenie napisu nie znika przy krótkim zasłonięciu i jedzie dalej
+z napisem (najwyżej ułamek sekundy stoi w starym miejscu). Zmieniona etykieta HUD znika najpóźniej
+po ok. 0,7 s. Zapisz, jeśli tłumaczenie zostaje na ścianie, gdy napisu już nie ma.
+
+## M55 — Zmiana ustawień w trakcie live (0.9.0)
+
+**Kroki:**
+1. Tryb live, dostawca odpowiadający wolniej (np. model językowy). Gdy w grze pojawi się nowy
+   napis i trwa jego tłumaczenie, zmień dostawcę tłumaczeń albo profil gry.
+2. W trakcie tłumaczenia kolejnego napisu zmień szybko po kolei kilka ustawień tłumaczenia (np.
+   dostawca, profil).
+
+**Oczekiwany wynik:** napisy wracają po ułamku sekundy (plus czas dostawcy), a nie po kilku
+sekundach; przy serii zmian — jeden odczyt po ostatniej zmianie, bez migania. Okno aplikacji nie
+przycina się przy starcie live (kursor i przewijanie płynne).

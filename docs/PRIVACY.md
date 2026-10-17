@@ -187,8 +187,11 @@ treść (np. czat w grze). Po włączeniu:
   w tym trybie nie trafią do niego także po wyłączeniu trybu prywatnego,
 - **bez zapamiętywania ostatniej gry** — nazwa procesu i tytuł okna są trzymane tylko w pamięci
   do zamknięcia programu (wartości zapisane wcześniej zostają w pliku),
-- **bez nowych własnych profili** — tworzenie i przemianowywanie profili gier w oknie jest
-  zablokowane, bo profil zapisuje na dysku nazwę gry i procesu (usuwać można),
+- **bez nowych własnych profili** — tworzenie, przemianowywanie i kopiowanie profili gier w oknie
+  oraz zapis nazwy, procesów, tytułów okien i opisu w edytorze są zablokowane, bo zapisałyby na
+  dysku nazwę gry, procesu albo tekst z tytułu okna (usuwać można; strojenie OCR, kroju, słownika,
+  wykrywania zmian i pomijanych obszarów wolno zapisać — to liczby i nazwy wybrane z list, bez tekstu
+  z ekranu),
 - **lista ostrzeżeń jakości** („Dane i słownik → Ostatnie ostrzeżenia”) jest jak zawsze tylko
   w pamięci i czyści się przy włączeniu i wyłączeniu trybu prywatnego, więc pozycja z sesji
   prywatnej nie może trafić do trwałej bazy przez „Popraw”,
@@ -216,7 +219,7 @@ Wszystkie dane programu leżą w `%LOCALAPPDATA%\GameTranslatorOverlay`:
 | cache SQLite (`cache.db`) | pary tekst źródłowy → tłumaczenie, także tłumaczenia korpusu z wyprzedzeniem (`CorpusTool translate`: profil gry, znacznik `src=corpus`) | w trybie prywatnym tłumaczenie go nie czyta i nie zapisuje (cache tylko w pamięci) |
 | klucze API (osobny dla każdego dostawcy) | zaszyfrowane Windows DPAPI (`CurrentUser`) | odczyta je tylko ten sam użytkownik Windows na tej maszynie |
 | logi (Serilog, rolling) | zdarzenia techniczne, błędy (stack trace tylko do logu); liczba tekstów wczytanego korpusu i zużycie tokenów modeli językowych jako same liczby | nigdy kluczy API; bez treści tłumaczeń w trybie prywatnym |
-| profile i słowniki | pliki JSON (`profiles/`, `glossaries/`) | profile z zestawu i słowniki to dane statyczne; **własne profile gier** utworzone w oknie (`profiles\<id>\profile.json`) zawierają nazwę gry (domyślnie z tytułu okna) i nazwę procesu `.exe`; identyfikator profilu (skrót nazwy) zapisuje się też jako aktywny profil w `settings.json` i przy wpisach cache; w logu własny profil występuje jako „(własny)” albo „własny profil”, bez nazwy i identyfikatora |
+| profile i słowniki | pliki JSON (`profiles/`, `glossaries/`) | profile z zestawu i słowniki to dane statyczne; **własne profile gier** utworzone w oknie (`profiles\<id>\profile.json`) zawierają nazwę gry (domyślnie z tytułu okna) i nazwę procesu `.exe`, a po edycji także tytuły okien (mogą zawierać np. nazwę zapisu) i opis; kopia profilu z zestawu ma pole `basedOn` z identyfikatorem oryginału; identyfikator profilu (skrót nazwy) zapisuje się też jako aktywny profil w `settings.json` i przy wpisach cache; w logu własny profil występuje jako „(własny)” albo „własny profil”, bez nazwy i identyfikatora |
 | lista ostrzeżeń jakości | oryginał, tłumaczenie, powód i godzina ostatnich 20 ostrzeżeń | tylko w pamięci procesu, nigdy na dysku ani w logu |
 | korpus gry (`corpus\<profil>.corpus.jsonl`) | angielskie teksty gry odczytane przez narzędzie z ADR-014 | tworzy go tylko narzędzie na polecenie użytkownika; aplikacja go czyta (aktywny profil, także w trybie prywatnym) i nie wysyła pliku, ale do dostawcy może trafić pojedynczy tekst korpusu dopasowany do odczytu z ekranu; `CorpusTool translate` wysyła teksty korpusu do dostawcy wybranego przez użytkownika, tylko na jego polecenie |
 

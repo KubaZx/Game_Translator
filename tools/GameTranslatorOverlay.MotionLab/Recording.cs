@@ -4,6 +4,7 @@ internal static class LabDefaults
 {
     public const string Profile = "escape-academy";
     public const string TruthFile = "truth.jsonl";
+    public const string SplitTruthFile = "truth-split.jsonl";
 
     public static string DiagnosticsRoot { get; } = FindDiagnosticsRoot();
 
@@ -51,7 +52,7 @@ internal sealed class Recording
 
     public string FramePath(int index) => Path.Combine(Directory, $"f{index:D5}.jpg");
 
-    public string TruthPath => Path.Combine(Directory, LabDefaults.TruthFile);
+    public string TruthPath(bool splitLabels) => Path.Combine(Directory, splitLabels ? LabDefaults.SplitTruthFile : LabDefaults.TruthFile);
 
     public double RelativeMs(int index) => Frames[index].TMs - Frames[0].TMs;
 

@@ -23,4 +23,8 @@
     <ProjectReference Include="..\..\src\GameTranslatorOverlay.Infrastructure\GameTranslatorOverlay.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\tools\GameTranslatorOverlay.SceneReplay\LocalModelServer.cs" Link="Tools\LocalModelServer.cs" />
+  </ItemGroup>
+
 </Project>

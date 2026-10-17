@@ -133,6 +133,163 @@ public class TranslationPipelineStaleReplacementTests
         Assert.Equal("reflow-1;qa=numbers;qa-final", (await cache.LookupAsync(Gold, "en", "pl", ""))!.Context);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(Profile)]
+    public async Task Pusty_wynik_dla_wpisu_w_starym_formacie_kosztuje_najwyzej_jedno_ponowienie(string profile)
+    {
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry(MultiLine, MultiLine, "en", "pl", "Porozmawiaj z\nkowalem.", "DeepL",
+            GameProfile: profile));
+        var provider = new RetryableScriptedProvider((_, _) => "");
+
+        var outcomes = new List<TranslationOutcome>();
+        var pipeline = Create(cache, provider, profile);
+        for (var i = 0; i < 4; i++) outcomes.Add(Assert.Single(await pipeline.TranslateAsync([MultiLine], "en", "pl")));
+        outcomes.Add(Assert.Single(await Create(cache, provider, profile).TranslateAsync([MultiLine], "en", "pl")));
+
+        Assert.Equal(1, provider.CallCount);
+        Assert.All(outcomes, static o => Assert.Equal("Porozmawiaj z\nkowalem.", o.TranslatedText));
+        Assert.All(outcomes, static o => Assert.Equal(TranslationOrigin.Cache, o.Origin));
+        var stored = await cache.LookupAsync(MultiLine, "en", "pl", profile);
+        Assert.Equal("reflow-final", stored!.Context);
+        Assert.Equal("DeepL", stored.Provider);
+        Assert.Equal(profile, stored.GameProfile);
+    }
+
+    [Fact]
+    public async Task Udane_ponowienie_wpisu_w_starym_formacie_zapisuje_nowy_format()
+    {
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry(MultiLine, MultiLine, "en", "pl", "Porozmawiaj z\nkowalem.", "DeepL"));
+        var provider = new ScriptedProvider((_, _) => "Porozmawiaj z kowalem o mieczu.");
+        var pipeline = Create(cache, provider);
+
+        for (var i = 0; i < 3; i++) await pipeline.TranslateAsync([MultiLine], "en", "pl");
+
+        Assert.Equal(1, provider.CallCount);
+        Assert.Equal(TextReflow.FormatVersion, (await cache.LookupAsync(MultiLine, "en", "pl", ""))!.Context);
+    }
+
+    [Fact]
+    public async Task Pusty_wynik_dla_starego_formatu_z_inna_plcia_ponawia_raz_na_pipeline()
+    {
+        var ready = TextNormalizer.Normalize("Are you ready to\nleave the harbor?");
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry(ready, ready, "en", "pl", "Czy jesteś gotowy,\nby opuścić port?", "LLM"));
+        var provider = new GenderAwareProvider((_, _) => "");
+        TranslationPipeline Female() => new(new GlossaryService(), cache, provider, new UsageTracker(),
+            new TranslationPipelineOptions { PlayerGender = PlayerGender.Female });
+
+        var first = Female();
+        for (var i = 0; i < 3; i++) await first.TranslateAsync([ready], "en", "pl");
+        Assert.Equal(1, provider.CallCount);
+        Assert.Equal("reflow-final", (await cache.LookupAsync(ready, "en", "pl", ""))!.Context);
+
+        var second = Female();
+        var outcomes = new List<TranslationOutcome>();
+        for (var i = 0; i < 3; i++) outcomes.Add(Assert.Single(await second.TranslateAsync([ready], "en", "pl")));
+        Assert.Equal(2, provider.CallCount);
+        Assert.All(outcomes, static o => Assert.Equal("Czy jesteś gotowy,\nby opuścić port?", o.TranslatedText));
+    }
+
+    [Fact]
+    public async Task Pusty_wynik_jednostek_bloku_w_starym_formacie_konczy_ponawianie_calego_bloku()
+    {
+        var block = TextNormalizer.Normalize("Options\nQuit");
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry(block, block, "en", "pl", "Opcje\nWyjdź", "DeepL"));
+        var provider = new ScriptedProvider((_, _) => "");
+        var pipeline = new TranslationPipeline(new GlossaryService(), cache, provider, new UsageTracker(),
+            new TranslationPipelineOptions { SplitParagraphs = true });
+
+        var outcomes = new List<TranslationOutcome>();
+        for (var i = 0; i < 4; i++) outcomes.Add(Assert.Single(await pipeline.TranslateAsync([block], "en", "pl")));
+
+        Assert.Equal(1, provider.CallCount);
+        Assert.All(outcomes, static o => Assert.Equal("Opcje\nWyjdź", o.TranslatedText));
+        Assert.Equal("reflow-final", (await cache.LookupAsync(block, "en", "pl", ""))!.Context);
+    }
+
+    [Fact]
+    public async Task Pusty_wynik_jednostek_bloku_z_inna_plcia_ponawia_raz_na_pipeline()
+    {
+        var block = TextNormalizer.Normalize("Options\nAre you ready?");
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry(block, block, "en", "pl", "Opcje\nCzy jesteś gotowy?", "LLM",
+            Context: "reflow-1;pg=m"));
+        var provider = new GenderAwareProvider((_, _) => "");
+        var pipeline = new TranslationPipeline(new GlossaryService(), cache, provider, new UsageTracker(),
+            new TranslationPipelineOptions { SplitParagraphs = true, PlayerGender = PlayerGender.Female });
+
+        var outcomes = new List<TranslationOutcome>();
+        for (var i = 0; i < 4; i++) outcomes.Add(Assert.Single(await pipeline.TranslateAsync([block], "en", "pl")));
+
+        Assert.Equal(1, provider.CallCount);
+        Assert.All(outcomes, static o => Assert.Equal("Opcje\nCzy jesteś gotowy?", o.TranslatedText));
+    }
+
+    [Fact]
+    public async Task Pusty_wynik_jednostek_bloku_z_problemem_jakosci_konczy_ponawianie_calego_bloku()
+    {
+        var block = TextNormalizer.Normalize("Level 20\nQuit");
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry(block, block, "en", "pl", "Poziom 2\nWyjdź", "Scripted",
+            Context: "reflow-1;qa=numbers"));
+        var provider = new ScriptedProvider((_, _) => "");
+        var pipeline = new TranslationPipeline(new GlossaryService(), cache, provider, new UsageTracker(),
+            new TranslationPipelineOptions { SplitParagraphs = true });
+
+        for (var i = 0; i < 3; i++) await pipeline.TranslateAsync([block], "en", "pl");
+
+        Assert.Equal(1, provider.CallCount);
+        Assert.Equal("reflow-1;qa=numbers;qa-final", (await cache.LookupAsync(block, "en", "pl", ""))!.Context);
+    }
+
+    [Fact]
+    public async Task Blad_dostawcy_dla_wpisu_w_starym_formacie_nie_konczy_ponawiania()
+    {
+        var cache = new InMemoryTranslationCache();
+        await cache.StoreAsync(new NewCacheEntry(MultiLine, MultiLine, "en", "pl", "Porozmawiaj z\nkowalem.", "DeepL"));
+        var provider = new ScriptedProvider((_, _) => throw new TranslationException(TranslationFailureKind.NetworkError, "offline"));
+        var pipeline = Create(cache, provider);
+
+        for (var i = 0; i < 2; i++) await pipeline.TranslateAsync([MultiLine], "en", "pl");
+
+        Assert.Equal(2, provider.CallCount);
+        Assert.Null((await cache.LookupAsync(MultiLine, "en", "pl", ""))!.Context);
+    }
+
+    [Theory]
+    [InlineData(null, "reflow-final")]
+    [InlineData("reflow-final", "reflow-final")]
+    [InlineData("pg=m", "pg=m;reflow-final")]
+    public void Znacznik_ostatecznosci_formatu_zachowuje_reszte_znacznika(string? context, string expected)
+    {
+        var marked = TranslationCacheContext.MarkReflowFinal(context);
+
+        Assert.Equal(expected, marked);
+        Assert.True(TranslationCacheContext.Parse(marked).ReflowFinal);
+        Assert.Null(TranslationCacheContext.Parse(marked).Format);
+        Assert.False(TranslationCacheContext.IsStale(marked, MultiLine));
+        Assert.False(TranslationCacheContext.IsStaleForFormat(marked, MultiLine));
+    }
+
+    [Fact]
+    public void Ostatecznosc_formatu_nie_wylacza_ponowienia_jakosci_ani_plci()
+    {
+        const string ready = "Are you ready to\nleave the harbor?";
+
+        Assert.True(TranslationCacheContext.IsStaleForFormat(null, MultiLine));
+        Assert.True(TranslationCacheContext.IsStaleForFormat("pg=m", MultiLine));
+        Assert.True(TranslationCacheContext.IsStale("reflow-final;qa=numbers", MultiLine));
+        Assert.True(TranslationCacheContext.IsStale("reflow-final", ready, PlayerGender.Female));
+        Assert.False(TranslationCacheContext.IsStale("reflow-final;pg=f", ready, PlayerGender.Female));
+    }
+
+    private sealed class GenderAwareProvider(Func<string, int, string> respond)
+        : ScriptedProvider(respond), IGenderAwareTranslationProvider;
+
     [Fact]
     public async Task Rownolegle_tlumaczenie_nieaktualnego_wpisu_profilu_nadpisuje_ten_wpis()
     {

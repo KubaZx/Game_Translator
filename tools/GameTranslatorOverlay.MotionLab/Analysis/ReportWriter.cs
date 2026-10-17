@@ -41,6 +41,7 @@ internal static class ReportWriter
         sb.AppendLine("| Metryka | Wartość |");
         sb.AppendLine("|---|---|");
         sb.AppendLine($"| Epizody tekstu tłumaczalnego (≥3 klatki) | {V("tracks.eligible")} (stałe {V("tracks.eligibleStatic")}, ruchome {V("tracks.eligibleMoving")}, pisane literami {V("tracks.typing")}; krótszych {V("tracks.shortLive")}) |");
+        sb.AppendLine($"| Prawda: tryb; odosobnione inne odczyty tekstu stałego zastąpione zgodnym (≤{TrackBuilder.MaxVariantRun} klatek) | {V("truthMode")}; {V("truthSmoothing.smoothedEligibleObs")} odczytów w epizodach, {V("truthSmoothing.smoothedTracks")} wierszy prawdy |");
         sb.AppendLine($"| **Pokrycie** — % czasu z tłumaczeniem | **{V("coverage.all.percent", " %")}** (z {V("coverage.all.seconds", " s")} tekst·czasu) |");
         sb.AppendLine($"| Pokrycie: teksty stałe (HUD) / ruchome | {V("coverage.static.percent", " %")} / {V("coverage.moving.percent", " %")} |");
         sb.AppendLine($"| Pokrycie: kamera w ruchu / w spoczynku | {V("coverage.cameraMotion.percent", " %")} ({V("coverage.cameraMotion.seconds", " s")}) / {V("coverage.cameraRest.percent", " %")} ({V("coverage.cameraRest.seconds", " s")}) |");
@@ -69,6 +70,7 @@ internal static class ReportWriter
         sb.AppendLine($"| Koszt: klatka→aktualizacja (mediana / p90 / max) | {S("cost.captureToUpdateMs")} |");
         sb.AppendLine($"| Koszt: OCR pełny / wycinek (operacja) | {S("cost.ocrFullOperationMs")} / {S("cost.ocrPartialOperationMs")} |");
         sb.AppendLine($"| Koszt: łatki budowa / czekanie | {S("cost.glyphCoverMs")} / {S("cost.glyphCoverWaitMs")} |");
+        sb.AppendLine($"| Zgubione w ruchu: lokalne odczyty (odzyskane) / OCR razem; usunięcia „zniknął albo odjechał” | {V("cost.lostReads")} ({V("cost.lostRecovered")}) / {V("cost.lostReadMs", " ms")} (z budową łatki {V("cost.lostReadTotalMs", " ms")}); {V("cost.trackingRemovals")} |");
         sb.AppendLine($"| Cięcia sceny / czyszczenia nakładki (w ruchu) / whiff | {V("cost.sceneCutFrames")} / {V("cost.clears")} ({V("cost.clearsInCameraMotion")}) / {V("cost.whiffFrames")} |");
         sb.AppendLine($"| Przerwy bez OCR ≥1 s (w ruchu) | {V("cost.ocrGapsOver1s")} ({V("cost.ocrGapsOver1sInMotion")}), razem {V("cost.ocrGapSeconds", " s")}, najdłuższa {V("cost.ocrGapMaxMs", " ms")}; próbek „obserwuję” z mocnym ruchem ≥12%: {V("cost.observeSamplesInMotion")} |");
         sb.AppendLine();

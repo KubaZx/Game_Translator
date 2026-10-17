@@ -2,6 +2,107 @@
 
 Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
+## [0.9.0] — 2026-10-17
+
+Wydanie „płynność bez udziału gracza”: poprawka ręczna widoczna od razu, szybszy powrót napisów
+po zmianie ustawień, mniej przycięć okna przy starcie live, napis zgubiony w ruchu kamery
+odczytywany lokalnie zamiast zdejmowany, pełny edytor własnego profilu gry i kopia profilu
+z zestawu, dokładniejsze unieważnianie wczesnych linii. Testy: 2285 xUnit (1675 Core + 443 Infrastructure + 167 CorpusTool), build bez ostrzeżeń.
+**W grze na żywo tego jeszcze nie oglądano** — zachowanie sprawdzone w powtórkach (SceneReplay),
+na nagraniach (MotionLab, teraz seriami) i na renderach okna (UiPreview). Wydanie 0.7 autor
+sprawdził ręcznie w grze: da się wygodnie grać.
+
+### Nowe w 0.9.0
+
+- **„Popraw” działa od razu.** Ręczna poprawka z panelu wyniku albo z listy „Ostatnie
+  ostrzeżenia” w trakcie live zmienia napis nad grą od razu — w dymku, na łatce w trybie
+  „Na oryginale (zakrywa)” i na pasku napisów — bez czekania na kolejny odczyt tekstu i bez
+  zapytania do dostawcy. Gdy aplikacja akurat czeka na tłumaczenie nowego tekstu, poprawka
+  pojawia się zaraz po nim.
+- **Zmiana ustawień w trakcie live**: gdy zmiana przerwie tłumaczenie w toku, napisy wracają po
+  ułamku sekundy (pełny odczyt po przebudowie tłumaczenia), a nie po kolejnym pełnym sprawdzeniu
+  ekranu (do 4 s). Seria szybkich zmian daje jeden odczyt po ostatniej.
+- **Start live i nowe napisy bez przycinania okna**: kroje nakładki rozgrzewają się i mierzą na
+  osobnym wątku, a pętla trybu live na nie nie czeka.
+- **Napis zgubiony w ruchu kamery** (np. przysłonięty na chwilę, rozmyty przy szybkim obrocie)
+  nie znika od razu: aplikacja czyta lokalnie (Windows OCR) mały wycinek w przewidywanym miejscu
+  i jeśli to ten sam tekst, śledzi go dalej z nowego miejsca — bez zapytania do dostawcy. Inny
+  tekst albo brak tekstu — zdejmuje go jak dotąd. Stary napis po zmianie widoku i napis zniknięty
+  na nieruchomej scenie dalej znikają od razu.
+- **Pełny edytor własnego profilu gry**: w karcie **Profil tej gry** przycisk **Dostosuj
+  profil** zmienia nazwę, procesy (z zaznaczonego okna), tytuły okien, język, słownik profilu,
+  powiększenie OCR (Automatycznie/1×/2×/3×), minimalną wysokość tekstu, liczbę analiz na sekundę
+  (1–30), próg zmiany obrazu (0–0,5), krój nakładki, zalecany tryb, pomijane obszary trybu live
+  i opis. Zapis zmienia w pliku tylko ruszone pola, nie gubi pól spoza edytora (komentarze
+  dopisane ręcznie w pliku znikają) i działa od razu. Język, zalecany tryb, tytuły okien
+  i minimalna wysokość tekstu są na razie tylko zapisywane — aplikacja ich jeszcze nie używa.
+- **Kopia profilu z zestawu**: profil z zestawu pokazuje swoje ustawienia i przycisk **Utwórz
+  własną kopię** (nazwa „X (własny)”, bez recepty korpusu). Kopia korzysta z tych samych
+  tłumaczeń w cache, poprawek i korpusu gry co oryginał (pole `basedOn`) i przy autodetekcji
+  wygrywa z oryginałem.
+- W trybie prywatnym edytor nie zapisuje nazwy gry, procesów, tytułów okien ani opisu i nie robi
+  kopii; strojenie OCR, kroju, słownika i wykrywania zmian działa (to liczby i nazwy z list).
+- **Wczesne linie modeli językowych**: zła liczba wyników w jednej partii zdejmuje tylko wczesne
+  linie tej partii; inne partie dalej się pokazują. Partia powyżej 12 linii ze złą liczbą wyników
+  jest dzielona na dwie mniejsze (osobne zapytania), zamiast psuć całą klatkę.
+- **Mniej zbędnych zapytań**: wpis sprzed zmiany formatu, którego ponowienie dało pusty wynik,
+  jest ostateczny (`reflow-final`) — najwyżej jedno ponowienie; płeć gracza w bloku z akapitami
+  ponawiana raz na pipeline.
+- Przełączenie na Cache-only, tryb prywatny albo innego dostawcę od razu przerywa przygotowanie
+  glosariusza DeepL w tle (wcześniej do 5 s, z ostrzeżeniem w logu).
+- **Modele lokalne**: odpowiedź z zepsutym domknięciem JSON-a (zbędny albo zamieniony nawias na
+  końcu — robi to np. polski Bielik w LM Studio) jest przyjmowana, gdy wszystkie tłumaczenia są
+  pełne i jest ich dokładnie tyle, ile trzeba. „Pierwsze linie od razu” sprawdzone na prawdziwym
+  serwerze lokalnym (LM Studio z Bielikiem 11B).
+- Narzędzia (dla deweloperów): MotionLab — `replay --phase-ms`, serie przebiegów `series`
+  i porównanie `compare` (dokładny test Manna–Whitneya, skupiska opóźnień), prawda dzielona jak
+  aplikacja i wygładzanie odosobnionych odczytów HUD, polecenie `lost`; SceneReplay — scenariusze
+  `settings-change`, `manual-correction`, `ui-fonts`, `motion-occlusion`, `motion-blur`,
+  `stream-partition` i pomiar strumienia na prawdziwym serwerze lokalnym (`openai-local`,
+  wyłącznie 127.0.0.1/localhost, bez klucza); UiPreview — warianty edytora profilu i zapasowy
+  render GDI.
+
+### Pomiary i regresje
+
+Pomiary bez gry, na komputerze bez innego obciążenia. MotionLab — serie po 5 przebiegów
+z przesuniętą fazą na kodzie 0.8.0 i 0.9.0, na przemian, porównanie testem Manna–Whitneya (nowa
+prawda MotionLab z podziałem imion i wygładzaniem, więc liczby nie są porównywalne wprost
+z rundami ≤ 10):
+
+- zakrywanie, pokój — pokrycie tekstu ruchomego 25,4 → 28,1% (istotnie lepiej, p = 0,016),
+  w ruchu kamery 17,1 → 20,3% (p = 0,032); pozostałe metryki w rozrzucie (pokrycie 83,2 → 83,7%,
+  HUD w ruchu 88,0 → 88,4%, dziury 0,6 → 0,7 s, nieaktualne 6,2 → 6,4 s);
+- zakrywanie, prolog z dialogiem — wszystko w rozrzucie poza błędem szwu łatek w ruchu
+  8,0 → 12,1 (gorzej, p = 0,008): łatka bloku czekającego na lokalny odczyt stoi przez chwilę
+  na przesuwającym się tle (czas łatek w ruchu 7,1–7,5 → 7,6–7,8 s; mocno zamrożonych 0–0,3 →
+  0–0,4 s);
+- „Pod oryginałem” — pokój bez istotnych różnic, prolog — jedna graniczna metryka o małym
+  mianowniku (p = 0,048, spodziewany przypadkowy alarm przy ~19 metrykach).
+
+SceneReplay (nowe scenariusze, 0.8.0 → 0.9.0): zmiana ustawień w trakcie klatki — ponowny odczyt
+3,76 → 0,20 s, po serii zmian 3,08 → 0,20 s; „Popraw” w trakcie live — napis zmieniony 2,5 s →
+2 ms po zapisie, bez OCR i bez zapytania; zła liczba wyników w jednej partii strumienia — wczesne
+linie dobrej partii zdejmowane 3 → 0; napis przysłonięty w panoramie (`motion-occlusion`) —
+zniknięcia 1–3 → 0; rozmyty (`motion-blur`) — 3 → 0–2 (scenariusz bywa niestabilny przy starcie,
+nieważne przebiegi pominięte); start live na wątku UI 37–46 → 1,1–1,2 ms, najdłuższy przestój
+37–46 → 9–10 ms (`ui-fonts`). Koszt: zmieniona etykieta HUD w ruchu znika po 71–203 ms zamiast
+ok. 58 ms (czeka na lokalny odczyt; limit scenariusza 700 ms), a stary napis po zmianie sceny
+ok. 2 ms później (35–36 → 37–38 ms).
+
+Prawdziwy serwer lokalny (LM Studio, Bielik 11B v3.0 Instruct Q5_K_M, ok. 8 GB pamięci karty): pierwsza
+linia ze strumieniem po 0,92–1,03 s wobec 1,72–1,75 s bez niego, całość 1,73–1,82 s; jakość na
+korpusie testowym (ProviderEval, 42 linie) chrF 73,0–77,0, 41–42/42 linie, mediana 0,43–0,45 s
+na linię (dla porównania z 5.10: DeepL 70,7, DeepSeek bez rozumowania 80,0). Bez poprawki
+parsera Bielik tracił 6 z 42 linii przez zepsute domknięcie JSON-a.
+
+Regresje SceneReplay: podstawowe sceny — stary napis usunięty po 37–39 ms, local-occlusion* —
+0 strat menu, moving-text/position-jitter — błąd 0 px, hud-motion* — 0 strat HUD, stale-* —
+usunięcie po 204–441 ms, z prawdziwą etykietą z gry 60–378 ms, stale-dim i stale-present-junk bez
+zniknięcia, pan-cut — 0 zniknięć, quality-mark — rożek na wszystkich 8 blokach, stream* (Claude
+i serwer zgodny z OpenAI) jak w 0.8.0 (pierwszy blok 1,47–1,54 s), typing — 2 zapytania,
+typing-nohold — 4 (rozrzut 2–4 także na kodzie 0.8.0). Okno (UiPreview, prawdziwy render WPF):
+162 obrazy, 0 uciętych napisów, 0 zasłoniętych kontrolek.
+
 ## [0.8.0] — 2026-10-16
 
 Wydanie „edytory i pierwsze linie od razu”: własne profile gier i skróty zmieniane w oknie,

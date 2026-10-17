@@ -1,6 +1,6 @@
 using GameTranslatorOverlay.Core.Ocr;
 
-internal sealed class LoggingOcr(IOcrProvider inner, Func<double> clock, JsonlWriter writer, bool probeAngle) : IOcrProvider
+internal sealed class LoggingOcr(IOcrProvider inner, Func<double> clock, JsonlWriter writer, bool probeAngle, bool lostRead = false) : IOcrProvider
 {
     private AngleAwareOcr? _probe;
     private int _calls;
@@ -30,7 +30,7 @@ internal sealed class LoggingOcr(IOcrProvider inner, Func<double> clock, JsonlWr
         }
         catch (Exception)
         {
-            writer.Write(new OcrDto(number, Json.R(start), Json.R(clock()), bitmap.Width, bitmap.Height, 0, true, null));
+            writer.Write(new OcrDto(number, Json.R(start), Json.R(clock()), bitmap.Width, bitmap.Height, 0, true, null, lostRead));
             throw;
         }
         var end = clock();
@@ -60,7 +60,7 @@ internal sealed class LoggingOcr(IOcrProvider inner, Func<double> clock, JsonlWr
         }
         else
         {
-            writer.Write(new OcrDto(number, Json.R(start), Json.R(end), bitmap.Width, bitmap.Height, lines, false, null));
+            writer.Write(new OcrDto(number, Json.R(start), Json.R(end), bitmap.Width, bitmap.Height, lines, false, null, lostRead));
         }
         return result;
     }

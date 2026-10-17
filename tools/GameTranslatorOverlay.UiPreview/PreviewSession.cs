@@ -478,12 +478,14 @@ internal static class PreviewSession
         report.Line($"Profil: po zmianie nazwy aktywny „{orchestrator.ActiveProfile?.Name}”, wybrany na liście: {Selected()}; status: {Text(window, "TxtStatus")}");
         await ShotAsync(window, report, "wariant-profil-po-zmianie-nazwy");
 
+        await RenderProfileTuningAsync(window, orchestrator, report, privateToggle);
+
         var session = new LiveTranslationSession(orchestrator, ocr, IntPtr.Zero, new LiveSessionOptions(), static _ => { }, logger);
         SetField(window, "_liveSession", session);
         Invoke(window, "UpdateLiveControls");
         InvokeLiveIndicator(window, "Active");
         await ShotAsync(window, report, "wariant-profil-live-blokada");
-        report.Line($"Profil: przy działającym live przyciski aktywne: zmień nazwę {Find<UIElement>(window, "BtnRenameProfile")?.IsEnabled}, usuń {Find<UIElement>(window, "BtnDeleteProfile")?.IsEnabled}");
+        report.Line($"Profil: przy działającym live przyciski aktywne: zmień nazwę {Find<UIElement>(window, "BtnRenameProfile")?.IsEnabled}, usuń {Find<UIElement>(window, "BtnDeleteProfile")?.IsEnabled}, dostosuj {Find<UIElement>(window, "BtnTuneProfile")?.IsEnabled}");
         SetField(window, "_liveSession", null);
         session.Dispose();
         Invoke(window, "UpdateLiveControls");
@@ -505,8 +507,11 @@ internal static class PreviewSession
             withBundled.Insert(1, bundledWindow);
             list.ItemsSource = withBundled;
             list.SelectedItem = bundledWindow;
-            await ShotAsync(window, report, "wariant-profil-z-zestawu");
-            report.Line($"Profil: okno procesu z zestawu → wybrany na liście: {Selected()}; usuń widoczne: {Find<UIElement>(window, "BtnDeleteProfile")?.IsVisible}");
+            await ShotAsync(window, report, "wariant-profil-z-zestawu", fullPage: true);
+            report.Line($"Profil: okno procesu z zestawu → wybrany na liście: {Selected()}; usuń widoczne: {Find<UIElement>(window, "BtnDeleteProfile")?.IsVisible}; " +
+                        $"„Utwórz własną kopię” widoczne {Find<UIElement>(window, "BtnCopyProfile")?.IsVisible}, aktywne {Find<UIElement>(window, "BtnCopyProfile")?.IsEnabled}; " +
+                        $"podsumowanie: {SummaryText(window)}");
+            await RenderProfileCopyAsync(window, orchestrator, paths, report, privateToggle, bundledWindow, profiles);
             list.ItemsSource = original;
             list.SelectedItem = game;
             await Waits.IdleAsync();
@@ -514,6 +519,163 @@ internal static class PreviewSession
         if (privateToggle is not null) privateToggle.IsChecked = true;
         await Waits.IdleAsync();
         report.Line(string.Empty);
+    }
+
+    private static void SetBox(FrameworkElement scope, string name, string text)
+    {
+        if (scope.FindName(name) is TextBox box) box.Text = text;
+    }
+
+    private static void Choose(FrameworkElement scope, string combo, Func<ProfileChoice, bool> pick)
+    {
+        if (scope.FindName(combo) is ComboBox box && box.Items.OfType<ProfileChoice>().LastOrDefault(pick) is { } choice) box.SelectedItem = choice;
+    }
+
+    private static string Chosen(FrameworkElement scope, string combo) =>
+        (scope.FindName(combo) as ComboBox)?.SelectedItem switch
+        {
+            ProfileChoice choice => choice.Label,
+            string text => text,
+            _ => "(brak)",
+        };
+
+    private static string Choices(FrameworkElement scope, string combo) =>
+        scope.FindName(combo) is ComboBox box ? string.Join(" | ", box.Items.OfType<ProfileChoice>().Select(static c => c.Label)) : "(brak)";
+
+    private static string Enabled(FrameworkElement scope, string name) => (scope.FindName(name) as UIElement)?.IsEnabled.ToString() ?? "(brak)";
+
+    private static string SummaryText(FrameworkElement scope) =>
+        scope.FindName("ListProfileSettings") is ItemsControl { ItemsSource: IEnumerable<GameTranslatorOverlay.Core.Profiles.ProfileSummaryRow> rows }
+            ? string.Join("; ", rows.Select(static r => $"{r.Label}: {r.Value}"))
+            : "(brak)";
+
+    private static async Task RenderProfileTuningAsync(
+        MainWindow window, TranslationOrchestrator orchestrator, PreviewReport report, ToggleButton? privateToggle)
+    {
+        if (orchestrator.ActiveProfile is not { } own || orchestrator.ProfileFile(own) is not { } file) return;
+        var noArgs = new object?[] { window, new RoutedEventArgs() };
+
+        Invoke(window, "OnTuneProfileClick", noArgs);
+        await ShotAsync(window, report, "wariant-profil-dostosuj", fullPage: true);
+        await NarrowShotAsync(window, report, "wariant-profil-dostosuj-min");
+        report.Line($"Profil: edytor otwarty {Find<UIElement>(window, "PnlProfileTune")?.IsVisible}; nazwa „{Text(window, "TxtTuneName")}”, " +
+                    $"powiększenie „{Chosen(window, "CmbTuneUpscale")}”, krój „{Chosen(window, "CmbTuneFont")}”, słownik „{Chosen(window, "CmbTuneGlossary")}”, " +
+                    $"tryb „{Chosen(window, "CmbTuneMode")}”, język „{Chosen(window, "CmbTuneLanguage")}”, analiz/s „{Text(window, "TxtTuneFps")}”, próg „{Text(window, "TxtTuneThreshold")}”");
+        report.Line($"Profil: opcje — słownik: {Choices(window, "CmbTuneGlossary")}; krój: {Choices(window, "CmbTuneFont")}; powiększenie: {Choices(window, "CmbTuneUpscale")}; tryb: {Choices(window, "CmbTuneMode")}");
+
+        var untouched = File.ReadAllText(file);
+        SetBox(window, "TxtTuneFps", "45");
+        Invoke(window, "OnSaveTuneClick", noArgs);
+        await ShotAsync(window, report, "wariant-profil-dostosuj-blad");
+        report.Line($"Profil: 45 analiz/s → „{Text(window, "TxtProfileEditError")}”; plik bez zmian: {File.ReadAllText(file) == untouched}");
+
+        SetBox(window, "TxtTuneFps", "10");
+        SetBox(window, "TxtTuneThreshold", "0,02");
+        SetBox(window, "TxtTuneMinHeight", "12");
+        Choose(window, "CmbTuneUpscale", static c => c.Value is 3.0);
+        Choose(window, "CmbTuneFont", static c => c.Value is "Cambria");
+        Choose(window, "CmbTuneMode", static c => c.Value is "live");
+        Choose(window, "CmbTuneGlossary", static c => c.Value is not null);
+        Invoke(window, "OnTuneAddTitleClick", noArgs);
+        Invoke(window, "OnTuneAddRegionClick", noArgs);
+        Invoke(window, "OnTuneAddRegionClick", noArgs);
+        var regions = Field(window, "_tuningRegions") as IList<IgnoreRegionRow>;
+        if (regions is { Count: > 0 })
+        {
+            regions[0].X = "0,425";
+            regions[0].Y = "0";
+            regions[0].Width = "0,15";
+            regions[0].Height = "0,08";
+        }
+        SetBox(window, "TxtTuneDescription", "Profil dostrojony w podglądzie: drobny tekst, szybsza reakcja trybu live i pominięty zegar u góry ekranu.");
+        await ShotAsync(window, report, "wariant-profil-dostosuj-wypelniony", fullPage: true);
+        await NarrowShotAsync(window, report, "wariant-profil-dostosuj-wypelniony-min");
+
+        Invoke(window, "OnSaveTuneClick", noArgs);
+        await ShotAsync(window, report, "wariant-profil-dostosuj-blad-obszaru");
+        report.Line($"Profil: pusty drugi obszar → „{Text(window, "TxtProfileEditError")}”; plik bez zmian: {File.ReadAllText(file) == untouched}");
+        if (regions is { Count: > 1 }) Invoke(window, "OnTuneRemoveRegionClick", new FrameworkElement { DataContext = regions[1] }, new RoutedEventArgs());
+
+        Invoke(window, "OnSaveTuneClick", noArgs);
+        await Waits.IdleAsync();
+        var saved = orchestrator.ActiveProfile;
+        report.Line($"Profil: po zapisie aktywny {saved?.Id} — OCR {saved?.Ocr?.Upscale}× min {saved?.Ocr?.MinTextHeight} px, live {saved?.ChangeDetection?.Fps}/s " +
+                    $"próg {saved?.ChangeDetection?.Threshold}, krój {saved?.Overlay?.FontFamily}, słownik {saved?.Glossary}, tryb {saved?.RecommendedMode}, " +
+                    $"tytuły {saved?.WindowTitles.Count}, obszary {saved?.Live?.IgnoreRegions?.Count}; edytor otwarty {Find<UIElement>(window, "PnlProfileTune")?.IsVisible}; " +
+                    $"błąd „{Text(window, "TxtProfileEditError")}”; status: {Text(window, "TxtStatus")}");
+        report.Line("Profil: plik po zapisie: " + File.ReadAllText(file).ReplaceLineEndings(" "));
+        report.Line($"Profil: podsumowanie po zapisie: {SummaryText(window)}");
+        await ShotAsync(window, report, "wariant-profil-po-dostosowaniu", fullPage: true);
+
+        if (privateToggle is null) return;
+        privateToggle.IsChecked = true;
+        await Waits.IdleAsync();
+        Invoke(window, "OnTuneProfileClick", noArgs);
+        await ShotAsync(window, report, "wariant-profil-dostosuj-prywatny", fullPage: true);
+        report.Line($"Profil (prywatny): aktywne — nazwa {Enabled(window, "TxtTuneName")}, opis {Enabled(window, "TxtTuneDescription")}, " +
+                    $"lista procesów {Enabled(window, "ListTuneProcesses")}, dodaj proces {Enabled(window, "BtnTuneAddProcess")}, dodaj tytuł {Enabled(window, "BtnTuneAddTitle")}, " +
+                    $"powiększenie {Enabled(window, "CmbTuneUpscale")}, zapisz {Enabled(window, "BtnSaveTune")}; komunikat „{Text(window, "TxtTunePrivate")}”");
+        var beforePrivate = File.ReadAllText(file);
+        var name = Text(window, "TxtTuneName");
+        SetBox(window, "TxtTuneName", "Nazwa, której nie wolno zapisać");
+        Invoke(window, "OnSaveTuneClick", noArgs);
+        report.Line($"Profil (prywatny): próba zmiany nazwy → „{Text(window, "TxtProfileEditError")}”; plik bez zmian: {File.ReadAllText(file) == beforePrivate}");
+        SetBox(window, "TxtTuneName", name);
+        Choose(window, "CmbTuneUpscale", static c => c.Value is 2.0);
+        Invoke(window, "OnSaveTuneClick", noArgs);
+        await Waits.IdleAsync();
+        report.Line($"Profil (prywatny): powiększenie 2× → w profilu {orchestrator.ActiveProfile?.Ocr?.Upscale}×, nazwa „{orchestrator.ActiveProfile?.Name}”; status „{Text(window, "TxtStatus")}”");
+        privateToggle.IsChecked = false;
+        await Waits.IdleAsync();
+    }
+
+    private static async Task RenderProfileCopyAsync(
+        MainWindow window, TranslationOrchestrator orchestrator, AppPaths paths, PreviewReport report, ToggleButton? privateToggle,
+        TargetWindow bundledWindow, ComboBox profiles)
+    {
+        var noArgs = new object?[] { window, new RoutedEventArgs() };
+        if (privateToggle is not null)
+        {
+            privateToggle.IsChecked = true;
+            await Waits.IdleAsync();
+            await ShotAsync(window, report, "wariant-profil-z-zestawu-prywatny");
+            report.Line($"Profil (prywatny): „Utwórz własną kopię” aktywne {Enabled(window, "BtnCopyProfile")}; komunikat „{Text(window, "TxtProfileLiveLock")}”");
+            Invoke(window, "OnCopyProfileClick", noArgs);
+            report.Line($"Profil (prywatny): kopia po kliknięciu — pliki: {ProfileFiles(paths)}");
+            privateToggle.IsChecked = false;
+            await Waits.IdleAsync();
+        }
+
+        Invoke(window, "OnCopyProfileClick", noArgs);
+        await Waits.IdleAsync();
+        var copy = orchestrator.ActiveProfile;
+        var copyFile = orchestrator.ProfileFile(copy);
+        report.Line($"Profil: kopia {copy?.Id} „{copy?.Name}”, korpus {(copy?.Corpus is null ? "brak" : "JEST (błąd)")}, krój {copy?.Overlay?.FontFamily}, " +
+                    $"reguły kroju {copy?.Overlay?.FontRules?.Count ?? 0}, obszary {copy?.Live?.IgnoreRegions?.Count ?? 0}, procesy {string.Join(", ", copy?.ProcessNames ?? [])}; " +
+                    $"edytor otwarty {Find<UIElement>(window, "PnlProfileTune")?.IsVisible}; status „{Text(window, "TxtStatus")}”; pliki: {ProfileFiles(paths)}");
+        if (copyFile is not null) report.Line("Profil: plik kopii: " + File.ReadAllText(copyFile).ReplaceLineEndings(" "));
+        await ShotAsync(window, report, "wariant-profil-kopia", fullPage: true);
+        await NarrowShotAsync(window, report, "wariant-profil-kopia-min");
+
+        Invoke(window, "OnCancelProfileEditClick", noArgs);
+        await ShotAsync(window, report, "wariant-profil-kopia-karta", fullPage: true);
+        report.Line($"Profil: karta okna po kopii → „{Text(window, "TxtMatchedProfileName")}”, chip „własny” {Find<UIElement>(window, "ChipProfileOwn")?.IsVisible}");
+
+        if (profiles.Items.Count > 0)
+        {
+            profiles.SelectedIndex = 0;
+            await Waits.IdleAsync();
+            Invoke(window, "ApplyProfileAutoSelection", bundledWindow);
+            await Waits.IdleAsync();
+            report.Line($"Profil: autodetekcja przy dwóch pasujących (oryginał z zestawu i kopia) → {profiles.SelectedItem as string}; aktywny {orchestrator.ActiveProfile?.Id}");
+        }
+
+        if (orchestrator.Profiles.FirstOrDefault(p => p.Id == copy?.Id) is { } current && orchestrator.ProfileFile(current) is { } currentFile)
+        {
+            Invoke(window, "DeleteUserProfile", current, currentFile);
+            await Waits.IdleAsync();
+        }
+        report.Line($"Profil: po usunięciu kopii pliki: {ProfileFiles(paths)}; aktywny {orchestrator.ActiveProfile?.Id ?? "(brak)"}");
     }
 
     private static void Press(UIElement target, Key key)

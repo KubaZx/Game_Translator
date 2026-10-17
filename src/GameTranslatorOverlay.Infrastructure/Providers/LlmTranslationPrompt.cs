@@ -153,13 +153,16 @@ public static partial class LlmTranslationPrompt
         if (string.IsNullOrWhiteSpace(content) || expectedCount <= 0) return null;
 
         // Źle odczytane tłumaczenie trafiłoby na stałe do cache, więc przyjmujemy tylko
-        // jednoznaczne formy: cała odpowiedź jako JSON, blok ```json albo obiekt z kluczem
-        // „translations” wycięty z tekstu. Nawias […] w zwykłym zdaniu nie jest odpowiedzią.
+        // jednoznaczne formy: cała odpowiedź jako JSON, blok ```json, obiekt z kluczem
+        // „translations” wycięty z tekstu albo — gdy model zepsuł samo domknięcie (zbędny
+        // albo zamieniony nawias) — pełne elementy tablicy „translations” w dokładnej liczbie,
+        // po których są już tylko nawiasy. Nawias […] w zwykłym zdaniu nie jest odpowiedzią.
         var cleaned = StripReasoning(content).Trim();
         var fenced = CodeFenceRegex().Match(cleaned) is { Success: true } fence ? fence.Groups[1].Value : null;
         var parsed = TryParseJson(cleaned, allowBareArray: true)
             ?? TryParseJson(fenced, allowBareArray: true)
-            ?? TryParseJson(ExtractObjectSpan(cleaned), allowBareArray: false);
+            ?? TryParseJson(ExtractObjectSpan(cleaned), allowBareArray: false)
+            ?? TryParseBrokenClosing(cleaned, expectedCount);
 
         if (parsed is { Count: var count } list && count == expectedCount)
         {
@@ -237,6 +240,19 @@ public static partial class LlmTranslationPrompt
         }
         array = default;
         return false;
+    }
+
+    private static List<string>? TryParseBrokenClosing(string text, int expectedCount)
+    {
+        var found = new List<string>(expectedCount);
+        var parser = new LlmTranslationStreamParser(expectedCount, (_, value) => found.Add(value));
+        for (var i = 0; i < text.Length && !parser.IsStopped; i++)
+        {
+            parser.Append(text[i].ToString());
+            if (found.Count == expectedCount)
+                return text.AsSpan(i + 1).ContainsAnyExcept("]} \t\r\n") ? null : found;
+        }
+        return null;
     }
 
     private static string? ExtractObjectSpan(string text)

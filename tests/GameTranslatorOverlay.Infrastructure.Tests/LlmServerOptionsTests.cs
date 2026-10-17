@@ -332,10 +332,16 @@ internal sealed class CapturingLogger<T> : ILogger<T>
 {
     private readonly Lock _gate = new();
     private readonly List<string> _messages = [];
+    private readonly List<LogLevel> _levels = [];
 
     public IReadOnlyList<string> Messages
     {
         get { lock (_gate) return _messages.ToList(); }
+    }
+
+    public IReadOnlyList<LogLevel> Levels
+    {
+        get { lock (_gate) return _levels.ToList(); }
     }
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -344,6 +350,10 @@ internal sealed class CapturingLogger<T> : ILogger<T>
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
-        lock (_gate) _messages.Add(formatter(state, exception));
+        lock (_gate)
+        {
+            _messages.Add(formatter(state, exception));
+            _levels.Add(logLevel);
+        }
     }
 }

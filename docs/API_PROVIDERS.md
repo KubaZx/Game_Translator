@@ -356,7 +356,13 @@ lokalne Ollama (`http://localhost:11434/v1`) i LM Studio (`http://localhost:1234
   ponownie dla tego adresu”.
 - Odpowiedź modelu jest przyjmowana tylko w jednoznacznej formie (cała odpowiedź, blok
   ```json albo obiekt z kluczem `translations`); echo wejścia (`texts`), elementy niebędące
-  tekstem i puste tłumaczenia unieważniają odpowiedź, zanim trafi do cache.
+  tekstem i puste tłumaczenia unieważniają odpowiedź, zanim trafi do cache. Od 0.9.0 przyjmowana
+  jest też odpowiedź z zepsutym samym domknięciem (zbędny albo zamieniony nawias — Bielik
+  w LM Studio: `{"translations": ["…"]}}`, `…"}]`): pełne elementy tablicy `translations`
+  w dokładnej liczbie, bez pustych, a po ostatnim elemencie wyłącznie nawiasy (parser strumienia).
+- LM Studio odrzuca `response_format: {"type": "json_object"}` (obsługuje tylko `json_schema`) —
+  dla niego nie ustawiaj `responseFormat`. Pod `localhost` przy serwerze słuchającym tylko na IPv4
+  pierwsze połączenie kosztuje ok. 2 s (Windows łączy najpierw przez `[::1]`).
 - Bez strumienia zapytanie ma tylko `model`, `messages` i `stream: false` — część modeli
   i serwerów odrzuca dodatkowe parametry; format wymusza prompt i tolerancyjny parser.
 - **Strumień** (tryb live, `streamLlmResponses`): `stream: true` i `stream_options.include_usage`,
@@ -367,7 +373,9 @@ lokalne Ollama (`http://localhost:11434/v1`) i LM Studio (`http://localhost:1234
   422 itp.; nie przy złym kluczu, limicie, nieznanym modelu ani złym adresie — 404), aplikacja
   wysyła zwykłe zapytanie; jeśli ono się uda, host jest zapamiętany jako „bez
   strumienia” do końca działania. Limit czasu obejmuje też czytanie strumienia i treści błędu.
-  Test połączenia idzie zawsze bez strumienia.
+  Test połączenia idzie zawsze bez strumienia. Sprawdzone na prawdziwym serwerze lokalnym
+  (LM Studio, Bielik 11B, SceneReplay `openai-local`): SSE z `usage` i `[DONE]`, pierwsza linia
+  po ok. 1 s wobec 1,7 s bez strumienia.
 - **Opcje serwera** (ADR-013, dopisek 2026-10-06): ustawienie `llmServerOptions`
   (`host`, `thinking`, `reasoningEffort`, `maxTokens`, `responseFormat`) dodaje do zapytania
   pola `thinking: {"type": …}`, `reasoning_effort`, `max_tokens`, `response_format: {"type": …}`

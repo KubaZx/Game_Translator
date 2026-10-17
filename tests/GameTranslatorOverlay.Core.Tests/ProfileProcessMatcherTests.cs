@@ -59,6 +59,40 @@ public class ProfileProcessMatcherTests
     }
 
     [Fact]
+    public void Przy_dwoch_pasujacych_profilach_wygrywa_preferowany_wlasny()
+    {
+        var bundled = Profile("latarnia", "Latarnia.exe");
+        var copy = Profile("latarnia-wlasny", "latarnia");
+        var other = Profile("inna", "Inna.exe");
+        GameProfile[] all = [bundled, other, copy];
+        bool Own(GameProfile p) => ReferenceEquals(p, copy);
+
+        Assert.Same(copy, ProfileProcessMatcher.FindByProcess(all, "LATARNIA.EXE", Own));
+        Assert.Same(bundled, ProfileProcessMatcher.FindByProcess(all, "LATARNIA.EXE"));
+        Assert.Same(other, ProfileProcessMatcher.FindByProcess(all, "Inna.exe", Own));
+        Assert.Null(ProfileProcessMatcher.FindByProcess(all, "notepad.exe", Own));
+        Assert.Same(bundled, ProfileProcessMatcher.FindByProcess([bundled, other], "Latarnia.exe", Own));
+    }
+
+    [Fact]
+    public void Autodetekcja_przy_dwoch_pasujacych_wybiera_wlasny_ale_nie_zmienia_swiadomego_wyboru()
+    {
+        var bundled = Profile("latarnia", "Latarnia.exe");
+        var copy = Profile("latarnia-wlasny", "Latarnia.exe");
+        var other = Profile("inna", "Inna.exe");
+        var generic = Profile("generic");
+        GameProfile[] all = [generic, bundled, other, copy];
+        bool Own(GameProfile p) => ReferenceEquals(p, copy);
+
+        Assert.Same(copy, ProfileProcessMatcher.AutoSelect(all, null, "Latarnia.exe", Own));
+        Assert.Same(copy, ProfileProcessMatcher.AutoSelect(all, other, "Latarnia.exe", Own));
+        Assert.Null(ProfileProcessMatcher.AutoSelect(all, bundled, "Latarnia.exe", Own));
+        Assert.Null(ProfileProcessMatcher.AutoSelect(all, copy, "Latarnia.exe", Own));
+        Assert.Null(ProfileProcessMatcher.AutoSelect(all, generic, "Latarnia.exe", Own));
+        Assert.Same(bundled, ProfileProcessMatcher.AutoSelect(all, null, "Latarnia.exe"));
+    }
+
+    [Fact]
     public void Wybor_okna_innej_gry_przelacza_profil_gry_ale_nie_ogolny()
     {
         var first = Profile("gra-pierwsza", "Pierwsza.exe");

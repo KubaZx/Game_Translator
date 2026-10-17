@@ -1,9 +1,13 @@
 using GameTranslatorOverlay.Core.Text;
 using GameTranslatorOverlay.Core.Vision;
+using GameTranslatorOverlay.MotionLab.Series;
 
 internal sealed record TruthRow(Box Box, string Norm, string BlockKeyHash, string? Identity, bool Live);
 
-internal sealed record TruthObs(int Frame, int Step, Box Box, string Norm, string BlockKeyHash, string? Identity, bool Live, bool Bridged);
+internal sealed record TruthObs(int Frame, int Step, Box Box, string Norm, string BlockKeyHash, string? Identity, bool Live, bool Bridged, string? SmoothedFrom = null)
+{
+    public bool Smoothed => SmoothedFrom is not null;
+}
 
 internal sealed class TruthTrack
 {
@@ -91,12 +95,13 @@ internal static class TextTools
 internal static class TrackBuilder
 {
     private const int LongGap = 15;
+    public const int MaxVariantRun = 15;
 
     public static IReadOnlyList<TruthRow> RowsOf(TruthFrameDto frame) =>
         frame.Blocks.SelectMany(static block => (block.Rows.Count > 0 ? block.Rows : [new TruthRowDto(block.Text, block.Norm, block.Box)])
             .Select(row => new TruthRow(row.Box, row.Norm, block.KeyHash, block.Identity, block.Live))).ToList();
 
-    public static List<TruthTrack> Build(IReadOnlyList<TruthFrameDto> frames, int frameWidth, int maxGap)
+    public static List<TruthTrack> Build(IReadOnlyList<TruthFrameDto> frames, int frameWidth, int maxGap, bool smoothStatic = false)
     {
         var tracks = new List<TruthTrack>();
         var active = new List<(TruthTrack Track, int LastStep)>();
@@ -155,8 +160,28 @@ internal static class TrackBuilder
         {
             Bridge(track, frames);
             Summarize(track);
+            if (smoothStatic) SmoothVariants(track);
         }
         return tracks;
+    }
+
+    private static void SmoothVariants(TruthTrack track)
+    {
+        if (!track.Static || track.Typing) return;
+        var consensus = track.Obs.Where(o => !o.Bridged && o.Norm == track.Norm).ToList();
+        if (consensus.Count < 2) return;
+        var keyHash = consensus.GroupBy(static o => o.BlockKeyHash).OrderByDescending(static g => g.Count()).First().Key;
+        var reference = consensus.First(o => o.BlockKeyHash == keyHash);
+        var runs = SeriesMath.IsolatedRuns(track.Obs.Count, k => track.Obs[k].Norm == track.Norm && track.Obs[k].BlockKeyHash == keyHash, MaxVariantRun);
+        foreach (var (start, end) in runs)
+        {
+            for (var j = start; j < end; j++)
+                track.Obs[j] = track.Obs[j] with
+                {
+                    Norm = track.Norm, BlockKeyHash = keyHash, Identity = reference.Identity, Live = reference.Live,
+                    SmoothedFrom = track.Obs[j].Norm,
+                };
+        }
     }
 
     private static bool IsGrowth(string previous, string current) =>

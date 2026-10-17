@@ -122,17 +122,125 @@ public class TranslationPipelineStreamingTests
     }
 
     [Fact]
-    public async Task Uniewaznienie_wczesnych_wynikow_dociera_do_odbiorcy()
+    public async Task Uniewaznienie_calego_wywolania_dostawcy_zdejmuje_wczesne_linie_kazdego_jego_tekstu()
     {
         var provider = new StreamingProvider(Polish) { ResetAfterStream = true };
         var (pipeline, _, _) = Create(provider);
         var partials = new Partials();
 
-        var outcomes = await pipeline.TranslateAsync(["Open the lantern door", "Light the beacon"], "en", "pl", knownLocal: null, partials.Add);
+        var outcomes = await pipeline.TranslateAsync(["Open the lantern door", "Light the beacon", "Open the lantern door"], "en", "pl",
+            knownLocal: null, partials.Add);
 
-        Assert.Equal(PartialResults.Reset, partials.Items[^1].Index);
-        Assert.Equal([0, 1], partials.Items.SkipLast(1).Select(static p => p.Index).Order());
-        Assert.Equal(["Otwórz drzwi latarni", "PL:Light the beacon"], outcomes.Select(static o => o.TranslatedText));
+        Assert.Equal([0, 1, 2], Reported(partials).Order());
+        Assert.Equal([0, 1, 2], Withdrawn(partials).Order());
+        Assert.All(partials.Items.Where(static p => p.Index < 0), static p => Assert.Null(p.Outcome.TranslatedText));
+        Assert.Equal(["Otwórz drzwi latarni", "PL:Light the beacon", "Otwórz drzwi latarni"], outcomes.Select(static o => o.TranslatedText));
+    }
+
+    [Theory]
+    [InlineData(false, 25)]
+    [InlineData(true, 24)]
+    public async Task Zla_liczba_wynikow_w_drugiej_partii_zdejmuje_tylko_jej_wczesne_linie(bool planned, int firstPartitionInputs)
+    {
+        var provider = new PartitionedProvider(partitionSize: 25, wrongPartition: 1);
+        var (pipeline, _, _) = Create(provider, new TranslationPipelineOptions { SplitParagraphs = planned });
+        var partials = new Partials();
+        var texts = LanternFrame(planned);
+
+        var outcomes = await pipeline.TranslateAsync(texts, "en", "pl", knownLocal: null, partials.Add);
+
+        Assert.Equal(30, Assert.Single(provider.Requests).Count);
+        var first = Enumerable.Range(0, firstPartitionInputs).ToArray();
+        var second = Enumerable.Range(firstPartitionInputs, texts.Length - firstPartitionInputs).ToArray();
+        Assert.Equal(second, Withdrawn(partials).Order());
+        Assert.Equal(first, Reported(partials).Where(i => i < firstPartitionInputs).Order());
+        Assert.Empty(ReportedAfterWithdrawal(partials));
+        Assert.All(outcomes, static o => Assert.Equal(TranslationOrigin.Provider, o.Origin));
+        Assert.All(outcomes, static o => Assert.StartsWith("PL:", o.TranslatedText));
+    }
+
+    [Theory]
+    [InlineData(false, 25)]
+    [InlineData(true, 24)]
+    public async Task Po_zdjeciu_wczesnych_linii_jednej_partii_kolejna_partia_dalej_je_publikuje(bool planned, int firstPartitionInputs)
+    {
+        var provider = new PartitionedProvider(partitionSize: 25, wrongPartition: 0);
+        var (pipeline, _, _) = Create(provider, new TranslationPipelineOptions { SplitParagraphs = planned });
+        var partials = new Partials();
+        var texts = LanternFrame(planned);
+
+        var outcomes = await pipeline.TranslateAsync(texts, "en", "pl", knownLocal: null, partials.Add);
+
+        var items = partials.Items;
+        var lastWithdrawal = items.Select(static (p, k) => (p.Index, k)).Last(static p => p.Index < 0).k;
+        Assert.Equal(Enumerable.Range(0, firstPartitionInputs), Withdrawn(partials).Order());
+        Assert.Equal(Enumerable.Range(firstPartitionInputs, texts.Length - firstPartitionInputs),
+            items.Skip(lastWithdrawal + 1).Select(static p => p.Index).Order());
+        Assert.All(items.Skip(lastWithdrawal + 1), p => Assert.Equal(outcomes[p.Index].TranslatedText, p.Outcome.TranslatedText));
+        Assert.Empty(ReportedAfterWithdrawal(partials));
+    }
+
+    private sealed class PartitionedProvider(int partitionSize, int wrongPartition) : IStreamingTranslationProvider
+    {
+        public List<IReadOnlyList<string>> Requests { get; } = [];
+
+        public string Name => "Partie";
+        public bool RequiresApiKey => false;
+
+        public Task<IReadOnlyList<string>> TranslateBatchAsync(
+            IReadOnlyList<string> texts, string sourceLanguage, string targetLanguage, CancellationToken cancellationToken = default) =>
+            TranslateWithContextAsync(texts, sourceLanguage, targetLanguage, TranslationContext.Empty, cancellationToken);
+
+        public Task<IReadOnlyList<string>> TranslateWithContextAsync(
+            IReadOnlyList<string> texts, string sourceLanguage, string targetLanguage, TranslationContext context,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>(texts.Select(static t => "PL:" + t).ToList());
+
+        public Task<IReadOnlyList<string>> TranslateStreamingAsync(
+            IReadOnlyList<string> texts, string sourceLanguage, string targetLanguage, TranslationContext context,
+            Action<int, string> onTranslation, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(texts.ToList());
+            for (var (start, partition) = (0, 0); start < texts.Count; start += partitionSize, partition++)
+            {
+                var end = Math.Min(texts.Count, start + partitionSize);
+                var wrong = partition == wrongPartition;
+                for (var i = start; i < (wrong ? start + 1 : end); i++) onTranslation(i, "PL:" + texts[i]);
+                if (!wrong) continue;
+                for (var i = start; i < end; i++) onTranslation(PartialResults.Withdraw(i), string.Empty);
+            }
+            return TranslateWithContextAsync(texts, sourceLanguage, targetLanguage, context, cancellationToken);
+        }
+
+        public Task<ProviderStatus> TestConnectionAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ProviderStatus(true, "ok"));
+    }
+
+    private static string[] LanternFrame(bool planned)
+    {
+        var texts = Enumerable.Range(0, planned ? 28 : 30).Select(static i => $"Lantern note {i} is here.").ToArray();
+        if (!planned) return texts;
+        texts[1] = "Open the gate\nClose the gate";
+        texts[27] = "Light the beacon\nDouse the beacon";
+        return texts;
+    }
+
+    private static IEnumerable<int> Reported(Partials partials) =>
+        partials.Items.Where(static p => p.Index >= 0).Select(static p => p.Index);
+
+    private static IEnumerable<int> Withdrawn(Partials partials) =>
+        partials.Items.Select(static p => PartialResults.IsWithdrawal(p.Index, out var index) ? index : -1).Where(static i => i >= 0);
+
+    private static List<int> ReportedAfterWithdrawal(Partials partials)
+    {
+        var withdrawn = new HashSet<int>();
+        var late = new List<int>();
+        foreach (var (index, _) in partials.Items)
+        {
+            if (PartialResults.IsWithdrawal(index, out var input)) withdrawn.Add(input);
+            else if (withdrawn.Contains(index)) late.Add(index);
+        }
+        return late;
     }
 
     [Fact]

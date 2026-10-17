@@ -18,6 +18,7 @@ public static class OverlayFonts
 
     private static readonly string[] BundledFamilies = ["Lexend Deca", "Zilla Slab"];
     private static readonly Lock Gate = new();
+    private static readonly Lock WeightsBuild = new();
     private static readonly Dictionary<string, FontFamily> Families = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, IReadOnlyList<Typeface>> Weights = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<(Typeface, string), InkMetrics> Metrics = [];
@@ -65,6 +66,68 @@ public static class OverlayFonts
     public static void WarmUpProfile(AppSettings settings)
     {
         foreach (var family in ProfileFamilies(settings)) WarmUp(family);
+    }
+
+    private static readonly Lazy<System.Windows.Threading.Dispatcher> Worker = new(StartWorker, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static System.Windows.Threading.Dispatcher StartWorker()
+    {
+        _ = System.Windows.Application.Current;
+        var ready = new TaskCompletionSource<System.Windows.Threading.Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            ready.SetResult(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+            System.Windows.Threading.Dispatcher.Run();
+        })
+        {
+            IsBackground = true,
+            Name = "GTO overlay fonts",
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return ready.Task.GetAwaiter().GetResult();
+    }
+
+    public static Task WarmUpProfileInBackground(AppSettings settings)
+    {
+        var families = ProfileFamilies(settings);
+        return Worker.Value.InvokeAsync(() =>
+        {
+            foreach (var family in families) WarmUp(family);
+        }).Task;
+    }
+
+    public static bool IsMeasured(string familyName, string text)
+    {
+        lock (Gate)
+        {
+            return Weights.TryGetValue(familyName, out var weights) && weights.All(t => Metrics.ContainsKey((t, text)));
+        }
+    }
+
+    public static bool PrepareMeasurements(IReadOnlyCollection<(string Family, string Text)> requests, TimeSpan wait)
+    {
+        var missing = requests
+            .Where(static r => r.Text.Length > 0)
+            .Distinct()
+            .Where(static r => !IsMeasured(r.Family, r.Text))
+            .ToList();
+        if (missing.Count == 0) return true;
+        var work = Worker.Value.InvokeAsync(() =>
+        {
+            foreach (var (family, text) in missing)
+            {
+                foreach (var typeface in AvailableWeights(family)) Measure(typeface, text);
+            }
+        }).Task;
+        try
+        {
+            return work.Wait(wait);
+        }
+        catch (AggregateException)
+        {
+            return false;
+        }
     }
 
     public static bool IsAvailable(string name)
@@ -125,6 +188,18 @@ public static class OverlayFonts
         {
             if (Weights.TryGetValue(name, out var cached)) return cached;
         }
+        lock (WeightsBuild)
+        {
+            lock (Gate)
+            {
+                if (Weights.TryGetValue(name, out var built)) return built;
+            }
+            return BuildWeights(name);
+        }
+    }
+
+    private static IReadOnlyList<Typeface> BuildWeights(string name)
+    {
         var family = Family(name);
         var weights = family.FamilyTypefaces
             .Where(static t => t.Style == FontStyles.Normal && t.Stretch == FontStretches.Normal)
@@ -146,7 +221,15 @@ public static class OverlayFonts
         }
         if (result.Count == 0)
         {
-            if (!name.Equals(DefaultFamily, StringComparison.OrdinalIgnoreCase)) return AvailableWeights(DefaultFamily);
+            if (!name.Equals(DefaultFamily, StringComparison.OrdinalIgnoreCase))
+            {
+                var fallback = AvailableWeights(DefaultFamily);
+                lock (Gate)
+                {
+                    Weights[name] = fallback;
+                }
+                return fallback;
+            }
             result.Add(Regular(name));
         }
         lock (Gate)

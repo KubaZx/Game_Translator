@@ -46,6 +46,24 @@ public sealed class LiveSubtitleContent
         return Render();
     }
 
+    public string? Correct(IReadOnlyDictionary<string, string> corrected, IEnumerable<string> flaggedKeys)
+    {
+        var changed = false;
+        for (var i = 0; i < _texts.Count; i++)
+        {
+            if (!corrected.TryGetValue(_texts[i].Key, out var text) || string.Equals(text, _texts[i].Value, StringComparison.Ordinal)) continue;
+            _texts[i] = new KeyValuePair<string, string>(_texts[i].Key, text);
+            changed = true;
+        }
+        var flagged = flaggedKeys.ToHashSet(StringComparer.Ordinal);
+        foreach (var key in corrected.Keys)
+        {
+            if (!Contains(key)) continue;
+            changed |= flagged.Contains(key) ? _flagged.Add(key) : _flagged.Remove(key);
+        }
+        return changed ? Render() : null;
+    }
+
     public void Clear()
     {
         _texts.Clear();

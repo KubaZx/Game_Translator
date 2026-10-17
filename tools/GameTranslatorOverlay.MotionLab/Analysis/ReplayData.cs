@@ -11,7 +11,8 @@ internal sealed class ReplayData
         Summary = summary;
         Shown = shown;
         Updates = updates;
-        Ocr = ocr;
+        Ocr = ocr.Where(static o => !o.LostRead).ToList();
+        LostReadOcr = ocr.Where(static o => o.LostRead).ToList();
         Layers = layers;
         Patches = patches;
     }
@@ -22,6 +23,8 @@ internal sealed class ReplayData
     public IReadOnlyList<ShownDto> Shown { get; }
     public IReadOnlyList<UpdateDto> Updates { get; }
     public IReadOnlyList<OcrDto> Ocr { get; }
+
+    public IReadOnlyList<OcrDto> LostReadOcr { get; }
     public IReadOnlyDictionary<int, LayerDto> Layers { get; }
     public IReadOnlyDictionary<int, PatchDto> Patches { get; }
 

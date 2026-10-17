@@ -29,10 +29,14 @@ public class DeepLGlossaryBackgroundTests
     private sealed class SlowDeepL
     {
         private readonly TaskCompletionSource _listGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _createGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _listCalls;
+        private int _createCalls;
 
         public bool BlockList { get; set; }
         public bool BlockOnlyFirstList { get; set; }
+        public bool BlockFirstCreate { get; set; }
+        public string ExistingGlossaries { get; set; } = "[]";
         public int ListStatus { get; set; } = 200;
         public TimeSpan ListDelay { get; set; } = TimeSpan.Zero;
         public FakeHttpHandler Handler { get; }
@@ -60,10 +64,12 @@ public class DeepLGlossaryBackgroundTests
                     failure.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
                     return failure;
                 }
-                return FakeHttpHandler.Json("{\"glossaries\":[]}");
+                return FakeHttpHandler.Json("{\"glossaries\":" + ExistingGlossaries + "}");
             }
             if (request.Method == HttpMethod.Post && path == "/v2/glossaries")
             {
+                if (BlockFirstCreate && Interlocked.Increment(ref _createCalls) == 1)
+                    await _createGate.Task.WaitAsync(request.CancellationToken);
                 using var body = JsonDocument.Parse(request.Body);
                 return FakeHttpHandler.Json(JsonSerializer.Serialize(new
                 {
@@ -74,6 +80,8 @@ public class DeepLGlossaryBackgroundTests
                     target_lang = "pl",
                 }), System.Net.HttpStatusCode.Created);
             }
+            if (request.Method == HttpMethod.Delete && path.StartsWith("/v2/glossaries/", StringComparison.Ordinal))
+                return FakeHttpHandler.Status(204);
             if (path == "/v2/translate")
             {
                 using var body = JsonDocument.Parse(request.Body);
@@ -95,8 +103,95 @@ public class DeepLGlossaryBackgroundTests
         }
     }
 
-    private static DeepLTranslationProvider Provider(SlowDeepL fake, DeepLOptions options) =>
-        new(new HttpClient(fake.Handler), static () => "key:fx", options);
+    private static DeepLTranslationProvider Provider(SlowDeepL fake, DeepLOptions options,
+        Microsoft.Extensions.Logging.ILogger<DeepLTranslationProvider>? logger = null) =>
+        new(new HttpClient(fake.Handler), static () => "key:fx", options, logger);
+
+    private static IReadOnlyList<CapturedRequest> Deletes(SlowDeepL fake) =>
+        fake.Handler.Requests.Where(static r => r.Method == HttpMethod.Delete).ToList();
+
+    [Fact]
+    public async Task Przelaczenie_na_cache_only_przerywa_wiszaca_liste_od_razu_bez_bledow_w_logu()
+    {
+        var fake = new SlowDeepL { BlockList = true, BlockOnlyFirstList = true };
+        var options = new DeepLOptions { GlossaryWaitBudget = TimeSpan.FromMilliseconds(50) };
+        var logger = new CapturingLogger<DeepLTranslationProvider>();
+        var provider = Provider(fake, options, logger);
+        provider.CancelGlossaryPreparation();
+
+        await provider.TranslateWithContextAsync(["Find a Waystone"], "en", "pl", WithTerms(Terms));
+        await WaitForListRequests(fake, 1);
+        var list = fake.Requests(HttpMethod.Get, "/v2/glossaries")[0];
+        Assert.False(list.CancellationToken.IsCancellationRequested);
+
+        var stopwatch = Stopwatch.StartNew();
+        provider.CancelGlossaryPreparation();
+        await WaitUntil(() => list.CancellationToken.IsCancellationRequested);
+        stopwatch.Stop();
+
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Przerwanie trwało {stopwatch.Elapsed}.");
+        await Task.Delay(100);
+        Assert.Empty(fake.Requests(HttpMethod.Post, "/v2/glossaries"));
+        Assert.DoesNotContain(logger.Levels, static level => level >= Microsoft.Extensions.Logging.LogLevel.Warning);
+
+        options.GlossaryWaitBudget = TimeSpan.FromSeconds(10);
+        await provider.TranslateWithContextAsync(["Energy Shield"], "en", "pl", WithTerms(Terms));
+        Assert.Equal(2, fake.Requests(HttpMethod.Get, "/v2/glossaries").Count);
+        Assert.Single(fake.Requests(HttpMethod.Post, "/v2/glossaries"));
+        Assert.Equal("new-id", SlowDeepL.GlossaryIdOf(fake.Requests(HttpMethod.Post, "/v2/translate")[^1]));
+    }
+
+    [Fact]
+    public async Task Przerwanie_w_trakcie_tworzenia_nie_zostawia_gotowego_glosariusza_ani_sprzatania_w_tle()
+    {
+        var fake = new SlowDeepL
+        {
+            BlockFirstCreate = true,
+            ExistingGlossaries = "[{\"glossary_id\":\"old-id\",\"name\":\"GameTranslatorOverlay 0000000000000000\",\"source_lang\":\"en\",\"target_lang\":\"pl\",\"ready\":true}]",
+        };
+        var options = new DeepLOptions { GlossaryWaitBudget = TimeSpan.FromMilliseconds(50) };
+        var logger = new CapturingLogger<DeepLTranslationProvider>();
+        var provider = Provider(fake, options, logger);
+
+        await provider.TranslateWithContextAsync(["Find a Waystone"], "en", "pl", WithTerms(Terms));
+        await WaitUntil(() => fake.Requests(HttpMethod.Post, "/v2/glossaries").Count == 1);
+        var create = fake.Requests(HttpMethod.Post, "/v2/glossaries")[0];
+
+        provider.CancelGlossaryPreparation();
+        await WaitUntil(() => create.CancellationToken.IsCancellationRequested);
+        await Task.Delay(150);
+
+        Assert.Empty(Deletes(fake));
+        Assert.DoesNotContain(logger.Levels, static level => level >= Microsoft.Extensions.Logging.LogLevel.Warning);
+
+        options.GlossaryWaitBudget = TimeSpan.FromSeconds(10);
+        await provider.TranslateWithContextAsync(["Energy Shield"], "en", "pl", WithTerms(Terms));
+
+        Assert.Equal(2, fake.Requests(HttpMethod.Get, "/v2/glossaries").Count);
+        Assert.Equal(2, fake.Requests(HttpMethod.Post, "/v2/glossaries").Count);
+        Assert.Equal("new-id", SlowDeepL.GlossaryIdOf(fake.Requests(HttpMethod.Post, "/v2/translate")[^1]));
+        await WaitUntil(() => Deletes(fake).Count == 1);
+        Assert.EndsWith("/v2/glossaries/old-id", Assert.Single(Deletes(fake)).Url);
+    }
+
+    [Fact]
+    public async Task Spoznione_zapytanie_po_wylaczeniu_glosariusza_nie_zaczyna_nowego_przygotowania()
+    {
+        var fake = new SlowDeepL();
+        var options = new DeepLOptions { UseGlossary = false };
+        var manager = new DeepLGlossaryManager(new HttpClient(fake.Handler), options, new CapturingLogger<DeepLTranslationProvider>());
+
+        var disabled = await manager.GetGlossaryIdAsync(Terms, "key:fx", "https://api-free.deepl.com", "en", "pl", CancellationToken.None);
+        options.UseGlossary = true;
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var aborted = await manager.GetGlossaryIdAsync(Terms, "key:fx", "https://api-free.deepl.com", "en", "pl", cancelled.Token);
+        await Task.Delay(100);
+
+        Assert.Null(disabled);
+        Assert.Null(aborted);
+        Assert.Empty(fake.Handler.Requests);
+    }
 
     /// <summary>
     /// Czeka, aż zapytanie o listę dotrze do atrapy. Bez tego test zależałby od tego, czy

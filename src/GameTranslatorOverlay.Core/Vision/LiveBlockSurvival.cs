@@ -27,6 +27,8 @@ public sealed record LiveOverlayBlock(
     public int ProbeBackgroundRgb => Probe?.BackgroundRgb ?? BackgroundRgb;
 
     public bool Provisional { get; init; }
+
+    public string? CacheKey { get; init; }
 }
 
 /// <summary>

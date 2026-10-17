@@ -29,13 +29,15 @@ public sealed class UserProfileStore
     };
 
     private readonly IReadOnlyList<string> _protectedDirectories;
+    private readonly Version? _appVersion;
 
-    public UserProfileStore(string rootDirectory, IReadOnlyList<string>? protectedDirectories = null)
+    public UserProfileStore(string rootDirectory, IReadOnlyList<string>? protectedDirectories = null, Version? appVersion = null)
     {
         RootDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDirectory));
         _protectedDirectories = (protectedDirectories ?? [])
             .Select(static d => Path.TrimEndingDirectorySeparator(Path.GetFullPath(d)))
             .ToList();
+        _appVersion = appVersion ?? typeof(ProfileCatalog).Assembly.GetName().Version;
     }
 
     public static UserProfileStore CreateDefault(AppPaths paths) => new(paths.ProfilesDirectory, [ProfileCatalog.BundledDirectory]);
@@ -120,7 +122,7 @@ public sealed class UserProfileStore
             throw new UserProfileException(nameError);
         }
 
-        var node = ReadOwnedNode(file, expectedId);
+        var node = ReadNode(file, expectedId);
         node["name"] = cleanName;
         var json = node.ToJsonString(WriteOptions);
 
@@ -133,6 +135,115 @@ public sealed class UserProfileStore
         WriteAtomic(file, json);
     }
 
+    public ProfileTuning ReadTuning(string profileFile, string expectedId)
+    {
+        var file = RequireOwned(profileFile);
+        return ReadTuning(ReadNode(file, expectedId));
+    }
+
+    public void Update(string profileFile, string expectedId, ProfileTuning before, ProfileTuning after,
+        IEnumerable<GameProfile> loadedProfiles, bool privateMode)
+    {
+        ArgumentNullException.ThrowIfNull(before);
+        ArgumentNullException.ThrowIfNull(after);
+        ArgumentNullException.ThrowIfNull(loadedProfiles);
+        var file = RequireOwned(profileFile);
+
+        var cleanName = ProfileNames.Clean(after.Name);
+        after = after with { Name = cleanName == ProfileNames.Clean(before.Name) ? before.Name : cleanName };
+
+        if (privateMode && ProfileTuningRules.PrivateModeViolation(before, after) is { } privacy)
+        {
+            throw new UserProfileException(privacy);
+        }
+        var others = loadedProfiles
+            .Where(p => !p.Id.Equals(expectedId, StringComparison.OrdinalIgnoreCase))
+            .Select(static p => p.Name);
+        if (ProfileTuningRules.Validate(before, after, others) is { Count: > 0 } invalid)
+        {
+            throw new UserProfileException(string.Join(" ", invalid));
+        }
+
+        var node = ReadNode(file, expectedId);
+        if (!ReadTuning(node).Equals(before))
+        {
+            throw new UserProfileException("Plik profilu zmienił się na dysku od otwarcia edytora — lista profili zostanie odświeżona.");
+        }
+        if (after.Equals(before)) return;
+
+        ProfileTuningJson.Apply(node, before, after);
+        var json = node.ToJsonString(WriteOptions);
+        if (ValidationErrors(json) is { Count: > 0 } errors)
+        {
+            throw new UserProfileException(string.Join(" ", errors));
+        }
+        WriteAtomic(file, json);
+    }
+
+    public GameProfile CreateCopy(string sourceFile, string expectedId, IEnumerable<GameProfile> loadedProfiles)
+    {
+        ArgumentNullException.ThrowIfNull(loadedProfiles);
+        var known = loadedProfiles.ToList();
+        var full = Path.GetFullPath(sourceFile);
+        if (!File.Exists(full))
+        {
+            throw new UserProfileException("Plik profilu zniknął z dysku — lista profili zostanie odświeżona.");
+        }
+
+        var node = ReadNode(full, expectedId);
+        GameProfile source;
+        try
+        {
+            source = ProfileSerializer.FromJson(node.ToJsonString());
+        }
+        catch (Exception ex) when (ex is JsonException or FormatException)
+        {
+            throw new UserProfileException("Plik profilu jest uszkodzony — nie da się zrobić jego kopii.");
+        }
+
+        var name = ProfileNames.SuggestCopy(source.Name, known.Select(static p => p.Name));
+        var folders = Directory.Exists(RootDirectory)
+            ? Directory.EnumerateDirectories(RootDirectory).Select(static d => Path.GetFileName(d))
+            : [];
+        var id = ProfileIds.CreateUnique(name, source.ProcessNames.FirstOrDefault(), known.Select(static p => p.Id).Concat(folders));
+
+        ProfileTuningJson.PrepareCopy(node, id, name);
+        var json = node.ToJsonString(WriteOptions);
+        if (ValidationErrors(json) is { Count: > 0 } errors)
+        {
+            throw new UserProfileException(string.Join(" ", errors));
+        }
+
+        var folder = Path.Combine(RootDirectory, id);
+        Directory.CreateDirectory(folder);
+        WriteAtomic(Path.Combine(folder, FileName), json);
+        return ProfileSerializer.FromJson(json);
+    }
+
+    private static ProfileTuning ReadTuning(JsonObject node)
+    {
+        try
+        {
+            return ProfileTuningJson.Read(node);
+        }
+        catch (Exception ex) when (ex is JsonException or FormatException or InvalidOperationException)
+        {
+            throw new UserProfileException("Plik profilu jest uszkodzony — popraw go albo usuń ręcznie w folderze danych.");
+        }
+    }
+
+    private IReadOnlyList<string> ValidationErrors(string json)
+    {
+        try
+        {
+            return ProfileValidator.Validate(ProfileSerializer.FromJson(json), _appVersion);
+        }
+        catch (Exception ex) when (ex is JsonException or FormatException)
+        {
+            return ["Plik profilu po zmianie nie dałby się wczytać."];
+        }
+    }
+
     public void Delete(string profileFile, string expectedId)
     {
         var file = RequireOwned(profileFile);
@@ -142,7 +253,7 @@ public sealed class UserProfileStore
             throw new UserProfileException("Ten profil leży w podfolderze — usuń go ręcznie w folderze danych.");
         }
 
-        _ = ReadOwnedNode(file, expectedId);
+        _ = ReadNode(file, expectedId);
 
         var otherProfiles = Directory.EnumerateFiles(folder, FileName, SearchOption.AllDirectories)
             .Count(other => !SamePath(other, file));
@@ -168,7 +279,7 @@ public sealed class UserProfileStore
         return full;
     }
 
-    private static JsonObject ReadOwnedNode(string file, string expectedId)
+    private static JsonObject ReadNode(string file, string expectedId)
     {
         JsonNode? node;
         try

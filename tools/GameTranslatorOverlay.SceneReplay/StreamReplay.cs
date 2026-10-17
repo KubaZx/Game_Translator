@@ -27,9 +27,13 @@ using TextBlock = System.Windows.Controls.TextBlock;
 
 internal static class StreamReplay
 {
-    public static readonly string[] Scenarios = ["stream", "stream-refusal", "stream-change"];
+    public static readonly string[] Scenarios = ["stream", "stream-refusal", "stream-change", "stream-partition"];
+
+    public const string LocalProvider = "openai-local";
 
     private const string ChangedMarker = "garden";
+    private const int PartitionSize = 3;
+    private static readonly string[] LineMarkers = ["lighthouse", "keeper", "brass", "gulls", "tide"];
 
     private static readonly string[] ChangedLines =
     [
@@ -40,7 +44,12 @@ internal static class StreamReplay
         "Leave the garden key by the well.",
     ];
 
-    public sealed record Options(string Provider, bool Streaming, int FirstLineMs, int LineMs);
+    public sealed record Options(string Provider, bool Streaming, int FirstLineMs, int LineMs)
+    {
+        public Uri? LocalEndpoint { get; init; }
+        public string? LocalModel { get; init; }
+        public bool Local => Provider == LocalProvider;
+    }
 
     private const string Prefix = "PL ";
     private const string LocalEndpoint = "http://localhost:5799/v1";
@@ -57,12 +66,14 @@ internal static class StreamReplay
     public static int Run(string output, string scenario, Options options)
     {
         using var report = new Report(output, scenario, options);
-        return RunAsync(report, scenario == "stream-refusal", options).GetAwaiter().GetResult();
+        return RunAsync(report, scenario == "stream-refusal", scenario == "stream-partition", options).GetAwaiter().GetResult();
     }
 
-    public static bool RequiresStreaming(string scenario) => scenario is "stream-refusal";
+    public static bool RequiresStreaming(string scenario) => scenario is "stream-refusal" or "stream-partition";
 
-    private static async Task<int> RunAsync(Report report, bool refuse, Options options)
+    public static bool SupportsLocalProvider(string scenario) => scenario == "stream";
+
+    private static async Task<int> RunAsync(Report report, bool refuse, bool partitioned, Options options)
     {
         var root = Path.Combine(Path.GetTempPath(), "gto-stream-" + Guid.NewGuid().ToString("N"));
         var paths = new AppPaths(root);
@@ -73,32 +84,55 @@ internal static class StreamReplay
             PrivateMode = true,
             ActiveProfileId = null,
             OcrUpscale = 1,
-            LlmEndpoint = LocalEndpoint,
-            LlmModel = "replay-model",
+            LlmEndpoint = options.Local ? options.LocalEndpoint!.ToString() : LocalEndpoint,
+            LlmModel = options.Local ? options.LocalModel : "replay-model",
+            LlmServerOptions = options.Local ? TranslationProviderCatalog.FindLlmPreset(options.LocalEndpoint!)?.ServerOptionsForHost() : null,
             StreamLlmResponses = options.Streaming,
         };
         using var logging = LoggerFactory.Create(static b => b.SetMinimumLevel(LogLevel.Warning));
-        var model = new ScriptedModelHandler(report, claude, refuse, options);
-        using var http = new HttpClient(model);
+        var observer = new LocalModelObserver(report.Event);
+        HttpMessageHandler handler = options.Local
+            ? LocalModelServer.CreateHandler(options.LocalEndpoint!, LocalModelServer.DefaultMaxRequests, observer.Wrap)
+            : new ScriptedModelHandler(report, claude, refuse, partitioned, options);
+        using var http = new HttpClient(handler);
         using var blocked = new HttpClient(new NoNetworkHandler());
+        var batching = partitioned ? new LlmProviderOptions { MaxBatchSize = PartitionSize } : null;
         var llm = new OpenAiCompatibleTranslationProvider(http, static () => null, static () => null,
-            () => settings.LlmEndpoint, () => settings.LlmModel);
-        var anthropic = new ClaudeTranslationProvider(http, static () => "replay-placeholder", () => settings.ClaudeModel);
+            () => settings.LlmEndpoint, () => settings.LlmModel, batching, serverOptionsAccessor: () => settings.LlmServerOptions);
+        ITranslationProvider[] providers = options.Local
+            ? [llm]
+            : [llm, new ClaudeTranslationProvider(http, static () => "replay-placeholder", () => settings.ClaudeModel, batching)];
+        report.Event(new
+        {
+            type = "provider_setup", provider = options.Provider, endpoint = options.Local ? options.LocalEndpoint!.Authority : null,
+            model = options.Local ? options.LocalModel : null, serverOptions = settings.LlmServerOptions?.Describe(),
+            maxBatchSize = batching?.MaxBatchSize ?? new LlmProviderOptions().MaxBatchSize,
+            maxRequests = options.Local ? LocalModelServer.DefaultMaxRequests : (int?)null,
+        });
         var ocr = new ObservedOcr(new WindowsOcrProvider(), report);
         var usage = new UsageTracker();
         var orchestrator = new TranslationOrchestrator(settings, new SqliteTranslationCache(paths.DatabasePath),
             new GlossaryService(), GlossaryCatalog.CreateDefault(paths), ProfileCatalog.CreateDefault(paths),
             new UserGlossaryStore(paths), new MockTranslationProvider(),
             new DeepLTranslationProvider(blocked, static () => null), ocr, usage, logging,
-            additionalProviders: [llm, anthropic]);
+            additionalProviders: providers);
         orchestrator.Initialize();
         if (!ocr.IsLanguageAvailable(settings.SourceLanguage)) throw new OcrLanguageNotAvailableException(settings.SourceLanguage);
         TestWindow? window = null;
         LiveTranslationSession? session = null;
         var exitCode = 0;
         var reason = "completed";
+        var sceneTimeout = TimeSpan.FromSeconds(options.Local ? 180 : 20);
         try
         {
+            if (options.Local)
+            {
+                var warmup = Stopwatch.StartNew();
+                var status = await llm.TestConnectionAsync();
+                report.Event(new { type = "warmup", ok = status.IsOk, ms = warmup.Elapsed.TotalMilliseconds, message = status.IsOk ? null : status.Message });
+                report.WarmupRequests = observer.Responses.Count;
+                if (!status.IsOk) throw new WarmupFailedException();
+            }
             window = await TestWindow.CreateAsync();
             await window.AfterRenderingAsync();
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
@@ -122,14 +156,19 @@ internal static class StreamReplay
             }
             else
             {
-                await report.AllBlocks.Task.WaitAsync(TimeSpan.FromSeconds(20));
+                await report.AllBlocks.Task.WaitAsync(sceneTimeout);
                 await Task.Delay(3000);
             }
         }
         catch (Exception ex)
         {
             exitCode = 3;
-            reason = ex is TimeoutException ? "scenario_timeout" : "runtime_error";
+            reason = ex switch
+            {
+                TimeoutException => "scenario_timeout",
+                WarmupFailedException => "warmup_failed",
+                _ => "runtime_error",
+            };
             report.Event(new { type = "error", errorType = ex.GetType().Name });
         }
         finally
@@ -150,10 +189,12 @@ internal static class StreamReplay
         }
         if (exitCode == 0 && report.ScreenFallback) { exitCode = 4; reason = "screen_fallback_observed"; }
         if (exitCode == 0 && report.DistinctBlocks < 2) { exitCode = 4; reason = "fewer_than_two_blocks"; }
-        var result = report.Finish(exitCode, reason, usage, orchestrator.Latency);
+        var result = report.Finish(exitCode, reason, usage, orchestrator.Latency, options.Local ? observer.Responses : null);
         try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         return result;
     }
+
+    private sealed class WarmupFailedException : Exception;
 
     private sealed class NoNetworkHandler : HttpMessageHandler
     {
@@ -161,7 +202,7 @@ internal static class StreamReplay
             throw new InvalidOperationException("HTTP disabled in StreamReplay.");
     }
 
-    private sealed class ScriptedModelHandler(Report report, bool claude, bool refuse, Options options) : HttpMessageHandler
+    private sealed class ScriptedModelHandler(Report report, bool claude, bool refuse, bool partitioned, Options options) : HttpMessageHandler
     {
         private static readonly JsonSerializerOptions Relaxed = new()
         {
@@ -226,17 +267,25 @@ internal static class StreamReplay
                 }));
                 pipe.Push(Event("content_block_start", new { type = "content_block_start", index = 0, content_block = new { type = "text", text = "" } }));
             }
-            for (var k = 0; k < translations.Length; k++)
+            var miscounted = partitioned && translations.Length > 1 && translations.Length < PartitionSize;
+            var count = miscounted ? 1 : translations.Length;
+            for (var k = 0; k < count; k++)
             {
                 var due = options.FirstLineMs + options.LineMs * k;
                 var wait = due - Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 if (wait > 0) await Task.Delay(TimeSpan.FromMilliseconds(wait), cancellationToken).ConfigureAwait(false);
                 var element = JsonSerializer.Serialize(translations[k], Relaxed);
-                var piece = (k == 0 ? "{\"translations\": [" : ", ") + element + (k == translations.Length - 1 ? "]}" : string.Empty);
+                var piece = (k == 0 ? "{\"translations\": [" : ", ") + element + (k == count - 1 && !miscounted ? "]}" : string.Empty);
                 var half = piece.Length / 2;
                 Delta(pipe, piece[..half]);
                 Delta(pipe, piece[half..]);
                 report.ProviderLine(requestId, k, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            }
+            if (miscounted)
+            {
+                await Task.Delay(options.LineMs, cancellationToken).ConfigureAwait(false);
+                Delta(pipe, "]}");
+                report.Event(new { type = "provider_miscount", id = requestId, lines = translations.Length, returned = count });
             }
             if (claude)
             {
@@ -435,6 +484,17 @@ internal static class StreamReplay
         private int _maxShown, _textChanges, _drops, _provisionalUpdates, _ocrRuns, _updates;
         private int _oldShownAtChange, _oldUpdatesAfterChangedAll, _mixedUpdates, _maxOldAfterChange;
         private bool _ended;
+        private readonly bool _partition;
+        private readonly bool _local;
+        private readonly Dictionary<int, double> _lineFirstShown = [];
+        private readonly int[] _lineDropsBeforeFinal = new int[Lines.Length];
+        private HashSet<int> _shownLines = [];
+        private readonly Dictionary<string, string> _firstProvisional = new(StringComparer.Ordinal);
+        private List<LiveDisplayBlock> _lastBlocks = [];
+        private double? _finalAt;
+        private int _miscountStatus;
+
+        public int WarmupRequests { get; set; }
 
         public bool ScreenFallback { get; private set; }
         public bool Change { get; }
@@ -461,16 +521,30 @@ internal static class StreamReplay
         {
             _refusal = scenario == "stream-refusal";
             Change = scenario == "stream-change";
+            _partition = scenario == "stream-partition";
+            _local = options.Local;
             _writer = new StreamWriter(new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) { AutoFlush = true };
             Event(new
             {
                 type = "header", scenario, provider = options.Provider, streaming = options.Streaming,
-                firstLineMs = options.FirstLineMs, lineMs = options.LineMs, lines = Lines.Length, ocrMode = "windows",
-                cache = "fresh-memory", privateMode = true, network = "scripted local handler only",
-                modelMeaning = "Scripted handler: element k of the answer completes firstLineMs + k*lineMs after the request; without stream the whole answer arrives at the last element's time",
+                firstLineMs = _local ? (int?)null : options.FirstLineMs, lineMs = _local ? (int?)null : options.LineMs,
+                lines = Lines.Length, ocrMode = "windows", cache = "fresh-memory", privateMode = true,
+                network = _local ? "loopback model server only (127.0.0.1, localhost, [::1]), no API key" : "scripted local handler only",
+                modelMeaning = _local
+                    ? "Real local OpenAI-compatible server; one warm-up request (not measured) before the scene"
+                    : "Scripted handler: element k of the answer completes firstLineMs + k*lineMs after the request; without stream the whole answer arrives at the last element's time",
+                partitionMeaning = _partition
+                    ? $"Provider batches of {PartitionSize} lines; the scripted model returns 1 element for the 2-line batch, then the provider translates it line by line"
+                    : null,
                 timingMeaning = "From WPF Rendering of the new lines to session callbacks; not physical overlay presentation latency",
             });
         }
+
+        private static int LineIndex(string translation) =>
+            Array.FindIndex(LineMarkers, marker => translation.Contains(marker, StringComparison.OrdinalIgnoreCase));
+
+        private bool IsReplayBlock(LiveDisplayBlock block) =>
+            _local ? !string.IsNullOrWhiteSpace(block.TranslatedText) : block.TranslatedText.StartsWith(Prefix, StringComparison.Ordinal);
 
         public void Event(object data) { lock (_gate) Write(data); }
 
@@ -537,13 +611,16 @@ internal static class StreamReplay
                 var provisional = update.StatusLine.Contains("pierwszych tłumaczeń", StringComparison.Ordinal);
                 if (provisional) _provisionalUpdates++;
                 if (update.ClearOverlay) _shown.Clear();
+                var elapsed = _clock.Elapsed.TotalMilliseconds;
+                if (update.StatusLine.Contains("pomylił liczbę linii", StringComparison.Ordinal)) _miscountStatus++;
                 if (update.Blocks is { } blocks)
                 {
-                    var now = blocks.Where(static b => b.TranslatedText.StartsWith(Prefix, StringComparison.Ordinal))
-                        .ToDictionary(static b => b.Key, static b => b.TranslatedText, StringComparer.Ordinal);
+                    var replayBlocks = blocks.Where(IsReplayBlock).ToList();
+                    var now = replayBlocks.ToDictionary(static b => b.Key, static b => b.TranslatedText, StringComparer.Ordinal);
                     foreach (var (key, text) in now)
                     {
                         if (_shown.TryGetValue(key, out var before) && before != text) _textChanges++;
+                        if (provisional) _firstProvisional.TryAdd(key, text);
                     }
                     if (now.Count < _shown.Count && _startedAt is not null && _allBlocksAt is not null) _drops++;
                     _shown.Clear();
@@ -552,8 +629,19 @@ internal static class StreamReplay
                         _shown[key] = text;
                         _everShown.Add(key);
                     }
+                    _lastBlocks = replayBlocks;
+                    var lines = now.Values.Select(LineIndex).Where(static i => i >= 0).ToHashSet();
+                    if (_startedAt is not null)
+                    {
+                        if (_finalAt is null)
+                        {
+                            foreach (var line in _shownLines.Where(line => !lines.Contains(line))) _lineDropsBeforeFinal[line]++;
+                        }
+                        foreach (var line in lines) _lineFirstShown.TryAdd(line, elapsed);
+                        if (update.Diagnostics is not null && now.Count > 0) _finalAt ??= elapsed;
+                    }
+                    _shownLines = lines;
                 }
-                var elapsed = _clock.Elapsed.TotalMilliseconds;
                 if (_startedAt is not null && _shown.Count > 0 && _firstBlockAt is null)
                 {
                     _firstBlockAt = elapsed;
@@ -595,10 +683,13 @@ internal static class StreamReplay
             }
         }
 
-        public int Finish(int exitCode, string reason, UsageTracker usage, LatencyMonitor latency)
+        public int Finish(int exitCode, string reason, UsageTracker usage, LatencyMonitor latency,
+            IReadOnlyList<LocalModelObserver.ResponseSummary>? localResponses)
         {
             lock (_gate)
             {
+                if (_partition) exitCode = FinishPartition(exitCode, ref reason);
+                if (localResponses is not null) FinishLocal(localResponses.Skip(WarmupRequests).ToList());
                 var first = _requests.Count > 0 ? _requests[0] : default;
                 var firstLines = _lineTimes.TryGetValue(0, out var lines) ? lines : [];
                 Write(new
@@ -615,8 +706,10 @@ internal static class StreamReplay
                     changedAllBlocksMs = _changedAllAt - _changedAt, mixedOldAndChangedUpdates = Change ? _mixedUpdates : (int?)null,
                     oldUpdatesAfterChangedAll = Change ? _oldUpdatesAfterChangedAll : (int?)null,
                     provisionalUpdates = _provisionalUpdates, textChangesOfShownBlocks = _textChanges, dropsAfterAllShown = _drops,
-                    providerRequests = _requests.Count, streamedRequests = _requests.Count(static r => r.Stream),
-                    firstRequestLines = first.Lines, firstRequestAfterChangeMs = _requests.Count > 0 ? first.At - _startedAt : null,
+                    providerRequests = _local ? (int?)null : _requests.Count,
+                    streamedRequests = _local ? (int?)null : _requests.Count(static r => r.Stream),
+                    firstRequestLines = _local ? (int?)null : first.Lines,
+                    firstRequestAfterChangeMs = _requests.Count > 0 ? first.At - _startedAt : null,
                     firstRequestFirstLineMs = firstLines.Count > 0 ? firstLines[0] : (double?)null,
                     firstRequestTotalMs = _requestTotals.TryGetValue(0, out var total) ? total : (double?)null,
                     latencyProviderMedianMs = latency.Summarize(LatencyStage.Provider)?.MedianMs,
@@ -628,6 +721,65 @@ internal static class StreamReplay
             }
             Console.WriteLine($"StreamReplay: {reason}; pierwszy blok {_firstBlockAt - _startedAt:F0} ms, wszystkie {_allBlocksAt - _startedAt:F0} ms.");
             return exitCode;
+        }
+
+        private int FinishPartition(int exitCode, ref string reason)
+        {
+            var first = Enumerable.Range(0, PartitionSize).ToArray();
+            var second = Enumerable.Range(PartitionSize, Lines.Length - PartitionSize).ToArray();
+            bool ShownEarly(int line) => _lineFirstShown.TryGetValue(line, out var at) && (_finalAt is null || at < _finalAt);
+            var pattern = _requests.Select(static r => (r.Stream ? "stream:" : "plain:") + r.Lines).ToArray();
+            var fixtureValid = pattern.SequenceEqual(["stream:3", "stream:2", "plain:1", "plain:1"])
+                               && first.Any(ShownEarly) && second.Any(ShownEarly) && _finalAt is not null;
+            var firstDrops = first.Sum(line => _lineDropsBeforeFinal[line]);
+            var secondEarlyDropped = second.Where(ShownEarly).All(line => _lineDropsBeforeFinal[line] > 0);
+            var allAtEnd = Enumerable.Range(0, Lines.Length).All(_shownLines.Contains);
+            var expected = firstDrops == 0 && secondEarlyDropped && allAtEnd;
+            Write(new
+            {
+                type = "partition_summary", fixtureValid, expectedBehavior = expected, requestPattern = pattern,
+                firstPartitionLines = first.Length, firstPartitionEarlyShown = first.Count(ShownEarly),
+                firstPartitionFirstShownMs = first.Where(_lineFirstShown.ContainsKey).Select(line => _lineFirstShown[line] - _startedAt).Min(),
+                firstPartitionDropsBeforeFinal = firstDrops,
+                secondPartitionEarlyShown = second.Count(ShownEarly),
+                secondPartitionDropsBeforeFinal = second.Sum(line => _lineDropsBeforeFinal[line]),
+                finalPublishedMs = _finalAt - _startedAt, allLinesShownAtEnd = allAtEnd, miscountStatusUpdates = _miscountStatus,
+            });
+            Console.WriteLine($"StreamReplay partition: fixtureValid={fixtureValid}, expectedBehavior={expected}, pierwsza partia zdjeta {firstDrops} razy.");
+            if (exitCode == 0 && !fixtureValid)
+            {
+                reason = "partition_fixture_invalid";
+                return 4;
+            }
+            return exitCode;
+        }
+
+        private void FinishLocal(IReadOnlyList<LocalModelObserver.ResponseSummary> responses)
+        {
+            var streamed = responses.Where(static r => r.Stream).ToList();
+            var firstScene = responses.Count > 0 ? responses[0] : null;
+            Write(new
+            {
+                type = "local_summary", requests = responses.Count, streamedRequests = streamed.Count,
+                plainRequests = responses.Count - streamed.Count, failedRequests = responses.Count(static r => r.Status is < 200 or >= 300),
+                textsRequested = responses.Sum(static r => r.Texts), translationsReturned = responses.Sum(static r => r.Returned),
+                emptyTranslations = responses.Sum(static r => r.Empty), qualityFlagged = responses.Sum(static r => r.QualityFlagged),
+                numbersChanged = responses.Sum(static r => r.NumbersChanged), untranslated = responses.Sum(static r => r.Untranslated),
+                runaway = responses.Sum(static r => r.Runaway), responsesNotAcceptedByApp = responses.Count(static r => !r.AppAccepted),
+                responsesWithMiscount = responses.Count(static r => r.Returned != r.Texts),
+                firstRequestStream = firstScene?.Stream, firstRequestTexts = firstScene?.Texts, firstRequestHeadersMs = firstScene?.HeadersMs,
+                firstRequestFirstContentMs = firstScene?.FirstContentMs, firstRequestFirstLineMs = firstScene?.FirstLineMs,
+                firstRequestTotalMs = firstScene?.TotalMs, firstRequestReasoningChars = firstScene?.ReasoningChars,
+                firstRequestUsage = firstScene?.Usage, firstRequestDoneMarker = firstScene?.DoneMarker,
+                firstRequestFinishReason = firstScene?.FinishReason, firstRequestMediaType = firstScene?.MediaType,
+                lineResults = _lastBlocks.OrderBy(static b => b.ScreenBox.Y).Select((b, i) => new
+                {
+                    line = i, source = i < Lines.Length ? Lines[i] : null, translation = b.TranslatedText,
+                    provisional = _firstProvisional.TryGetValue(b.Key, out var early) ? early : null,
+                    changedAfterProvisional = _firstProvisional.TryGetValue(b.Key, out var earlier) && earlier != b.TranslatedText,
+                    qualityIssues = b.QualityIssues.ToString(), b.SameAsSource,
+                }),
+            });
         }
 
         public void Dispose() => _writer.Dispose();

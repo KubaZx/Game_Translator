@@ -1,6 +1,10 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
+using GameTranslatorOverlay.Core.Caching;
+using GameTranslatorOverlay.Core.Glossary;
 using GameTranslatorOverlay.Core.Translation;
+using GameTranslatorOverlay.Core.Usage;
 using GameTranslatorOverlay.Infrastructure.Providers;
 
 namespace GameTranslatorOverlay.Infrastructure.Tests;
@@ -282,8 +286,117 @@ public class OpenAiCompatibleStreamingTests
         var result = await CreateProvider(handler).TranslateStreamingAsync(["A", "B"], "en", "pl", TranslationContext.Empty, collector.Add);
 
         Assert.Equal(["PL:A", "PL:B"], result);
-        Assert.Equal(new (int, string)[] { (0, "tylko jedno"), (PartialResults.Reset, string.Empty) }, collector.Items);
+        Assert.Equal(new (int, string)[]
+        {
+            (0, "tylko jedno"), (PartialResults.Withdraw(0), string.Empty), (PartialResults.Withdraw(1), string.Empty),
+        }, collector.Items);
         Assert.Equal(3, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, 25)]
+    [InlineData(true, 24)]
+    public async Task Powyzej_25_tekstow_zla_liczba_wynikow_w_drugiej_partii_zdejmuje_tylko_jej_wczesne_linie(
+        bool planned, int firstPartitionInputs)
+    {
+        var handler = new FakeHttpHandler((request, _) =>
+        {
+            using var body = JsonDocument.Parse(request.Body);
+            var root = body.RootElement;
+            var user = root.GetProperty("messages")[1].GetProperty("content").GetString()!;
+            using var payload = JsonDocument.Parse(user[(user.IndexOf('\n') + 1)..]);
+            var translations = payload.RootElement.GetProperty("texts").EnumerateArray().Select(static t => "PL:" + t.GetString()).ToArray();
+            if (!root.GetProperty("stream").GetBoolean())
+            {
+                return Task.FromResult(FakeHttpHandler.Json(JsonSerializer.Serialize(new
+                {
+                    choices = new[] { new { message = new { role = "assistant", content = Answer(translations) }, finish_reason = "stop" } },
+                })));
+            }
+            return Task.FromResult(FakeSse.Response([FakeSse.Text(Stream(Answer(translations.Length < 25 ? translations[..^1] : translations), 7))]));
+        });
+        var pipeline = new TranslationPipeline(new GlossaryService(), new InMemoryTranslationCache(), CreateProvider(handler),
+            new UsageTracker(), new TranslationPipelineOptions { SplitParagraphs = planned });
+        var texts = Enumerable.Range(0, planned ? 28 : 30).Select(static i => $"Lantern note {i} is here.").ToArray();
+        if (planned)
+        {
+            texts[1] = "Open the gate\nClose the gate";
+            texts[27] = "Light the beacon\nDouse the beacon";
+        }
+        var partials = new ConcurrentQueue<(int Index, TranslationOutcome Outcome)>();
+
+        var outcomes = await pipeline.TranslateAsync(texts, "en", "pl", knownLocal: null, (index, outcome) => partials.Enqueue((index, outcome)));
+
+        var withdrawn = partials.Select(static p => PartialResults.IsWithdrawal(p.Index, out var index) ? index : -1).Where(static i => i >= 0);
+        Assert.Equal(Enumerable.Range(firstPartitionInputs, texts.Length - firstPartitionInputs), withdrawn.Order());
+        Assert.Equal(Enumerable.Range(0, firstPartitionInputs),
+            partials.Where(p => p.Index >= 0 && p.Index < firstPartitionInputs).Select(static p => p.Index).Order());
+        Assert.All(outcomes, static o => Assert.StartsWith("PL:", o.TranslatedText));
+        Assert.Equal(TranslationOrigin.Provider, outcomes[^1].Origin);
+        Assert.Equal(2 + 5, handler.Calls);
+    }
+
+    [Fact]
+    public async Task Dzielenie_partii_jest_jednopoziomowe_i_ogranicza_liczbe_zapytan()
+    {
+        var handler = new FakeHttpHandler((request, _) =>
+        {
+            using var body = JsonDocument.Parse(request.Body);
+            var root = body.RootElement;
+            var user = root.GetProperty("messages")[1].GetProperty("content").GetString()!;
+            using var payload = JsonDocument.Parse(user[(user.IndexOf('\n') + 1)..]);
+            var translations = payload.RootElement.GetProperty("texts").EnumerateArray().Select(static t => "PL:" + t.GetString()).ToArray();
+            var answer = Answer(translations.Length > 1 ? translations[..^1] : translations);
+            if (!root.GetProperty("stream").GetBoolean())
+            {
+                return Task.FromResult(FakeHttpHandler.Json(JsonSerializer.Serialize(new
+                {
+                    choices = new[] { new { message = new { role = "assistant", content = answer }, finish_reason = "stop" } },
+                })));
+            }
+            return Task.FromResult(FakeSse.Response([FakeSse.Text(Stream(answer, 7))]));
+        });
+        var pipeline = new TranslationPipeline(new GlossaryService(), new InMemoryTranslationCache(), CreateProvider(handler),
+            new UsageTracker(), new TranslationPipelineOptions());
+        var texts = Enumerable.Range(0, 30).Select(static i => $"Lantern note {i} is here.").ToArray();
+
+        var outcomes = await pipeline.TranslateAsync(texts, "en", "pl", knownLocal: null, static (_, _) => { });
+
+        Assert.Equal(1 + 1 + 12 + 1, handler.Calls);
+        Assert.All(outcomes, static o => Assert.Null(o.TranslatedText));
+    }
+
+    [Fact]
+    public async Task Zla_liczba_wynikow_w_partii_powyzej_12_tekstow_dzieli_ja_zamiast_przerywac_klatke()
+    {
+        var handler = new FakeHttpHandler((request, _) =>
+        {
+            using var body = JsonDocument.Parse(request.Body);
+            var root = body.RootElement;
+            var user = root.GetProperty("messages")[1].GetProperty("content").GetString()!;
+            using var payload = JsonDocument.Parse(user[(user.IndexOf('\n') + 1)..]);
+            var translations = payload.RootElement.GetProperty("texts").EnumerateArray().Select(static t => "PL:" + t.GetString()).ToArray();
+            if (!root.GetProperty("stream").GetBoolean())
+            {
+                return Task.FromResult(FakeHttpHandler.Json(JsonSerializer.Serialize(new
+                {
+                    choices = new[] { new { message = new { role = "assistant", content = Answer(translations) }, finish_reason = "stop" } },
+                })));
+            }
+            return Task.FromResult(FakeSse.Response([FakeSse.Text(Stream(Answer(translations.Length == 25 ? translations[..^1] : translations), 7))]));
+        });
+        var pipeline = new TranslationPipeline(new GlossaryService(), new InMemoryTranslationCache(), CreateProvider(handler),
+            new UsageTracker(), new TranslationPipelineOptions());
+        var texts = Enumerable.Range(0, 30).Select(static i => $"Lantern note {i} is here.").ToArray();
+        var partials = new ConcurrentQueue<(int Index, TranslationOutcome Outcome)>();
+
+        var outcomes = await pipeline.TranslateAsync(texts, "en", "pl", knownLocal: null, (index, outcome) => partials.Enqueue((index, outcome)));
+
+        var withdrawn = partials.Select(static p => PartialResults.IsWithdrawal(p.Index, out var index) ? index : -1).Where(static i => i >= 0);
+        Assert.Equal(Enumerable.Range(0, 25), withdrawn.Order());
+        Assert.Equal(Enumerable.Range(25, 5), partials.Where(static p => p.Index >= 25).Select(static p => p.Index).Order());
+        Assert.All(outcomes, static o => Assert.StartsWith("PL:", o.TranslatedText));
+        Assert.Equal(1 + 2 + 1, handler.Calls);
     }
 
     [Fact]
@@ -304,6 +417,88 @@ public class OpenAiCompatibleStreamingTests
 
         Assert.Equal(["PL:A", "PL:B", "PL:C"], result);
         Assert.Equal(new (int, string)[] { (0, "PL:A"), (1, "PL:B"), (2, "PL:C") }, collector.Items);
+    }
+
+    [Theory]
+    [InlineData("lmstudio")]
+    [InlineData("ollama")]
+    [InlineData("bez-spacji-crlf")]
+    [InlineData("bez-done")]
+    [InlineData("rozumowanie")]
+    public async Task Warianty_strumienia_serwerow_lokalnych_daja_ten_sam_wynik_i_wczesne_linie(string variant)
+    {
+        var handler = new FakeHttpHandler((_, _) => Task.FromResult(FakeSse.Response(
+            FakeSse.Split(LocalServerStream(variant, Answer("Mroczna Latarnia", "Zgaś światło")), 9),
+            out _, mediaType: "text/event-stream")));
+        var collector = new Collector();
+        var provider = CreateProvider(handler, endpoint: variant == "ollama" ? "http://localhost:11434/v1" : "http://127.0.0.1:1234/v1");
+
+        var result = await provider.TranslateStreamingAsync(["The Dark Lantern", "Put out the light"], "en", "pl",
+            TranslationContext.Empty, collector.Add);
+
+        Assert.Equal(["Mroczna Latarnia", "Zgaś światło"], result);
+        Assert.Equal(new (int, string)[] { (0, "Mroczna Latarnia"), (1, "Zgaś światło") }, collector.Items);
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal(variant is "lmstudio" or "ollama" ? 1 : 0, provider.Usage.RequestsWithUsage);
+    }
+
+    [Fact]
+    public async Task Blad_jako_tekst_w_strumieniu_przerywa_tlumaczenie()
+    {
+        var handler = new FakeHttpHandler((_, _) => Task.FromResult(FakeSse.Response(
+            [FakeSse.Text("data: {\"error\":\"Model unloaded\"}\n\n")])));
+
+        var ex = await Assert.ThrowsAsync<TranslationException>(() => CreateProvider(handler, endpoint: "http://127.0.0.1:1234/v1")
+            .TranslateStreamingAsync(["One"], "en", "pl", TranslationContext.Empty, static (_, _) => { }));
+
+        Assert.Equal(TranslationFailureKind.ServiceUnavailable, ex.Kind);
+    }
+
+    private static string LocalServerStream(string variant, string answer)
+    {
+        static string Chunk(object payload, bool space = true) =>
+            "data:" + (space ? " " : string.Empty) + JsonSerializer.Serialize(payload) + "\n\n";
+        static object Delta(object delta, string? finish = null) =>
+            new { id = "chatcmpl-1", @object = "chat.completion.chunk", model = "lokalny", choices = new[] { new { index = 0, delta, finish_reason = finish } } };
+        var pieces = Enumerable.Range(0, (answer.Length + 6) / 7).Select(i => answer.Substring(i * 7, Math.Min(7, answer.Length - i * 7))).ToList();
+        var usage = new { prompt_tokens = 50, completion_tokens = 12, total_tokens = 62 };
+        var body = new StringBuilder();
+        switch (variant)
+        {
+            case "lmstudio":
+                foreach (var piece in pieces) body.Append(Chunk(Delta(new { role = "assistant", content = piece })));
+                body.Append(Chunk(new
+                {
+                    id = "chatcmpl-1", @object = "chat.completion.chunk", choices = new[] { new { index = 0, delta = new { }, finish_reason = "stop" } }, usage,
+                }));
+                body.Append("data: [DONE]\n\n");
+                break;
+            case "ollama":
+                body.Append(Chunk(Delta(new { role = "assistant", content = "" })));
+                foreach (var piece in pieces) body.Append(Chunk(Delta(new { role = "assistant", content = piece })));
+                body.Append(Chunk(Delta(new { role = "assistant", content = "" }, "stop")));
+                body.Append(Chunk(new { id = "chatcmpl-1", @object = "chat.completion.chunk", choices = Array.Empty<object>(), usage }));
+                body.Append("data: [DONE]\n\n");
+                break;
+            case "bez-spacji-crlf":
+                body.Append(": keep-alive\r\n\r\n\r\n");
+                foreach (var piece in pieces) body.Append(Chunk(Delta(new { content = piece }), space: false).Replace("\n", "\r\n", StringComparison.Ordinal));
+                body.Append("\r\n\r\ndata:[DONE]\r\n\r\n");
+                break;
+            case "bez-done":
+                foreach (var piece in pieces) body.Append(Chunk(Delta(new { content = piece })));
+                body.Append(Chunk(Delta(new { }, "stop")));
+                break;
+            case "rozumowanie":
+                body.Append(Chunk(Delta(new { reasoning_content = "The user wants Polish." })));
+                body.Append(Chunk(Delta(new { reasoning = "Two strings." })));
+                body.Append(Chunk(Delta(new { content = "<think>\nkrótko\n</think>\n\n" })));
+                foreach (var piece in pieces) body.Append(Chunk(Delta(new { content = piece })));
+                body.Append(Chunk(Delta(new { }, "stop")));
+                body.Append("data: [DONE]\n\n");
+                break;
+        }
+        return body.ToString();
     }
 
     [Fact]

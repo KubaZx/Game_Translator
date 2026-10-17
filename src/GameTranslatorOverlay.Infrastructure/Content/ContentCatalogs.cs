@@ -106,6 +106,31 @@ public sealed class GlossaryCatalog(IReadOnlyList<string> rootDirectories)
 
         return (null, new CatalogIssue(fileName, $"Nie znaleziono słownika „{glossaryId}” ({fileName})."));
     }
+
+    public IReadOnlyList<string> ListIds(string sourceLanguage, string targetLanguage)
+    {
+        var fileName = $"{sourceLanguage}-{targetLanguage}.json";
+        var ids = new List<string>();
+        foreach (var root in rootDirectories)
+        {
+            try
+            {
+                if (!Directory.Exists(root)) continue;
+                ids.AddRange(Directory.EnumerateDirectories(root)
+                    .Where(directory => File.Exists(Path.Combine(directory, fileName)))
+                    .Select(static directory => Path.GetFileName(directory)));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+        }
+        return ids
+            .Where(static id => ProfileTuningRules.IsContentId(id) && !id.Equals("global", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 }
 
 /// <summary>

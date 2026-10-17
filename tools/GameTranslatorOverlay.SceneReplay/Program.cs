@@ -50,11 +50,15 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink|typing|typing-nohold|pan-cut|quality-mark|quality-mark-clean] [--ocr scripted|windows]\n" +
+            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink|typing|typing-nohold|pan-cut|motion-occlusion|motion-blur|quality-mark|quality-mark-clean|settings-change|manual-correction] [--ocr scripted|windows]\n" +
+                "  --scenario ui-fonts --font-path sync|background (przestoj watku UI przy starcie live i nowym napisie)\n" +
                 "  [--provider-delay-ms 0..5000] [--phase-ms 0..200] [--ocr-delay-ms 100..600 only ocr-timing]\n" +
                 "  [--assets KATALOG_Z_inspect_crop.png] [--texture OBRAZ] [--texture-origin X,Y] [--bright-spot-px 4..14] only stale-*\n" +
                 "  [--fade-ms 100..1000 only stale-fade] [--dim-percent 10..90 only stale-dim] [--junk-run 1..3 only stale-present-junk]\n" +
-                "  --scenario stream|stream-refusal|stream-change [--stream on|off] [--stream-provider llm|claude] [--first-line-ms 0..5000] [--line-ms 0..2000]\n" +
+                "  --scenario stream|stream-refusal|stream-change|stream-partition [--stream on|off] [--stream-provider llm|claude] [--first-line-ms 0..5000] [--line-ms 0..2000]\n" +
+                "  --scenario stream --stream-provider openai-local --endpoint http://127.0.0.1:PORT/v1 --model NAZWA [--stream on|off]\n" +
+                "    (prawdziwy serwer modelu wylacznie na tym komputerze: 127.0.0.1, localhost albo [::1]; bez klucza API)\n" +
+                "  --scenario motion-occlusion|motion-blur [--lost-read on|off]\n" +
                 "Wlasne widoczne okno; prawdziwy capture i LiveTranslationSession. Mock domyslnie 2000 ms, bez sieci.\n" +
                 "Faza domyslnie 0 ms; niezerowa tylko dla displayed/inflight/stale-*. Scenariusze local-reading/reading-jitter/reading-whiff odrzucaja oba parametry.\n" +
                 "Domyslnie displayed oraz scripted OCR z koloru przechwyconej klatki. Bez sterowania gra.");
@@ -82,6 +86,10 @@ internal static class Program
             string? streamProvider = null;
             int? firstLineMs = null;
             int? lineMs = null;
+            string? endpoint = null;
+            string? model = null;
+            string? fontPath = null;
+            string? lostRead = null;
             for (var i = 0; i < args.Length; i++)
             {
                 var option = args[i];
@@ -127,25 +135,68 @@ internal static class Program
                         streamMode = args[i] is "on" or "off" ? args[i] : throw new ArgumentException("--stream wymaga on albo off.");
                         break;
                     case "--stream-provider":
-                        streamProvider = args[i] is "llm" or "claude" ? args[i] : throw new ArgumentException("--stream-provider wymaga llm albo claude.");
+                        streamProvider = args[i] is "llm" or "claude" or StreamReplay.LocalProvider
+                            ? args[i]
+                            : throw new ArgumentException("--stream-provider wymaga llm, claude albo openai-local.");
                         break;
+                    case "--endpoint": endpoint = args[i]; break;
+                    case "--model": model = args[i]; break;
                     case "--first-line-ms": firstLineMs = ParseMilliseconds(args[i], option, 5000); break;
                     case "--line-ms": lineMs = ParseMilliseconds(args[i], option, 2000); break;
+                    case "--font-path":
+                        fontPath = UiFontsReplay.Paths.Contains(args[i]) ? args[i] : throw new ArgumentException("--font-path wymaga sync albo background.");
+                        break;
+                    case "--lost-read":
+                        lostRead = args[i] is "on" or "off" ? args[i] : throw new ArgumentException("--lost-read wymaga on albo off.");
+                        break;
                     default: throw new ArgumentException("Nieznany argument.");
                 }
             }
             if (output is null) throw new ArgumentException("Wymagany nowy plik --output.");
+            if ((fontPath is not null) != (scenario == "ui-fonts"))
+                throw new ArgumentException("--scenario ui-fonts wymaga --font-path sync|background (i tylko on je przyjmuje).");
+            if (scenario == "ui-fonts")
+            {
+                if (args.Length != 6) throw new ArgumentException("ui-fonts przyjmuje tylko --output, --scenario i --font-path.");
+                return UiFontsReplay.Run(output, fontPath!);
+            }
+            if (lostRead is not null && !MotionLossReplay.Scenarios.Contains(scenario))
+                throw new ArgumentException("--lost-read jest dostepne tylko dla motion-occlusion i motion-blur.");
+            if (MotionLossReplay.Scenarios.Contains(scenario))
+            {
+                if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
+                    throw new ArgumentException($"{scenario} uses scripted OCR and Mock 200; timing overrides are not supported.");
+                return MotionLossReplay.Run(output, scenario, lostRead != "off");
+            }
             var streamScenario = StreamReplay.Scenarios.Contains(scenario);
             if (!streamScenario && (streamMode is not null || streamProvider is not null || firstLineMs is not null || lineMs is not null))
-                throw new ArgumentException("--stream, --stream-provider, --first-line-ms i --line-ms sa dostepne tylko dla stream, stream-refusal i stream-change.");
+                throw new ArgumentException("--stream, --stream-provider, --first-line-ms i --line-ms sa dostepne tylko dla stream, stream-refusal, stream-change i stream-partition.");
+            var localProvider = streamProvider == StreamReplay.LocalProvider;
+            if (!localProvider && (endpoint is not null || model is not null))
+                throw new ArgumentException("--endpoint i --model sa dostepne tylko z --stream-provider openai-local.");
             if (streamScenario)
             {
                 if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "windows"))
                     throw new ArgumentException($"{scenario} uses Windows OCR and its own scripted model timing (--first-line-ms, --line-ms).");
                 if (StreamReplay.RequiresStreaming(scenario) && streamMode == "off")
                     throw new ArgumentException($"{scenario} mierzy wczesne linie, wymaga --stream on.");
-                return StreamReplay.Run(output, scenario, new StreamReplay.Options(
-                    streamProvider ?? "llm", streamMode != "off", firstLineMs ?? 900, lineMs ?? 350));
+                if (!localProvider)
+                    return StreamReplay.Run(output, scenario, new StreamReplay.Options(
+                        streamProvider ?? "llm", streamMode != "off", firstLineMs ?? 900, lineMs ?? 350));
+                if (!StreamReplay.SupportsLocalProvider(scenario))
+                    throw new ArgumentException("--stream-provider openai-local dziala tylko ze scenariuszem stream.");
+                if (firstLineMs is not null || lineMs is not null)
+                    throw new ArgumentException("--first-line-ms i --line-ms dotycza skryptowanego modelu, nie serwera openai-local.");
+                if (!LocalModelServer.TryParseEndpoint(endpoint, out var localEndpoint, out var endpointError))
+                    throw new ArgumentException(endpointError);
+                var localModel = model?.Trim();
+                if (string.IsNullOrEmpty(localModel) || localModel.Length > 200 || localModel.Any(char.IsControl))
+                    throw new ArgumentException("--model wymaga nazwy modelu zaladowanego na serwerze (np. z LM Studio albo z ollama list).");
+                return StreamReplay.Run(output, scenario, new StreamReplay.Options(StreamReplay.LocalProvider, streamMode != "off", 0, 0)
+                {
+                    LocalEndpoint = localEndpoint,
+                    LocalModel = localModel,
+                });
             }
             var staleScenario = StaleLabelReplay.Scenarios.Contains(scenario);
             if (!staleScenario && (assetsDirectory is not null || texturePath is not null || textureOrigin is not null || brightSpotPx > 0))
@@ -194,6 +245,12 @@ internal static class Program
                 if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
                     throw new ArgumentException("Quality mark uses scripted OCR and an instant scripted provider; timing overrides are not supported.");
                 return QualityMarkReplay.Run(output, scenario == "quality-mark");
+            }
+            if (ReactionReplay.Scenarios.Contains(scenario))
+            {
+                if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
+                    throw new ArgumentException($"{scenario} uses scripted OCR and a fixed provider; timing overrides are not supported.");
+                return ReactionReplay.Run(output, scenario);
             }
             if (ocrDelaySpecified) throw new ArgumentException("--ocr-delay-ms requires --scenario ocr-timing.");
             if (scenario is ("local-occlusion" or "local-occlusion-hover" or "local-occlusion-inflight" or "moving-text" or "position-jitter"))

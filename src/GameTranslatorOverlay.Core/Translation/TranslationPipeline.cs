@@ -149,7 +149,12 @@ public sealed class TranslationPipeline(
     // (np. wynik atrapy Mock przy prawdziwym dostawcy) — liczy się tylko jego profil.
     // GenderStale = wpis jest nieaktualny (także) z powodu innej płci gracza.
     private sealed record StaleEntry(
-        string? TranslatedText, string GameProfile, TranslationCacheContext Context, bool GenderStale = false);
+        string? TranslatedText, string GameProfile, TranslationCacheContext Context, bool GenderStale = false)
+    {
+        public bool FormatStale { get; init; }
+        public string? CachedContext { get; init; }
+        public string? CachedProvider { get; init; }
+    }
 
     // Błąd odczytu cache logujemy raz na pipeline — w trybie live pytamy co klatkę.
     private int _cacheLookupFailureLogged;
@@ -352,7 +357,7 @@ public sealed class TranslationPipeline(
         return results;
     }
 
-    private static Action<string, TranslationOutcome> PartialByText(
+    private static Action<string, TranslationOutcome?> PartialByText(
         (string Source, string Normalized)[] normalizedInputs, Action<int, TranslationOutcome> onPartial)
     {
         var positions = new Dictionary<string, List<int>>(StringComparer.Ordinal);
@@ -362,15 +367,21 @@ public sealed class TranslationPipeline(
             if (!positions.TryGetValue(normalized, out var list)) positions[normalized] = list = [];
             list.Add(index);
         }
+        var gate = new Lock();
+        var withdrawn = new HashSet<string>(StringComparer.Ordinal);
         return (normalized, outcome) =>
         {
-            if (normalized == PartialResults.ResetKey)
-            {
-                onPartial(PartialResults.Reset, outcome);
-                return;
-            }
             if (!positions.TryGetValue(normalized, out var list)) return;
-            foreach (var index in list) onPartial(index, WithSource(outcome, normalizedInputs[index].Source));
+            lock (gate)
+            {
+                if (withdrawn.Contains(normalized)) return;
+                if (outcome is null) withdrawn.Add(normalized);
+            }
+            foreach (var index in list)
+            {
+                if (outcome is null) onPartial(PartialResults.Withdraw(index), PartialResults.ResetOutcome);
+                else onPartial(index, WithSource(outcome, normalizedInputs[index].Source));
+            }
         };
     }
 
@@ -381,7 +392,7 @@ public sealed class TranslationPipeline(
         private readonly Dictionary<int, TranslationOutcome?[]> _units = [];
         private readonly Dictionary<int, (int Input, int Unit)> _slots = [];
         private readonly HashSet<int> _reported = [];
-        private bool _reset;
+        private readonly HashSet<int> _withdrawn = [];
 
         public void MapPlain(int coreIndex, int input) => _slots[coreIndex] = (input, -1);
 
@@ -394,17 +405,16 @@ public sealed class TranslationPipeline(
 
         public void Report(int coreIndex, TranslationOutcome outcome)
         {
-            if (coreIndex == PartialResults.Reset)
+            if (PartialResults.IsWithdrawal(coreIndex, out var withdrawnCore))
             {
-                lock (_gate) _reset = true;
-                onPartial(PartialResults.Reset, outcome);
+                Withdraw(withdrawnCore);
                 return;
             }
+            if (!_slots.TryGetValue(coreIndex, out var slot)) return;
             lock (_gate)
             {
-                if (_reset) return;
+                if (_withdrawn.Contains(slot.Input)) return;
             }
-            if (!_slots.TryGetValue(coreIndex, out var slot)) return;
             if (slot.Unit < 0)
             {
                 onPartial(slot.Input, WithSource(outcome, inputs[slot.Input].Source));
@@ -413,6 +423,7 @@ public sealed class TranslationPipeline(
             TranslationOutcome? assembled = null;
             lock (_gate)
             {
+                if (_withdrawn.Contains(slot.Input)) return;
                 var units = _units[slot.Input];
                 units[slot.Unit] = outcome;
                 var plan = plans[slot.Input]!;
@@ -424,6 +435,16 @@ public sealed class TranslationPipeline(
                 assembled = Assemble(inputs[slot.Input], plan, units);
             }
             if (assembled.TranslatedText is not null) onPartial(slot.Input, assembled);
+        }
+
+        private void Withdraw(int coreIndex)
+        {
+            if (!_slots.TryGetValue(coreIndex, out var slot)) return;
+            lock (_gate)
+            {
+                if (!_withdrawn.Add(slot.Input)) return;
+            }
+            onPartial(PartialResults.Withdraw(slot.Input), PartialResults.ResetOutcome);
         }
     }
 
@@ -778,6 +799,7 @@ public sealed class TranslationPipeline(
                 partials is null ? null : partials.Report, cancellationToken).ConfigureAwait(false);
 
         var final = new List<TranslationOutcome>(inputs.Length);
+        HashSet<string>? keptFinal = null;
         for (var i = 0; i < inputs.Length; i++)
         {
             if (plainSlots[i] >= 0)
@@ -797,6 +819,18 @@ public sealed class TranslationPipeline(
                     if (slots[k] >= 0) unitOutcomes[k] = coreOutcomes[slots[k]];
                 }
                 var assembled = Assemble(inputs[i], plans[i]!, unitOutcomes);
+                if (probes[i]?.Stale is { GenderStale: true } && slots.Any(static s => s >= 0))
+                {
+                    if (_genderRetried.Count >= MaxDegradedResults) _genderRetried.Clear();
+                    _genderRetried.TryAdd(inputs[i].Normalized, 0);
+                }
+                if (assembled.TranslatedText is null && probes[i]?.Stale is { } emptied
+                    && unitOutcomes.All(static o => o is not { TranslatedText: null } || o.Issue == OutcomeIssue.EmptyResult)
+                    && (keptFinal ??= new HashSet<string>(StringComparer.Ordinal)).Add(inputs[i].Normalized))
+                {
+                    await KeepStaleAsFinalAsync(inputs[i].Source, inputs[i].Normalized, sourceLanguage, targetLanguage, emptied)
+                        .ConfigureAwait(false);
+                }
                 final.Add(assembled.TranslatedText is null && probes[i]?.Stale is { TranslatedText: { } staleText } stale
                     ? assembled with
                     {
@@ -1027,7 +1061,12 @@ public sealed class TranslationPipeline(
             if (staleFallbacks is not null)
                 staleFallbacks[normalized] = new StaleEntry(
                     cached.TranslatedText, cached.GameProfile, TranslationCacheContext.Parse(cached.Context),
-                    TranslationCacheContext.IsStaleForPlayerGender(cached.Context, normalized, gender));
+                    TranslationCacheContext.IsStaleForPlayerGender(cached.Context, normalized, gender))
+                {
+                    FormatStale = TranslationCacheContext.IsStaleForFormat(cached.Context, normalized),
+                    CachedContext = cached.Context,
+                    CachedProvider = cached.Provider,
+                };
             cached = null;
         }
 
@@ -1082,7 +1121,7 @@ public sealed class TranslationPipeline(
         string targetLanguage,
         Dictionary<string, TranslationOutcome> outcomes,
         Dictionary<string, StaleEntry> staleFallbacks,
-        Action<string, TranslationOutcome>? onPartial,
+        Action<string, TranslationOutcome?>? onPartial,
         CancellationToken cancellationToken)
     {
         var mine = new List<(string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)>();
@@ -1252,7 +1291,7 @@ public sealed class TranslationPipeline(
         string targetLanguage,
         Dictionary<string, TranslationOutcome> outcomes,
         Dictionary<string, StaleEntry> staleFallbacks,
-        Action<string, TranslationOutcome>? onPartial,
+        Action<string, TranslationOutcome?>? onPartial,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -1300,7 +1339,12 @@ public sealed class TranslationPipeline(
         {
             if (index == PartialResults.Reset)
             {
-                onPartial(PartialResults.ResetKey, PartialResults.ResetOutcome);
+                foreach (var item in chunk) onPartial(item.Normalized, null);
+                return;
+            }
+            if (PartialResults.IsWithdrawal(index, out var withdrawn))
+            {
+                if (withdrawn < chunk.Length) onPartial(chunk[withdrawn].Normalized, null);
                 return;
             }
             if (index < 0 || index >= chunk.Length) return;
@@ -1412,21 +1456,12 @@ public sealed class TranslationPipeline(
                 {
                     Issue = OutcomeIssue.EmptyResult,
                 };
-                // Pusty wynik przy ponownym tłumaczeniu wpisu z problemem jakości: stary wynik
-                // (pokazany jako zapasowy) zapisujemy jako ostateczny — inaczej każde kolejne
-                // wystąpienie byłoby kolejnym płatnym zapytaniem z pustą odpowiedzią.
-                if (stale is { TranslatedText: not null, Context.NeedsQualityRetry: true })
-                {
-                    if (!await TryStoreAsync(new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage,
-                            stale.TranslatedText, provider.Name, GameProfile: profile,
-                            Context: TranslationCacheContext.Build(stale.Context.QualityIssues, final: true,
-                                playerGender: stale.Context.PlayerGender))).ConfigureAwait(false))
-                    {
-                        // Zapis się nie udał (np. pełny dysk) — ostateczny wynik pamiętamy
-                        // awaryjnie, żeby nie pytać dostawcy przy każdym wystąpieniu.
-                        RememberDegraded(normalized, sourceLanguage, targetLanguage, stale.TranslatedText);
-                    }
-                }
+                // Pusty wynik przy ponownym tłumaczeniu wpisu z problemem jakości albo w starym
+                // formacie: stary wynik (pokazany jako zapasowy) zapisujemy jako ostateczny
+                // (qa-final / reflow-final) — inaczej każde kolejne wystąpienie byłoby kolejnym
+                // płatnym zapytaniem z pustą odpowiedzią.
+                if (stale is not null)
+                    await KeepStaleAsFinalAsync(source, normalized, sourceLanguage, targetLanguage, stale).ConfigureAwait(false);
                 continue;
             }
 
@@ -1454,6 +1489,35 @@ public sealed class TranslationPipeline(
             {
                 RememberDegraded(normalized, sourceLanguage, targetLanguage, translated);
             }
+        }
+    }
+
+    private async Task KeepStaleAsFinalAsync(
+        string source, string normalized, string sourceLanguage, string targetLanguage, StaleEntry stale)
+    {
+        if (stale.TranslatedText is not { } previous) return;
+        string context;
+        string providerName;
+        if (stale.Context.NeedsQualityRetry)
+        {
+            context = TranslationCacheContext.Build(stale.Context.QualityIssues, final: true, playerGender: stale.Context.PlayerGender);
+            providerName = provider.Name;
+        }
+        else if (stale.FormatStale)
+        {
+            context = TranslationCacheContext.MarkReflowFinal(stale.CachedContext);
+            providerName = stale.CachedProvider ?? provider.Name;
+        }
+        else
+        {
+            return;
+        }
+        if (!await TryStoreAsync(new NewCacheEntry(source, normalized, sourceLanguage, targetLanguage,
+                previous, providerName, GameProfile: stale.GameProfile, Context: context)).ConfigureAwait(false))
+        {
+            // Zapis się nie udał (np. pełny dysk) — ostateczny wynik pamiętamy
+            // awaryjnie, żeby nie pytać dostawcy przy każdym wystąpieniu.
+            RememberDegraded(normalized, sourceLanguage, targetLanguage, previous);
         }
     }
 

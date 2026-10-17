@@ -165,4 +165,30 @@ public class LiveSubtitleContentTests
         Assert.Equal("Drzwi są otwarte\nZbadaj", content.Restore([Text("inspect", "Zbadaj"), Text("dialog", "Drzwi są otwarte")]));
         Assert.Equal("Drzwi są otwarte\nZbadaj", content.Restore([Text("inspect", "Zbadaj")]));
     }
+
+    [Fact]
+    public void Poprawka_podmienia_tekst_w_miejscu_i_zdejmuje_ostrzezenie()
+    {
+        var content = new LiveSubtitleContent();
+        content.Replace([Text("inspect", "Zbadaj"), Text("door", "Otwórz drzwi poziomu")], ["door"]);
+        Assert.True(content.HasFlagged);
+
+        var corrected = content.Correct(new Dictionary<string, string> { ["door"] = "Otwórz drzwi poziomu 20" }, []);
+
+        Assert.Equal("Zbadaj\nOtwórz drzwi poziomu 20", corrected);
+        Assert.False(content.HasFlagged);
+        Assert.True(content.Contains("door"));
+    }
+
+    [Fact]
+    public void Poprawka_bloku_spoza_paska_nie_zmienia_paska()
+    {
+        var content = new LiveSubtitleContent();
+        content.Replace([Text("inspect", "Zbadaj")]);
+
+        Assert.Null(content.Correct(new Dictionary<string, string> { ["door"] = "Otwórz drzwi poziomu 20" }, []));
+        Assert.Null(content.Correct(new Dictionary<string, string> { ["inspect"] = "Zbadaj" }, []));
+        Assert.Equal("Zbadaj", content.Correct(new Dictionary<string, string> { ["inspect"] = "Zbadaj" }, ["inspect"]));
+        Assert.True(content.HasFlagged);
+    }
 }

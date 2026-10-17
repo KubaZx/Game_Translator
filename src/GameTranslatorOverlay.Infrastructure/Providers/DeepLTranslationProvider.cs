@@ -62,6 +62,8 @@ public sealed class DeepLTranslationProvider(
     /// <summary>Ustawienia zmieniane w locie (np. glosariusz wyłączony w trybie prywatnym).</summary>
     public DeepLOptions Options => _options;
 
+    public void CancelGlossaryPreparation() => Volatile.Read(ref _glossaries)?.CancelPending();
+
     public string Name => ProviderName;
     public bool RequiresApiKey => true;
 

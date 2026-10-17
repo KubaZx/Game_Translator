@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 
-internal sealed record AnalyzeOptions(string? Truth, int Worst);
+internal sealed record AnalyzeOptions(string? Truth, int Worst, bool PlainTruth = false);
 
 internal static class AnalyzeCommand
 {
@@ -10,14 +10,14 @@ internal static class AnalyzeCommand
         var watch = Stopwatch.StartNew();
         var data = ReplayData.Load(outDirectory);
         var recording = Recording.Load(data.Header.Recording);
-        var truthPath = options.Truth ?? recording.TruthPath;
+        var truthPath = options.Truth ?? recording.TruthPath(!options.PlainTruth);
         if (!File.Exists(truthPath))
         {
             Console.WriteLine("analyze: brak prawdy — uruchamiam truth");
-            TruthCommand.Run(recording.Directory, new TruthOptions(1, 6, false, data.Header.Corpus, data.Header.Profile));
+            TruthCommand.Run(recording.Directory, new TruthOptions(1, 6, false, data.Header.Corpus, data.Header.Profile, !options.PlainTruth));
         }
-        var (_, truth) = TruthCommand.Load(truthPath);
-        var analyzer = new MotionAnalyzer(data, recording, truth);
+        var (truthHeader, truth) = TruthCommand.Load(truthPath);
+        var analyzer = new MotionAnalyzer(data, recording, truth, !options.PlainTruth);
         analyzer.Run();
         new PatchAnalyzer(analyzer, Math.Clamp(Environment.ProcessorCount / 4, 2, 8)).Run();
 
@@ -35,6 +35,7 @@ internal static class AnalyzeCommand
         {
             ["recording"] = recording.Name,
             ["truth"] = truthPath,
+            ["truthMode"] = (truthHeader.SplitLabels ? "split" : "plain") + (options.PlainTruth ? string.Empty : "+smooth"),
             ["replay"] = data.Summary is { } s
                 ? new { s.FramesShown, s.LateSetMedianMs, s.LateSetP90Ms, s.LateSetMaxMs, s.LateRenderMedianMs, s.DecodeStalls, s.WallSeconds, s.Error, s.CompositesDropped }
                 : null,

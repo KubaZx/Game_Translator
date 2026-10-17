@@ -20,15 +20,50 @@ internal sealed record ReplayOptions(
     string Out, double Speed, int ProviderDelayMs, string? Cache, string Corpus, string Profile, string Placement,
     string Live, double Opacity, double FontSize, string FontFamily, int RenderEvery, double CompositeScale,
     bool ShowOverlay, bool Analyze, int TailMs, int MaxFrames, bool KeepWork, bool AngleProbe, int Lookahead,
-    string Capture = "auto");
+    string Capture = "auto", int PhaseMs = 0, bool LostRead = true);
 
 internal static class ReplayCommand
 {
+    public const int DesktopUnavailableExit = 6;
+
+    private static readonly string[] ConnectStates =
+        ["aktywna", "połączona", "łączenie", "podgląd", "rozłączona", "bezczynna", "nasłuch", "reset", "wyłączona", "inicjalizacja"];
+
+    [DllImport("wtsapi32.dll", EntryPoint = "WTSQuerySessionInformationW", SetLastError = true)]
+    private static extern bool WTSQuerySessionInformation(IntPtr server, int sessionId, int infoClass, out IntPtr buffer, out int bytes);
+
+    [DllImport("wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr memory);
+
+    public static string? DesktopProblem()
+    {
+        if (!WTSQuerySessionInformation(IntPtr.Zero, -1, 8, out var buffer, out _)) return null;
+        try
+        {
+            var state = Marshal.ReadInt32(buffer);
+            if (state == 0) return null;
+            var name = state >= 0 && state < ConnectStates.Length ? ConnectStates[state] : state.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return $"sesja Windows jest {name} — bez aktywnego pulpitu PrintWindow i zrzut ekranu nie działają; połącz się z pulpitem i powtórz";
+        }
+        finally
+        {
+            WTSFreeMemory(buffer);
+        }
+    }
+
     public static int Run(string recordingName, ReplayOptions options)
     {
         var recording = Recording.Load(recordingName);
+        var frames = options.MaxFrames > 0 ? Math.Min(options.MaxFrames, recording.Frames.Count) : recording.Frames.Count;
+        if (options.PhaseMs > 0 && options.PhaseMs >= recording.RelativeMs(frames - 1) / options.Speed)
+            throw new ArgumentException($"--phase-ms {options.PhaseMs}: sesja wystartowałaby po ostatniej klatce.");
         if (Directory.Exists(options.Out) && Directory.EnumerateFileSystemEntries(options.Out).Any())
             throw new ArgumentException($"Katalog wyjściowy musi być pusty: {options.Out}");
+        if (DesktopProblem() is { } problem)
+        {
+            Console.Error.WriteLine($"replay: {problem}.");
+            return DesktopUnavailableExit;
+        }
         Directory.CreateDirectory(options.Out);
         if (Application.Current is null) _ = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
 
@@ -102,6 +137,7 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
     private StaPool? _ioPool;
     private ShownBuilder[] _shown = [];
     private int _frameCount;
+    private double? _sessionStartMs;
 
     private double Now => _clock.Elapsed.TotalMilliseconds;
 
@@ -132,6 +168,7 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
 
         var windowsOcr = new WindowsOcrProvider();
         var ocr = new LoggingOcr(windowsOcr, () => Now, ocrWriter, options.AngleProbe);
+        var lostReadOcr = new LoggingOcr(windowsOcr, () => Now, ocrWriter, probeAngle: false, lostRead: true);
         var labOptions = new LabOptions(options.Cache, options.Corpus, options.Profile, options.ProviderDelayMs,
             options.Placement, options.Live, options.Opacity, options.FontSize, options.FontFamily);
         using var environment = LabEnvironment.Create(OutPath("app-data"), labOptions, ocr, loggers, options.KeepWork);
@@ -196,6 +233,8 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
                 EnableDiagnostics = true,
                 UseGraphicsCapture = options.Capture != "gdi",
                 PreferGraphicsCapture = options.Capture == "wgc",
+                ReadLostBlocks = options.LostRead,
+                LostReadOcr = lostReadOcr,
             };
             header = new ReplayHeaderDto(recording.Directory, recording.Name, _frameCount, recording.Width, recording.Height,
                 options.Speed, options.ProviderDelayMs, options.Cache, options.Corpus, options.Profile, options.Placement,
@@ -206,24 +245,26 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
                     sessionOptions.StabilityDelay.TotalMilliseconds, sessionOptions.ForcedProcessInterval.TotalMilliseconds,
                     sessionOptions.StaticRescanInterval.TotalMilliseconds, sessionOptions.BlockMissGrace, sessionOptions.OcrUpscale,
                     sessionOptions.AllowAutoUpscale, sessionOptions.RenderGlyphCovers(), sessionOptions.HoldTypingPrefixes(),
-                    sessionOptions.IdentityEchoSafe(), _host.Window.IsCaptureExclusionActive),
+                    sessionOptions.IdentityEchoSafe(), _host.Window.IsCaptureExclusionActive, sessionOptions.ReadLostBlocks),
                 DisplayedField is not null, _host.ElementsReflection,
-                typeof(ReplayRunner).Assembly.GetName().Version?.ToString() ?? "?");
+                typeof(ReplayRunner).Assembly.GetName().Version?.ToString() ?? "?", options.PhaseMs);
             Json.Write(OutPath("replay.json"), header);
 
             _session = new LiveTranslationSession(orchestrator, ocr, _replay.Handle, sessionOptions, OnUpdate,
                 loggers.CreateLogger("LiveTranslationSession"));
             var pacerDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var pacer = new Thread(() => Pace(feed, pacerDone))
+            var delayedStart = options.PhaseMs > 0;
+            var pacer = new Thread(() => Pace(feed, pacerDone, delayedStart ? StartSession : null))
             {
                 IsBackground = true,
                 Name = "pacer",
                 Priority = ThreadPriority.Highest,
             };
             Console.WriteLine($"replay: {recording.Name} — {_frameCount} klatek, {recording.RelativeMs(_frameCount - 1) / options.Speed / 1000:0.0} s, " +
-                $"Mock {options.ProviderDelayMs} ms, {settings.OverlayPlacement}/{settings.LiveDisplayMode}");
+                $"Mock {options.ProviderDelayMs} ms, {settings.OverlayPlacement}/{settings.LiveDisplayMode}" +
+                (delayedStart ? $", start sesji po {options.PhaseMs} ms" : string.Empty));
             _clock.Start();
-            _session.Start();
+            if (!delayedStart) StartSession();
             pacer.Start();
             await pacerDone.Task;
 
@@ -286,7 +327,8 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
                 Json.R(renderSummary.Median), Json.R(renderSummary.P90), Json.R(renderSummary.Max),
                 stalls.Count, Json.R(stalls.Count == 0 ? 0 : stalls.Max(static s => s.DecodeWait)),
                 _updates.Count, ocr.Calls, ocr.Probes, _layerCount, _nextPatchId, _compositesWritten, _compositesDropped,
-                Json.R(stopMs), stoppedCleanly, Math.Round(wall.Elapsed.TotalSeconds, 1), error);
+                Json.R(stopMs), stoppedCleanly, Math.Round(wall.Elapsed.TotalSeconds, 1), error,
+                _sessionStartMs is { } started ? Json.R(started) : null);
             Json.Write(OutPath("replay.json"), summary);
             Console.WriteLine($"replay: koniec — {summary.FramesShown} klatek, spóźnienie podmiany mediana {summary.LateSetMedianMs} ms (p90 {summary.LateSetP90Ms}, max {summary.LateSetMaxMs}), " +
                 $"aktualizacji {summary.Updates}, OCR {summary.OcrCalls}, kompozytów {summary.CompositesWritten} (pominiętych {summary.CompositesDropped}), " +
@@ -349,7 +391,13 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
     [DllImport("winmm.dll")]
     private static extern uint timeEndPeriod(uint period);
 
-    private void Pace(FrameFeed feed, TaskCompletionSource done)
+    private void StartSession()
+    {
+        _sessionStartMs = Now;
+        _session!.Start();
+    }
+
+    private void Pace(FrameFeed feed, TaskCompletionSource done, Action? startSession)
     {
         timeBeginPeriod(1);
         try
@@ -357,6 +405,12 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
             for (var i = 0; i < _frameCount; i++)
             {
                 var shown = _shown[i];
+                if (startSession is not null && shown.Due >= options.PhaseMs)
+                {
+                    WaitUntil(options.PhaseMs);
+                    startSession();
+                    startSession = null;
+                }
                 WaitUntil(shown.Due);
                 var task = feed.Get(i);
                 if (!task.IsCompleted)
@@ -492,7 +546,7 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
                 d.OcrWidth, d.OcrHeight, d.RawLines, d.RecognizedBlocks, d.ReusedBlocks, d.RetainedBlocks, d.DisplayedBlocks,
                 d.PartialOcr, d.SceneCut, d.WhiffSuspected, d.UsedScreenFallback, d.OcrSceneChecks, Json.R(d.OcrSceneCheckMs),
                 d.TranslationSceneChecks, Json.R(d.TranslationSceneCheckMs), Json.R(d.GlyphCoverMs), Json.R(d.GlyphCoverWaitMs),
-                d.GraphicsCapture, d.FastTracks, Json.R(d.FastTrackMs))
+                d.GraphicsCapture, d.FastTracks, Json.R(d.FastTrackMs), d.LostReads, d.LostRecovered, Json.R(d.LostReadMs), Json.R(d.LostReadTotalMs))
             : null;
         double? captureAt = update.Diagnostics is { } diagnostics ? Json.R(emit - diagnostics.CaptureToUpdateMs) : null;
         List<BlockDto>? blocks = null;

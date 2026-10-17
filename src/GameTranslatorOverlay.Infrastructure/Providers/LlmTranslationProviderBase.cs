@@ -16,7 +16,8 @@ public sealed class LlmProviderOptions : HttpProviderOptions
 
     /// <summary>
     /// Gdy model zwróci nieczytelną odpowiedź dla partii, teksty są tłumaczone pojedynczo —
-    /// ale tylko dla partii nie większych niż ta wartość (kontrola liczby zapytań).
+    /// ale tylko dla partii nie większych niż ta wartość; większa jest raz dzielona na dwie
+    /// połowy, a połowa dalej za duża kończy się błędem (kontrola liczby zapytań).
     /// </summary>
     public int MaxIndividualFallback { get; set; } = 12;
 
@@ -98,7 +99,9 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
             offset += chunk.Length;
             Action<int, string>? onChunkTranslation = onTranslation is null
                 ? null
-                : (index, text) => onTranslation(index == PartialResults.Reset ? PartialResults.Reset : chunkOffset + index, text);
+                : (index, text) => onTranslation(PartialResults.IsWithdrawal(index, out var withdrawn)
+                    ? PartialResults.Withdraw(chunkOffset + withdrawn)
+                    : chunkOffset + index, text);
             results.AddRange(await TranslateChunkAsync(chunk, chunkNotes, systemPrompt, context.RecentExchanges, onChunkTranslation,
                     cancellationToken)
                 .ConfigureAwait(false));
@@ -132,7 +135,7 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
 
     private async Task<IReadOnlyList<string>> TranslateChunkAsync(
         string[] chunk, IReadOnlyList<string?>? notes, string systemPrompt, IReadOnlyList<RecentExchange> previousLines,
-        Action<int, string>? onTranslation, CancellationToken cancellationToken)
+        Action<int, string>? onTranslation, CancellationToken cancellationToken, bool allowSplit = true)
     {
         var content = await CompleteChunkAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage(chunk, previousLines, notes),
                 chunk.Length, onTranslation, cancellationToken)
@@ -142,26 +145,30 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
             return parsed;
         }
 
-        if (chunk.Length == 1 || chunk.Length > Options.MaxIndividualFallback)
+        if (chunk.Length == 1 || (!allowSplit && chunk.Length > Math.Max(1, Options.MaxIndividualFallback)))
         {
             throw UnreadableResponse(chunk.Length);
+        }
+
+        WithdrawEarly(chunk.Length, onTranslation);
+        if (chunk.Length > Math.Max(1, Options.MaxIndividualFallback))
+        {
+            Logger.LogInformation("{Provider}: nieczytelna odpowiedź dla partii {Count} tekstów — dzielę ją na dwie mniejsze",
+                Name, chunk.Length);
+            var half = chunk.Length / 2;
+            var first = await TranslateChunkAsync(chunk[..half], notes?.Take(half).ToList(), systemPrompt, previousLines, null,
+                    cancellationToken, allowSplit: false)
+                .ConfigureAwait(false);
+            var second = await TranslateChunkAsync(chunk[half..], notes?.Skip(half).ToList(), systemPrompt, previousLines, null,
+                    cancellationToken, allowSplit: false)
+                .ConfigureAwait(false);
+            return [.. first, .. second];
         }
 
         // Model pomylił liczbę albo format wyników — tłumaczymy pojedynczo zamiast
         // ryzykować przesunięcie tłumaczeń między blokami.
         Logger.LogInformation("{Provider}: nieczytelna odpowiedź dla partii {Count} tekstów — tłumaczę pojedynczo",
             Name, chunk.Length);
-        if (onTranslation is not null)
-        {
-            try
-            {
-                onTranslation(PartialResults.Reset, string.Empty);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.LogWarning(ex, "{Provider}: odbiorca wczesnych tłumaczeń zgłosił błąd", Name);
-            }
-        }
         var singles = new List<string>(chunk.Length);
         for (var i = 0; i < chunk.Length; i++)
         {
@@ -173,6 +180,19 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
             singles.Add(parsedSingle[0]);
         }
         return singles;
+    }
+
+    private void WithdrawEarly(int count, Action<int, string>? onTranslation)
+    {
+        if (onTranslation is null) return;
+        try
+        {
+            for (var i = 0; i < count; i++) onTranslation(PartialResults.Withdraw(i), string.Empty);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "{Provider}: odbiorca wczesnych tłumaczeń zgłosił błąd", Name);
+        }
     }
 
     private TranslationException UnreadableResponse(int count) =>

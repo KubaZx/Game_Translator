@@ -26,6 +26,8 @@ internal sealed record StaleRun(string Key, string Text, double StartMs, double 
 
 internal sealed record LatencyItem(int TrackId, string Text, bool Static, bool Typing, bool StartedInMotion, bool AtStart, double StartMs, int StartFrame, double? LatencyMs, double? FromTypingEndMs);
 
+internal sealed record SmoothedRun(int TrackId, string Text, int Frame, int Frames, bool Eligible, IReadOnlyList<string> Readings);
+
 internal sealed record HudLoss(int TrackId, string Text, int Frame, double TimeMs, string Cause, double? CaptureAngle, double? ProbeAngle, int? Seq, string? Status);
 
 internal sealed record BlockMatch(bool Valid, double PosErr, Box? Union, IReadOnlyList<TruthObs> Rows, bool StaticRows, string Reason, double? MovedPx);
@@ -54,15 +56,17 @@ internal sealed partial class MotionAnalyzer
     private readonly Dictionary<(int Seq, int Frame), FrameMatch> _matches = [];
     private readonly Dictionary<TruthObs, TruthTrack> _trackOf = new(ReferenceEqualityComparer.Instance);
 
-    public MotionAnalyzer(ReplayData data, Recording recording, IReadOnlyList<TruthFrameDto> truth)
+    public MotionAnalyzer(ReplayData data, Recording recording, IReadOnlyList<TruthFrameDto> truth, bool smoothStaticTruth = false)
     {
         Data = data;
         Recording = recording;
         Truth = truth.OrderBy(static t => t.I).ToList();
         Clock = new FrameClock(data.Shown, recording.NominalIntervalMs / Math.Max(0.01, data.Header.Speed));
         HideIdentical = data.Header.Placement.Equals("cover", StringComparison.OrdinalIgnoreCase);
+        SessionStartMs = data.Header.PhaseMs;
         Timeline = OverlayTimeline.Build(data.Updates, HideIdentical);
-        Tracks = TrackBuilder.Build(Truth, recording.Width, 2);
+        SmoothStaticTruth = smoothStaticTruth;
+        Tracks = TrackBuilder.Build(Truth, recording.Width, 2, smoothStaticTruth);
         _updatesBySeq = data.Updates.ToDictionary(static u => u.Seq);
         _stepOfFrame = new int[Clock.Count];
         var step = -1;
@@ -103,6 +107,8 @@ internal sealed partial class MotionAnalyzer
     public OverlayTimeline Timeline { get; }
     public List<TruthTrack> Tracks { get; }
     public bool HideIdentical { get; }
+    public double SessionStartMs { get; }
+    public bool SmoothStaticTruth { get; }
     public bool[] Moving { get; }
     public double[] Angle { get; }
     public double[] StrongFraction { get; }
@@ -277,6 +283,7 @@ internal sealed partial class MotionAnalyzer
             {
                 var f = obs.Frame;
                 if (f >= Clock.Count) break;
+                if (Clock.End[f] <= SessionStartMs) continue;
                 var match = Match(Timeline.At(Clock.Mid(f)), f);
                 var covered = match.Covered.ContainsKey(obs);
                 var shown = match.Shown.ContainsKey(obs);
@@ -315,6 +322,14 @@ internal sealed partial class MotionAnalyzer
         }
 
         Metrics["coverage"] = RatiosToObject(coverage);
+        Metrics["truthSmoothing"] = new
+        {
+            enabled = SmoothStaticTruth,
+            smoothedObs = Tracks.Sum(static t => t.Obs.Count(static o => o.Smoothed)),
+            smoothedEligibleObs = Tracks.Where(Eligible).Sum(static t => t.Obs.Count(static o => o.Smoothed)),
+            smoothedTracks = Tracks.Count(static t => t.Obs.Any(static o => o.Smoothed)),
+            runs = SmoothedRuns().OrderByDescending(static r => r.Frames).Take(20).ToList(),
+        };
         Metrics["flicker"] = new { holes, tracksWithHoles, holeSeconds = Math.Round(holeMs / 1000, 2) };
         Metrics["tracks"] = new
         {
@@ -343,6 +358,27 @@ internal sealed partial class MotionAnalyzer
             liveOcrFullProbed = Data.Ocr.Count(o => o.Angle is not null && o.W >= Recording.Width && o.H >= Recording.Height),
             liveOcrPartialAngled = Data.Ocr.Count(o => Math.Abs(o.Angle ?? 0) >= AngleThreshold && o.W < Recording.Width),
         };
+    }
+
+    private IEnumerable<SmoothedRun> SmoothedRuns()
+    {
+        foreach (var track in Tracks)
+        {
+            for (var k = 0; k < track.Obs.Count;)
+            {
+                if (!track.Obs[k].Smoothed)
+                {
+                    k++;
+                    continue;
+                }
+                var end = k;
+                while (end < track.Obs.Count && track.Obs[end].Smoothed) end++;
+                var readings = track.Obs.Skip(k).Take(end - k).Where(static o => !o.Bridged).Select(static o => TextTools.Short(o.SmoothedFrom!, 32))
+                    .Distinct(StringComparer.Ordinal).Take(4).ToList();
+                yield return new SmoothedRun(track.Id, track.Short, track.Obs[k].Frame, end - k, Eligible(track), readings);
+                k = end;
+            }
+        }
     }
 
     private void EvaluatePositions()
@@ -446,7 +482,7 @@ internal sealed partial class MotionAnalyzer
             {
                 var mid = list[(start + k - 1) / 2].Frame;
                 var typingHold = initial && track.Typing && list[k - 1].Frame <= track.TypingEndFrame + 3;
-                var atStart = initial && Clock.Start[list[start].Frame] < AtStartMs;
+                var atStart = initial && Clock.Start[list[start].Frame] < SessionStartMs + AtStartMs;
                 var kind = initial ? (atStart ? "BRAK (start sesji)" : typingHold ? "BRAK (pisanie literami)" : "BRAK (opóźnienie)") : "BRAK (zgubione)";
                 var score = duration / 1000.0 * (typingHold ? 0.4 : atStart ? 0.3 : 1.0);
                 AddTrackProblem(kind, track, mid, duration, score,
@@ -477,7 +513,7 @@ internal sealed partial class MotionAnalyzer
         {
             if (!Eligible(track)) continue;
             var startFrame = track.First;
-            var startMs = Clock.Start[startFrame];
+            var startMs = Math.Max(Clock.Start[startFrame], SessionStartMs);
             double? found = null;
             foreach (var obs in track.Obs)
             {
@@ -499,7 +535,7 @@ internal sealed partial class MotionAnalyzer
             double? fromTyping = track.Typing && found is { } latency
                 ? startMs + latency - Clock.Start[Math.Min(track.TypingEndFrame, Clock.Count - 1)]
                 : null;
-            Latencies.Add(new LatencyItem(track.Id, track.Short, track.Static, track.Typing, startedInMotion, startMs < AtStartMs,
+            Latencies.Add(new LatencyItem(track.Id, track.Short, track.Static, track.Typing, startedInMotion, startMs < SessionStartMs + AtStartMs,
                 Json.R(startMs), startFrame, found is { } value ? Json.R(value) : null, fromTyping is { } typing ? Json.R(typing) : null));
         }
         var shown = Latencies.Where(static l => l.LatencyMs is not null && !l.AtStart).ToList();
@@ -700,6 +736,13 @@ internal sealed partial class MotionAnalyzer
             glyphCoverMs = Summary(diag.Where(static d => d.GlyphCoverMs > 0).Select(static d => d.GlyphCoverMs)),
             glyphCoverWaitMs = Summary(diag.Select(static d => d.GlyphCoverWaitMs)),
             sceneChecksPerFrame = Summary(diag.Select(static d => (double)(d.OcrSceneChecks + d.TranslationSceneChecks))),
+            lostReads = diag.Count == 0 ? 0 : diag.Max(static d => d.LostReads),
+            lostRecovered = diag.Count == 0 ? 0 : diag.Max(static d => d.LostRecovered),
+            lostReadMs = diag.Count == 0 ? 0 : Json.R(diag.Max(static d => d.LostReadMs)),
+            lostReadTotalMs = diag.Count == 0 ? 0 : Json.R(diag.Max(static d => d.LostReadTotalMs)),
+            lostReadOcrCalls = Data.LostReadOcr.Count,
+            lostReadOcrOperationMs = Summary(Data.LostReadOcr.Select(static o => o.EndMs - o.StartMs)),
+            trackingRemovals = Data.Updates.Count(static u => u.Status.StartsWith("Live: napis zniknął albo odjechał", StringComparison.Ordinal)),
             clears = Data.Updates.Count(static u => u.Clear),
             clearsInCameraMotion = Data.Updates.Count(u => u.Clear && Moving[Clock.FrameAt(u.AppliedMs)]),
             hides = Data.Updates.Count(static u => u.Hide),

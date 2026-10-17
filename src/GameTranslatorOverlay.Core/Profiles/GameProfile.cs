@@ -6,6 +6,7 @@ namespace GameTranslatorOverlay.Core.Profiles;
 public sealed class GameProfile
 {
     public string Id { get; set; } = string.Empty;
+    public string? BasedOn { get; set; }
     public string Name { get; set; } = string.Empty;
     public int ProfileVersion { get; set; } = 1;
     public string? Author { get; set; }
@@ -22,6 +23,9 @@ public sealed class GameProfile
     public CorpusRecipe? Corpus { get; set; }
     public OverlayProfileSettings? Overlay { get; set; }
     public LiveProfileSettings? Live { get; set; }
+
+    [JsonIgnore]
+    public string ContentId => string.IsNullOrWhiteSpace(BasedOn) ? Id : BasedOn;
 }
 
 public sealed class OverlayProfileSettings
@@ -60,6 +64,10 @@ public sealed class OcrProfileSettings
 
 public sealed class ChangeDetectionProfileSettings
 {
+    public const double AppDefaultFps = 6;
+
+    public const double AppDefaultThreshold = 0.0;
+
     public double Threshold { get; set; } = 0.02;
     public double Fps { get; set; } = 4;
 }
@@ -78,8 +86,11 @@ public static class ProfileSerializer
 
     public static GameProfile FromJson(string json)
     {
-        var profile = JsonSerializer.Deserialize<GameProfile>(json, JsonOptions);
-        return profile ?? throw new FormatException("Plik profilu jest pusty albo ma niepoprawny format JSON.");
+        var profile = JsonSerializer.Deserialize<GameProfile>(json, JsonOptions)
+            ?? throw new FormatException("Plik profilu jest pusty albo ma niepoprawny format JSON.");
+        profile.ProcessNames ??= [];
+        profile.WindowTitles ??= [];
+        return profile;
     }
 
     public static string ToJson(GameProfile profile) => JsonSerializer.Serialize(profile, JsonOptions);
@@ -102,6 +113,11 @@ public static class ProfileValidator
         else if (profile.Id.Any(static ch => char.IsWhiteSpace(ch) || ch is '\\' or '/' or ':' or '*' or '?' or '"' or '<' or '>' or '|'))
         {
             errors.Add($"Identyfikator profilu „{profile.Id}” zawiera niedozwolone znaki (dozwolone: litery, cyfry, myślniki).");
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.BasedOn) && !ProfileTuningRules.IsContentId(profile.BasedOn))
+        {
+            errors.Add($"Pole „basedOn” („{profile.BasedOn}”) musi być identyfikatorem profilu (litery, cyfry, myślniki).");
         }
 
         if (string.IsNullOrWhiteSpace(profile.Name))

@@ -67,7 +67,8 @@ internal sealed record DiagDto(
     int OcrWidth, int OcrHeight, int RawLines, int RecognizedBlocks, int ReusedBlocks, int RetainedBlocks,
     int DisplayedBlocks, bool PartialOcr, bool SceneCut, bool WhiffSuspected, bool UsedScreenFallback,
     int OcrSceneChecks, double OcrSceneCheckMs, int TranslationSceneChecks, double TranslationSceneCheckMs,
-    double GlyphCoverMs, double GlyphCoverWaitMs, bool GraphicsCapture = false, int FastTracks = 0, double FastTrackMs = 0);
+    double GlyphCoverMs, double GlyphCoverWaitMs, bool GraphicsCapture = false, int FastTracks = 0, double FastTrackMs = 0,
+    int LostReads = 0, int LostRecovered = 0, double LostReadMs = 0, double LostReadTotalMs = 0);
 
 internal sealed record UpdateDto(
     int Seq, double EmitMs, double AppliedMs, string Status, bool Clear, bool Hide, bool Stopped,
@@ -85,7 +86,7 @@ internal sealed record PatchDto(
     int Id, int PixelW, int PixelH, double W, double H, bool Soft, double BuildMs, double MaskFraction,
     int FirstSeq, double FirstEmitMs, double? CaptureAtMs, string File);
 
-internal sealed record OcrDto(int N, double StartMs, double EndMs, int W, int H, int Lines, bool Failed, double? Angle);
+internal sealed record OcrDto(int N, double StartMs, double EndMs, int W, int H, int Lines, bool Failed, double? Angle, bool LostRead = false);
 
 internal sealed record FidelityDto(int CapturedW, int CapturedH, bool Fallback, double MeanAbsDiff, double DiffFraction);
 
@@ -93,21 +94,21 @@ internal sealed record SessionOptionsDto(
     double Fps, double ChangeThreshold, double MotionThreshold, double MaxMotionPauseMs, double SceneCutThreshold,
     double StabilityDelayMs, double ForcedProcessIntervalMs, double StaticRescanIntervalMs, int BlockMissGrace,
     double OcrUpscale, bool AllowAutoUpscale, bool BuildGlyphCovers, bool HoldTypingPrefixes, bool IdentityEchoSafe,
-    bool CaptureExclusionActive);
+    bool CaptureExclusionActive, bool ReadLostBlocks = true);
 
 internal sealed record ReplayHeaderDto(
     string Recording, string RecordingName, int Frames, int FrameW, int FrameH, double Speed, int ProviderDelayMs,
     string? Cache, string Corpus, string Profile, string Placement, string Live, double Opacity, double FontSize,
     string FontFamily, int RenderEvery, double CompositeScale, bool OverlayShown, DateTime Started,
     Box Monitor, double DpiScale, int OcrMaxDimension, FidelityDto? Fidelity, SessionOptionsDto Session,
-    bool SourceTextReflection, bool OverlayElementsReflection, string Tool);
+    bool SourceTextReflection, bool OverlayElementsReflection, string Tool, int PhaseMs = 0);
 
 internal sealed record ReplaySummaryDto(
     ReplayHeaderDto Header, double PlaybackMs, int FramesShown, double LateSetMedianMs, double LateSetP90Ms,
     double LateSetMaxMs, double LateRenderMedianMs, double LateRenderP90Ms, double LateRenderMaxMs,
     int DecodeStalls, double DecodeStallMaxMs, int Updates, int OcrCalls, int AngleProbes, int Layers, int Patches,
     int CompositesWritten, int CompositesDropped, double SessionStopMs, bool SessionStoppedCleanly, double WallSeconds,
-    string? Error);
+    string? Error, double? SessionStartMs = null);
 
 internal sealed record TruthRowDto(string Text, string Norm, Box Box);
 
@@ -119,7 +120,7 @@ internal sealed record TruthFrameDto(
 
 internal sealed record TruthHeaderDto(
     string Type, int Version, int Frames, int Every, string Profile, string CorpusFile, long CorpusLength,
-    string Language, int OcrMaxDimension, double Downscale, bool AngleCorrected, DateTime Created);
+    string Language, int OcrMaxDimension, double Downscale, bool AngleCorrected, DateTime Created, bool SplitLabels = false);
 
 internal static class Json
 {

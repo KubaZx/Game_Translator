@@ -856,10 +856,168 @@
                         <TextBlock x:Name="TxtMatchedProfileActive" Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,3,0,0" />
                       </StackPanel>
                     </Border>
+                    <Border x:Name="PnlProfileSettings" Style="{StaticResource Card.Inset}" Padding="14,12" Margin="0,10,0,0">
+                      <StackPanel>
+                        <TextBlock Text="USTAWIENIA PROFILU" Style="{StaticResource Text.Overline}" />
+                        <ItemsControl x:Name="ListProfileSettings" Margin="0,8,0,0" Focusable="False">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <TextBlock TextWrapping="Wrap" FontSize="12" LineHeight="17" Margin="0,0,0,4">
+                                <Run Text="{Binding Label, Mode=OneWay}" Foreground="{StaticResource Brush.TextMuted}" /><Run Text=": " Foreground="{StaticResource Brush.TextMuted}" /><Run Text="{Binding Value, Mode=OneWay}" Foreground="#FFC3C9D6" />
+                              </TextBlock>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="Czego tu nie ma, bierze się z ustawień aplikacji." Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,2,0,0" />
+                      </StackPanel>
+                    </Border>
                     <WrapPanel x:Name="PnlOwnProfileActions" Margin="0,12,0,-8">
+                      <Button x:Name="BtnTuneProfile" Content="Dostosuj profil" Style="{StaticResource Btn.Primary}" ui:Visuals.Glyph="&#xE713;"
+                              Click="OnTuneProfileClick" Margin="0,0,8,8" />
                       <Button x:Name="BtnRenameProfile" Content="Zmień nazwę" ui:Visuals.Glyph="&#xE8AC;" Click="OnRenameProfileClick" Margin="0,0,8,8" />
                       <Button x:Name="BtnDeleteProfile" Content="Usuń profil" Style="{StaticResource Btn.Danger}" ui:Visuals.Glyph="&#xE74D;"
                               Click="OnDeleteProfileClick" Margin="0,0,8,8" />
+                    </WrapPanel>
+                    <StackPanel x:Name="PnlBundledProfileActions" Margin="0,12,0,0">
+                      <Button x:Name="BtnCopyProfile" Content="Utwórz własną kopię" Style="{StaticResource Btn.Primary}" ui:Visuals.Glyph="&#xE8C8;"
+                              HorizontalAlignment="Left" Click="OnCopyProfileClick" />
+                      <TextBlock Text="Kopia trafi do folderu danych z tymi samymi ustawieniami (bez recepty korpusu), włączy się zamiast tego profilu i da się ją dostosować. Korzysta z tych samych tłumaczeń w cache, poprawek i korpusu gry co ten profil."
+                                 Style="{StaticResource Field.Hint}" Margin="0,8,0,0" />
+                    </StackPanel>
+                  </StackPanel>
+
+                  <StackPanel x:Name="PnlProfileTune" Margin="0,14,0,0" Visibility="Collapsed" KeyDown="OnProfileEditorKeyDown"
+                              TextBoxBase.TextChanged="OnProfileTuneEdited" Selector.SelectionChanged="OnProfileTuneEdited">
+                    <TextBlock Text="DOSTOSUJ PROFIL" Style="{StaticResource Text.Overline}" />
+                    <TextBlock x:Name="TxtTunePrivate" Style="{StaticResource Text.Status}" Foreground="#FFFCD34D" Margin="0,6,0,0" />
+
+                    <TextBlock Text="Nazwa profilu" Style="{StaticResource Text.Label}" Margin="0,12,0,7" />
+                    <TextBox x:Name="TxtTuneName" MaxLength="80" AutomationProperties.Name="Nazwa profilu" />
+
+                    <TextBlock Text="Procesy gry" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <ItemsControl x:Name="ListTuneProcesses" Focusable="False">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Style="{StaticResource Field.ReadOnly}" Padding="11,0,3,0" Margin="0,0,0,6">
+                            <DockPanel>
+                              <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Ghost}" ui:Visuals.Glyph="&#xE711;" MinHeight="30" Padding="9,0"
+                                      VerticalAlignment="Center" ToolTip="Usuń z listy" AutomationProperties.Name="Usuń proces z listy"
+                                      Click="OnTuneRemoveProcessClick" />
+                              <TextBlock Text="{Binding}" FontFamily="{StaticResource Font.Mono}" FontSize="12" Foreground="#FFC3C9D6"
+                                         TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,9,6,9" />
+                            </DockPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock x:Name="TxtTuneProcessesEmpty" Text="Brak — profil nie włączy się sam; wybierzesz go ręcznie w sekcji Tłumaczenie."
+                               Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,0,0,6" />
+                    <Button x:Name="BtnTuneAddProcess" Content="Dodaj proces okna" ui:Visuals.Glyph="&#xE710;" HorizontalAlignment="Left"
+                            Margin="0,2,0,0" Click="OnTuneAddProcessClick" />
+                    <TextBlock x:Name="TxtTuneProcessHint" Style="{StaticResource Field.Hint}" />
+
+                    <TextBlock Text="Tytuły okien" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <ItemsControl x:Name="ListTuneTitles" Focusable="False">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Style="{StaticResource Field.ReadOnly}" Padding="11,0,3,0" Margin="0,0,0,6">
+                            <DockPanel>
+                              <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Ghost}" ui:Visuals.Glyph="&#xE711;" MinHeight="30" Padding="9,0"
+                                      VerticalAlignment="Center" ToolTip="Usuń z listy" AutomationProperties.Name="Usuń tytuł z listy"
+                                      Click="OnTuneRemoveTitleClick" />
+                              <TextBlock Text="{Binding}" FontSize="12.5" Foreground="#FFC3C9D6" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,9,6,9" />
+                            </DockPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock x:Name="TxtTuneTitlesEmpty" Text="Brak." Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,0,0,6" />
+                    <Button x:Name="BtnTuneAddTitle" Content="Dodaj tytuł okna" ui:Visuals.Glyph="&#xE710;" HorizontalAlignment="Left"
+                            Margin="0,2,0,0" Click="OnTuneAddTitleClick" />
+                    <TextBlock Text="Tytuł okna zaznaczonego na liście. Tylko do opisu — grę rozpoznaje nazwa procesu." Style="{StaticResource Field.Hint}" />
+
+                    <TextBlock Text="Język gry" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <ComboBox x:Name="CmbTuneLanguage" AutomationProperties.Name="Język gry w profilu" />
+
+                    <TextBlock Text="TŁUMACZENIE I NAPISY" Style="{StaticResource Text.Overline}" Margin="0,22,0,0" />
+                    <TextBlock Text="Słownik profilu" Style="{StaticResource Text.Label}" Margin="0,10,0,7" />
+                    <ComboBox x:Name="CmbTuneGlossary" DisplayMemberPath="Label" AutomationProperties.Name="Słownik profilu" />
+                    <TextBlock Text="Słowniki z zestawu i z folderu danych (glossaries) dla bieżącej pary języków. Twój słownik działa zawsze."
+                               Style="{StaticResource Field.Hint}" />
+                    <TextBlock Text="Krój nakładki" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <ComboBox x:Name="CmbTuneFont" DisplayMemberPath="Label" AutomationProperties.Name="Krój nakładki w profilu" />
+                    <TextBlock Text="Działa, gdy w sekcji Wygląd nakładki krój to „Jak w grze”." Style="{StaticResource Field.Hint}" />
+                    <TextBlock Text="Zalecany tryb" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <ComboBox x:Name="CmbTuneMode" DisplayMemberPath="Label" AutomationProperties.Name="Zalecany tryb" />
+                    <TextBlock Text="Podpowiedź w profilu — nie zmienia działania tłumacza." Style="{StaticResource Field.Hint}" />
+
+                    <TextBlock Text="OCR I TRYB LIVE" Style="{StaticResource Text.Overline}" Margin="0,22,0,0" />
+                    <TextBlock Text="Powiększenie przed OCR" Style="{StaticResource Text.Label}" Margin="0,10,0,7" />
+                    <ComboBox x:Name="CmbTuneUpscale" DisplayMemberPath="Label" AutomationProperties.Name="Powiększenie przed OCR" />
+                    <TextBlock Text="Automatycznie = ustawienia aplikacji (2× dla małych regionów). Drobny tekst: 2× albo 3×." Style="{StaticResource Field.Hint}" />
+                    <TextBlock Text="Minimalna wysokość tekstu (px)" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <TextBox x:Name="TxtTuneMinHeight" MaxLength="4" AutomationProperties.Name="Minimalna wysokość tekstu w pikselach" />
+                    <TextBlock Text="Puste = brak. 4–64 px. Zapisuje się w profilu; ta wersja tłumacza jeszcze z niej nie korzysta."
+                               Style="{StaticResource Field.Hint}" />
+                    <TextBlock Text="Analiz na sekundę" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <TextBox x:Name="TxtTuneFps" MaxLength="6" AutomationProperties.Name="Analiz na sekundę w trybie live" />
+                    <TextBlock Text="Puste = 6. Zakres 1–30: więcej to szybsza reakcja i większe obciążenie komputera." Style="{StaticResource Field.Hint}" />
+                    <TextBlock Text="Próg zmiany obrazu" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <TextBox x:Name="TxtTuneThreshold" MaxLength="8" AutomationProperties.Name="Próg zmiany obrazu w trybie live" />
+                    <TextBlock Text="Puste = 0, czyli reakcja na każdą wyraźną zmianę. Zakres 0–0,5 (część obrazu); 0,02–0,05 dla gier z ruchomym tłem."
+                               Style="{StaticResource Field.Hint}" />
+
+                    <TextBlock Text="Pomijane obszary" Style="{StaticResource Text.Label}" Margin="0,14,0,7" />
+                    <ItemsControl x:Name="ListTuneRegions" Focusable="False">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Style="{StaticResource Card.Inset}" Padding="12,10" Margin="0,0,0,8">
+                            <StackPanel>
+                              <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="Usuń" Style="{StaticResource Btn.Chip}" ui:Visuals.Glyph="&#xE74D;" Margin="0"
+                                        AutomationProperties.Name="Usuń obszar" Click="OnTuneRemoveRegionClick" />
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                              </DockPanel>
+                              <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="*" />
+                                  <ColumnDefinition Width="8" />
+                                  <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                  <RowDefinition Height="Auto" />
+                                  <RowDefinition Height="Auto" />
+                                  <RowDefinition Height="Auto" />
+                                  <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="Od lewej (X)" Style="{StaticResource Text.Label}" />
+                                <TextBox Grid.Row="1" Text="{Binding X, UpdateSourceTrigger=PropertyChanged}" MaxLength="8" AutomationProperties.Name="Od lewej (X)" />
+                                <TextBlock Grid.Column="2" Text="Od góry (Y)" Style="{StaticResource Text.Label}" />
+                                <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding Y, UpdateSourceTrigger=PropertyChanged}" MaxLength="8" AutomationProperties.Name="Od góry (Y)" />
+                                <TextBlock Grid.Row="2" Text="Szerokość" Style="{StaticResource Text.Label}" Margin="0,10,0,7" />
+                                <TextBox Grid.Row="3" Text="{Binding Width, UpdateSourceTrigger=PropertyChanged}" MaxLength="8" AutomationProperties.Name="Szerokość obszaru" />
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="Wysokość" Style="{StaticResource Text.Label}" Margin="0,10,0,7" />
+                                <TextBox Grid.Row="3" Grid.Column="2" Text="{Binding Height, UpdateSourceTrigger=PropertyChanged}" MaxLength="8" AutomationProperties.Name="Wysokość obszaru" />
+                              </Grid>
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button x:Name="BtnTuneAddRegion" Content="Dodaj obszar" ui:Visuals.Glyph="&#xE710;" HorizontalAlignment="Left" Click="OnTuneAddRegionClick" />
+                    <TextBlock Text="Tryb live pomija linie OCR ze środkiem w obszarze (np. zegar). Ułamki okna gry 0–1, np. 0,425."
+                               Style="{StaticResource Field.Hint}" />
+
+                    <TextBlock Text="OPIS" Style="{StaticResource Text.Overline}" Margin="0,22,0,0" />
+                    <TextBox x:Name="TxtTuneDescription" Margin="0,10,0,0" MaxLength="2000" TextWrapping="Wrap" AcceptsReturn="False"
+                             VerticalContentAlignment="Top" Padding="11,9" MinHeight="76" MaxHeight="160"
+                             VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Opis profilu" />
+                    <TextBlock x:Name="TxtTuneKept" Style="{StaticResource Text.Status}" FontSize="12" Margin="0,12,0,0" />
+
+                    <WrapPanel Margin="0,16,0,-8">
+                      <Button x:Name="BtnSaveTune" Content="Zapisz profil" Style="{StaticResource Btn.Primary}" ui:Visuals.Glyph="&#xE74E;"
+                              Click="OnSaveTuneClick" Margin="0,0,8,8" />
+                      <Button Content="Anuluj" Style="{StaticResource Btn.Ghost}" Click="OnCancelProfileEditClick" Margin="0,0,8,8" />
                     </WrapPanel>
                   </StackPanel>
 
