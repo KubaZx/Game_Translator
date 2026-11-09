@@ -203,9 +203,14 @@ automatycznie, a ReportGenerator scala **wszystkie** pliki `coverage.cobertura.x
 w nim znajdzie. Z resztkami poprzednich przebiegów pokrycie lokalne wychodzi zawyżone względem
 CI, które zawsze startuje od czystego checkoutu.
 
+Build do pomiaru pokrycia musi wyłączyć mapowanie ścieżek źródeł (`-p:PathMap=`). Od 0.10.0
+build Release zamienia ścieżki źródeł na `/_/`, żeby pliki programu nie niosły ścieżek
+z komputera autora; z takim mapowaniem coverlet nie znajduje plików źródłowych i pomija moduły,
+a raport wychodzi pusty. Paczkę wydania buduj potem zwykłym poleceniem, bez tego parametru.
+
 ```bash
 rm -rf TestResults            # PowerShell: Remove-Item -Recurse -Force TestResults
-dotnet build GameTranslatorOverlay.slnx -c Release -p:EnableWindowsTargeting=true
+dotnet build GameTranslatorOverlay.slnx -c Release -p:EnableWindowsTargeting=true -p:PathMap=
 dotnet test GameTranslatorOverlay.slnx -c Release --no-build -p:EnableWindowsTargeting=true --collect:"XPlat Code Coverage" --settings tests/coverage.runsettings --results-directory TestResults
 dotnet tool restore
 dotnet tool run reportgenerator "-reports:TestResults/**/coverage.cobertura.xml" "-targetdir:TestResults/coverage-report" "-reporttypes:HtmlInline;MarkdownSummaryGithub;Cobertura"

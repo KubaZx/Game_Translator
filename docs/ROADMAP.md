@@ -2125,6 +2125,11 @@ z tym regularnie”, a licencją jest MIT.
 - scenariusz `provider-failure` powstał bez wyłączenia bramki widoczności i nie robił żadnego
   odczytu (okno powtórki nie jest na pierwszym planie).
 
+Po wypchnięciu na `main` padł jeszcze próg pokrycia na Linuksie: mapowanie ścieżek źródeł
+(`PathMap`) sprawia, że coverlet nie znajduje plików i pomija moduły, więc raport był pusty.
+Build do pomiaru pokrycia wyłącza teraz mapowanie (`-p:PathMap=`); testy na obu systemach
+przechodziły od początku.
+
 **Pomiary.** SceneReplay, po jednym przebiegu: `black-frame` — 0 klatek ze zrzutu ekranu, bez
 ostrzeżenia; `provider-failure` — 15 odczytów ekranu, 1 zapytanie, wstrzymanie trwałe;
 `displayed`/`stop` — stary napis usunięty po 35–36 ms; `typing` — 2 zapytania; `stale-junk`,

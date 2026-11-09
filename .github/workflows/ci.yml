@@ -44,7 +44,7 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Build
-        run: dotnet build GameTranslatorOverlay.slnx -c Release -p:EnableWindowsTargeting=true
+        run: dotnet build GameTranslatorOverlay.slnx -c Release -p:EnableWindowsTargeting=true -p:PathMap=
 
       # Pokrycie zbiera coverlet.collector (już w projektach testowych); co liczymy,
       # a czego nie (kod generowany, obj/, same testy), ustala tests/coverage.runsettings.
