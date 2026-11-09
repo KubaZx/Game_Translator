@@ -91,6 +91,8 @@ public sealed class LiveSessionOptions
 
     public TimeSpan StabilityDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 
+    public TimeSpan QuickStabilityDelay { get; init; } = TimeSpan.FromMilliseconds(160);
+
     /// <summary>
     /// Przy ciągłych zmianach (animowane tło) przetwarzaj mimo braku stabilizacji.
     /// W żywej grze 3D szum sceny stale przekracza <see cref="ChangeThreshold"/>,
@@ -189,6 +191,8 @@ public sealed class LiveSessionOptions
 
     public bool RequireGameVisible { get; init; } = true;
 
+    public TimeSpan EarlyKnownReadDelay { get; init; } = TimeSpan.FromMilliseconds(80);
+
     public double FastTrackFps { get; init; } = 30;
 
     public TimeSpan TrackedMotionPause { get; init; } = TimeSpan.FromMilliseconds(900);
@@ -260,6 +264,8 @@ public sealed class LiveTranslationSession(
     private bool _captureInitialized;
     private readonly CaptureRoute _route = new();
     private readonly GraphicsFrameTrust _graphicsTrust = new();
+    private readonly EarlyReadGate _earlyRead = new(options.EarlyKnownReadDelay);
+    private EarlyCarry? _earlyCarry;
     private int _screenFrameStreak;
     private readonly GamePauseGate _pauseGate = new();
     private readonly LiveFailureBackoff _backoff = new();
@@ -326,6 +332,15 @@ public sealed class LiveTranslationSession(
     private double _diagnosticFastTrackMs;
     private double _diagnosticSceneCheckMs;
     private sealed record PendingTextArea(string Key, RectPx Box, int TextRgb, int BackgroundRgb);
+
+    private sealed record EarlyRead(
+        OcrResult Ocr, double OcrMs, IReadOnlyDictionary<string, TranslationOutcome> Known, bool LocalOnly);
+
+    private sealed record EarlyCarry(
+        OcrBitmap Frame, OcrBitmap? Native, double ScaleBack, RectPx Region, bool Partial, RectPx FrameRect,
+        EarlyRead Read, TimeSpan At);
+
+    private static readonly TimeSpan EarlyCarryGrace = TimeSpan.FromMilliseconds(250);
     private readonly List<PendingTextArea> _pendingTextAreas = [];
     private bool _pendingTextGone;
     private byte[]? _presenceRowBuffer;
@@ -588,7 +603,7 @@ public sealed class LiveTranslationSession(
     private async Task LoopAsync(CancellationToken cancellationToken)
     {
         var clock = Stopwatch.StartNew();
-        var stabilizer = new ChangeStabilizer(options.StabilityDelay, options.ForcedProcessInterval);
+        var stabilizer = new ChangeStabilizer(options.StabilityDelay, options.ForcedProcessInterval, options.QuickStabilityDelay);
         var interval = TimeSpan.FromSeconds(1.0 / Math.Clamp(options.Fps, 0.5, 30.0));
         var wasMinimized = false;
 
@@ -716,6 +731,7 @@ public sealed class LiveTranslationSession(
                     ? TimeSpan.FromSeconds(1.0 / Math.Clamp(Math.Max(options.Fps, Math.Min(options.MotionFps, options.Fps * 2)), 0.5, 30.0))
                     : interval;
                 var remaining = stabilizer.GetPollingDelay(now, pace - (now - cycleStart), pace);
+                if (pace < options.StabilityDelay) remaining = _earlyRead.GetPollingDelay(now, remaining);
                 if (remaining > TimeSpan.Zero)
                 {
                     await DelayWithFastTrackAsync(remaining, LostReadSettled() is { } settled
@@ -1068,6 +1084,9 @@ public sealed class LiveTranslationSession(
         double strongFraction;
         double significantFraction;
         long captureMs;
+        var early = false;
+        RectPx? earlyDirty = null;
+        EarlyRead? carriedRead = null;
 
         var captureStartedTimestamp = Stopwatch.GetTimestamp();
         var sampledAt = clock.Elapsed;
@@ -1109,6 +1128,9 @@ public sealed class LiveTranslationSession(
             // Scena w ruchu (bieg, przesuw kamery): każdy wynik OCR wylądowałby w miejscu,
             // z którego tekst już odpłynął. Ruch poznajemy po MOCNYCH zmianach pikseli —
             // falująca mgła/pogoda zmienia komórki subtelnie i ruchem nie jest.
+            if (isMoving) _earlyRead.Clear();
+            else _earlyRead.Observe(frameChanged, motionNow);
+            if (isMoving || frameChanged) _earlyCarry = null;
             if (isMoving)
             {
                 _pendingDirtyRegion = frameRect;
@@ -1143,11 +1165,32 @@ public sealed class LiveTranslationSession(
             }
             if (shouldProcess)
             {
+                _earlyRead.Clear();
+            }
+            else if (!frameChanged && !isMoving && stabilizer.IsDirty && orchestrator.PipelineReady && _earlyRead.IsDue(clock.Elapsed))
+            {
+                _earlyRead.Clear();
+                early = true;
+                shouldProcess = true;
+                earlyDirty = _pendingDirtyRegion;
+            }
+            if (shouldProcess)
+            {
+                var carry = !early && !forceProcess && !heartbeatDue && _earlyCarry is { } kept
+                    && kept.FrameRect == frameRect && clock.Elapsed - kept.At <= options.StabilityDelay + EarlyCarryGrace
+                    ? kept
+                    : null;
+                _earlyCarry = null;
                 ocrRegion = frameRect;
                 var dirty = _pendingDirtyRegion;
                 _pendingDirtyRegion = null;
 
-                if (dirty is { } dirtyRegion && !heartbeatDue)
+                if (carry is not null)
+                {
+                    ocrRegion = carry.Region;
+                    partialOcr = carry.Partial;
+                }
+                else if (dirty is { } dirtyRegion && !heartbeatDue)
                 {
                     // Region rozszerzamy o zapas i o wyświetlane bloki, które na niego
                     // nachodzą — do PUNKTU STAŁEGO: unia z blokiem może dosunąć region do
@@ -1204,36 +1247,71 @@ public sealed class LiveTranslationSession(
                     }
                 }
 
-                using var crop = partialOcr
-                    ? bitmap.Clone(
-                        new System.Drawing.Rectangle(ocrRegion.X, ocrRegion.Y, ocrRegion.Width, ocrRegion.Height),
-                        System.Drawing.Imaging.PixelFormat.Format32bppArgb)
-                    : null;
-                var source = crop ?? bitmap;
-
-                // Powiększanie z profilu służy małym wycinkom — skalowanie całej klatki
-                // 1080p do 4K kosztowałoby sekundę+ na każde przetworzenie.
-                var preferredUpscale = source.Width >= 1000 || source.Height >= 700 ? 0.0 : options.OcrUpscale;
-                var downscale = OcrScaling.ComputeDownscale(source.Width, source.Height, ocrProvider.MaxImageDimension);
-                var factor = downscale < 1.0
-                    ? downscale
-                    : OcrScaling.ComputeUpscale(
-                        source.Width, source.Height, ocrProvider.MaxImageDimension, preferredUpscale, options.AllowAutoUpscale);
-
-                if (Math.Abs(factor - 1.0) > 0.001)
+                if (carry is not null)
                 {
-                    using var scaled = ScreenCapture.Rescale(source, factor);
-                    frameForOcr = ScreenCapture.ToOcrBitmap(scaled);
-                    ocrScaleBack = 1.0 / factor;
-                    if (!usedScreenFallback && options.BuildGlyphCovers() && orchestrator.StreamsPartialResults)
-                        nativeForOcr = ScreenCapture.ToOcrBitmap(source);
+                    frameForOcr = carry.Frame;
+                    nativeForOcr = carry.Native;
+                    ocrScaleBack = carry.ScaleBack;
+                    carriedRead = carry.Read;
                 }
                 else
                 {
-                    frameForOcr = ScreenCapture.ToOcrBitmap(source);
-                    if (!usedScreenFallback) nativeForOcr = frameForOcr;
+                    using var crop = partialOcr
+                        ? bitmap.Clone(
+                            new System.Drawing.Rectangle(ocrRegion.X, ocrRegion.Y, ocrRegion.Width, ocrRegion.Height),
+                            System.Drawing.Imaging.PixelFormat.Format32bppArgb)
+                        : null;
+                    var source = crop ?? bitmap;
+
+                    // Powiększanie z profilu służy małym wycinkom — skalowanie całej klatki
+                    // 1080p do 4K kosztowałoby sekundę+ na każde przetworzenie.
+                    var preferredUpscale = source.Width >= 1000 || source.Height >= 700 ? 0.0 : options.OcrUpscale;
+                    var downscale = OcrScaling.ComputeDownscale(source.Width, source.Height, ocrProvider.MaxImageDimension);
+                    var factor = downscale < 1.0
+                        ? downscale
+                        : OcrScaling.ComputeUpscale(
+                            source.Width, source.Height, ocrProvider.MaxImageDimension, preferredUpscale, options.AllowAutoUpscale);
+
+                    if (Math.Abs(factor - 1.0) > 0.001)
+                    {
+                        using var scaled = ScreenCapture.Rescale(source, factor);
+                        frameForOcr = ScreenCapture.ToOcrBitmap(scaled);
+                        ocrScaleBack = 1.0 / factor;
+                        if (!usedScreenFallback && options.BuildGlyphCovers() && orchestrator.StreamsPartialResults)
+                            nativeForOcr = ScreenCapture.ToOcrBitmap(source);
+                    }
+                    else
+                    {
+                        frameForOcr = ScreenCapture.ToOcrBitmap(source);
+                        if (!usedScreenFallback) nativeForOcr = frameForOcr;
+                    }
                 }
             }
+        }
+
+        var earlyRead = carriedRead;
+        if (early)
+        {
+            try
+            {
+                earlyRead = frameForOcr is null
+                    ? null
+                    : await ProbeKnownTextAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, capturedFrameRect, cancellationToken)
+                        .ConfigureAwait(false);
+            }
+            finally
+            {
+                if (earlyRead is not { LocalOnly: true } && earlyDirty is { } unread)
+                    _pendingDirtyRegion = _pendingDirtyRegion?.Union(unread) ?? unread;
+            }
+            if (earlyRead is not { LocalOnly: true })
+            {
+                if (earlyRead is not null && frameForOcr is not null)
+                    _earlyCarry = new EarlyCarry(frameForOcr, nativeForOcr, ocrScaleBack, ocrRegion, partialOcr, capturedFrameRect,
+                        earlyRead, clock.Elapsed);
+                return (changedFraction, strongFraction, significantFraction, false);
+            }
+            stabilizer.Reset();
         }
 
         if (frameForOcr is not null)
@@ -1263,7 +1341,7 @@ public sealed class LiveTranslationSession(
             try
             {
                 await ProcessFrameAsync(frameForOcr, ocrScaleBack, ocrRegion, partialOcr, capturedFrameRect, captureMs, peakChanged,
-                        captureStartedTimestamp, usedScreenFallback, clock, cancellationToken, nativeForOcr)
+                        captureStartedTimestamp, usedScreenFallback, clock, cancellationToken, nativeForOcr, earlyRead)
                     .ConfigureAwait(false);
                 frameCompleted = !_frameDiscarded;
             }
@@ -2147,34 +2225,9 @@ public sealed class LiveTranslationSession(
         return best;
     }
 
-    private async Task ProcessFrameAsync(
-        OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr, RectPx capturedFrameRect,
-        long captureMs, double peakChangedFraction, long captureStartedTimestamp,
-        bool usedScreenFallback, Stopwatch clock, CancellationToken cancellationToken, OcrBitmap? nativeFrame = null)
+    private IReadOnlyList<OcrLine> WindowLines(
+        OcrResult ocrResult, OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr, RectPx capturedFrameRect)
     {
-        var generation = _sceneValidity.Generation;
-        _frameWarningGeneration = orchestrator.QualityWarnings.Generation;
-        var ocrWatch = Stopwatch.StartNew();
-        var ocrChecksBefore = _diagnosticSceneChecks;
-        var ocrCheckMsBefore = _diagnosticSceneCheckMs;
-        double? ocrOperationMs = null;
-        var ocrStarted = Stopwatch.GetTimestamp();
-        var ocrTask = ocrProvider.RecognizeAsync(frame, orchestrator.SourceLanguage, cancellationToken);
-        if (options.EnableDiagnostics)
-            ocrTask = ObserveOperationTimeAsync(ocrTask, ocrStarted, elapsed => ocrOperationMs = elapsed);
-        var ocrResult = await AwaitWithSceneChecksAsync(ocrTask, clock, cancellationToken, ocrStartedTimestamp: ocrStarted).ConfigureAwait(false);
-        var ocrMs = ocrWatch.ElapsedMilliseconds;
-        orchestrator.Latency.Record(LatencyStage.Ocr, ocrWatch.Elapsed.TotalMilliseconds);
-        var ocrSceneChecks = _diagnosticSceneChecks - ocrChecksBefore;
-        var ocrSceneCheckMs = _diagnosticSceneCheckMs - ocrCheckMsBefore;
-        if (!_sceneValidity.IsCurrent(generation) || _pendingTextGone)
-        {
-            _refreshAfterBusyChanges = true;
-            _frameDiscarded = true;
-            return;
-        }
-        var rawLineCount = ocrResult.Lines.Count;
-
         var lines = ocrResult.Lines;
         if (Math.Abs(scaleBack - 1.0) > 0.001)
         {
@@ -2212,6 +2265,79 @@ public sealed class LiveTranslationSession(
         // do dostawcy. Sprawdzenie na blokach niżej zostaje jako druga ochrona.
         if (options.NoticeEcho is { } lineEcho) lines = lineEcho.RemoveEchoLines(lines);
         if (options.DetectInlineIcons) lines = InlineIcons.Annotate(frame, lines, ocrRegion, scaleBack);
+        return lines;
+    }
+
+    private async Task<EarlyRead?> ProbeKnownTextAsync(
+        OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr, RectPx capturedFrameRect,
+        CancellationToken cancellationToken)
+    {
+        var watch = Stopwatch.StartNew();
+        var ocr = await ocrProvider.RecognizeAsync(frame, orchestrator.SourceLanguage, cancellationToken).ConfigureAwait(false);
+        var ocrMs = watch.Elapsed.TotalMilliseconds;
+        orchestrator.Latency.Record(LatencyStage.Ocr, ocrMs);
+
+        var lines = WindowLines(ocr, frame, scaleBack, ocrRegion, partialOcr, capturedFrameRect);
+        var texts = TextBlockSplitter.SplitLabels(TextBlockGrouper.Group(lines),
+                box => BlockColorSampler.SampleColors(frame.PixelsBgra32, frame.Width, frame.Height, frame.Stride,
+                    GlyphCoverBuilder.ToSampleBox(box, ocrRegion, scaleBack)).TextRgb)
+            .Select(static block => block.Text)
+            .Where(orchestrator.ShouldTranslateLive)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var known = new Dictionary<string, TranslationOutcome>(texts.Count, StringComparer.Ordinal);
+        if (texts.Count == 0) return new EarlyRead(ocr, ocrMs, known, LocalOnly: false);
+
+        var local = await orchestrator.TranslateLocalAsync(texts, cancellationToken).ConfigureAwait(false);
+        for (var i = 0; i < texts.Count; i++)
+        {
+            if (local[i] is not { } outcome) return new EarlyRead(ocr, ocrMs, new Dictionary<string, TranslationOutcome>(), LocalOnly: false);
+            known[texts[i]] = outcome;
+        }
+        return new EarlyRead(ocr, ocrMs, known, LocalOnly: true);
+    }
+
+    private async Task ProcessFrameAsync(
+        OcrBitmap frame, double scaleBack, RectPx ocrRegion, bool partialOcr, RectPx capturedFrameRect,
+        long captureMs, double peakChangedFraction, long captureStartedTimestamp,
+        bool usedScreenFallback, Stopwatch clock, CancellationToken cancellationToken, OcrBitmap? nativeFrame = null,
+        EarlyRead? early = null)
+    {
+        var generation = _sceneValidity.Generation;
+        _frameWarningGeneration = orchestrator.QualityWarnings.Generation;
+        var ocrWatch = Stopwatch.StartNew();
+        var ocrChecksBefore = _diagnosticSceneChecks;
+        var ocrCheckMsBefore = _diagnosticSceneCheckMs;
+        double? ocrOperationMs = null;
+        var ocrStarted = Stopwatch.GetTimestamp();
+        OcrResult ocrResult;
+        long ocrMs;
+        if (early is null)
+        {
+            var ocrTask = ocrProvider.RecognizeAsync(frame, orchestrator.SourceLanguage, cancellationToken);
+            if (options.EnableDiagnostics)
+                ocrTask = ObserveOperationTimeAsync(ocrTask, ocrStarted, elapsed => ocrOperationMs = elapsed);
+            ocrResult = await AwaitWithSceneChecksAsync(ocrTask, clock, cancellationToken, ocrStartedTimestamp: ocrStarted).ConfigureAwait(false);
+            ocrMs = ocrWatch.ElapsedMilliseconds;
+            orchestrator.Latency.Record(LatencyStage.Ocr, ocrWatch.Elapsed.TotalMilliseconds);
+        }
+        else
+        {
+            ocrResult = early.Ocr;
+            ocrMs = (long)early.OcrMs;
+            ocrOperationMs = early.OcrMs;
+        }
+        var ocrSceneChecks = _diagnosticSceneChecks - ocrChecksBefore;
+        var ocrSceneCheckMs = _diagnosticSceneCheckMs - ocrCheckMsBefore;
+        if (!_sceneValidity.IsCurrent(generation) || _pendingTextGone)
+        {
+            _refreshAfterBusyChanges = true;
+            _frameDiscarded = true;
+            return;
+        }
+        var rawLineCount = ocrResult.Lines.Count;
+
+        var lines = WindowLines(ocrResult, frame, scaleBack, ocrRegion, partialOcr, capturedFrameRect);
 
         var blocks = TextBlockSplitter.SplitLabels(KeepConfirmedSplit(TextBlockGrouper.Group(lines)),
                 box => BlockColorSampler.SampleColors(frame.PixelsBgra32, frame.Width, frame.Height, frame.Stride,
@@ -2452,8 +2578,11 @@ public sealed class LiveTranslationSession(
                         throw new SceneSupersededException();
                 }
                 var texts = keyed.Select(static k => k.Block.Text).ToList();
-                var local = await TranslateLocalWithSceneChecksAsync(texts, generation, clock, cancellationToken)
-                    .ConfigureAwait(false);
+                var local = early is { } carried && texts.TrueForAll(carried.Known.ContainsKey)
+                    ? texts.Select(text => (TranslationOutcome?)carried.Known[text]).ToList()
+                    : await TranslateLocalWithSceneChecksAsync(texts, generation, clock, cancellationToken)
+                        .ConfigureAwait(false);
+                if (early is { LocalOnly: true } && local.Any(static o => o is null)) throw new SceneSupersededException();
                 if (local.All(static o => o is not null))
                 {
                     // Cała klatka jest znana (korekty, słownik, cache): bez miejsca w kolejce

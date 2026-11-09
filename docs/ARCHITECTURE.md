@@ -69,6 +69,14 @@ Zawartość:
   `Windows/LiveStartConfirmation` (drugie wciśnięcie skrótu na nieznanym oknie),
   `Usage/LiveErrorTally` (liczniki pominiętych wyjątków). `LiveTranslationSession` tylko je
   wywołuje i wykonuje wynik.
+- **Wczesny odczyt znanego tekstu** (od 0.10.1): `Vision/EarlyReadGate` pozwala na jeden odczyt
+  OCR ok. 80 ms po ostatniej zmianie obrazu, przed końcem okna stabilności (250 ms). Gdy cały
+  odczyt jest znany lokalnie (`TranslateLocalAsync`), klatka idzie zwykłą ścieżką bez dostawcy;
+  w innym razie wynik OCR czeka i zwykły odczyt po oknie stabilności używa go zamiast czytać
+  ekran drugi raz — o ile żadna próbka po drodze nie pokazała zmiany. Wczesny odczyt nigdy nie
+  wysyła tekstu do dostawcy. `ChangeStabilizer` ma krótsze okno (160 ms) dla pojedynczej zmiany
+  po co najmniej 0,6 s spokoju; druga zmiana w serii, ruch, wymuszone ponowne czytanie i zmiana
+  zgłoszona wstecz przywracają pełne 250 ms.
 - **Ochrona danych gracza** (od 0.10.0): `JsonSettingsStore` czyta `settings.json` pole po polu,
   przy nieczytelnym pliku oddaje ustawienia bezpieczne (tryb prywatny i Cache-only) i blokuje
   zapis; `SqliteTranslationCache` pilnuje wersji schematu (`user_version`) i odkłada uszkodzoną

@@ -580,15 +580,28 @@ public static class BlockColorSampler
 /// po <see cref="_maxDirtyDuration"/> ciągłych zmian przetwarzamy klatkę mimo wszystko,
 /// inaczej tłumaczenie czekałoby w nieskończoność na spokój, który nie nadejdzie.
 /// </summary>
-public sealed class ChangeStabilizer(TimeSpan stabilityDelay, TimeSpan? maxDirtyDuration = null)
+public sealed class ChangeStabilizer(
+    TimeSpan stabilityDelay, TimeSpan? maxDirtyDuration = null, TimeSpan? quickDelay = null, TimeSpan? quietBeforeQuick = null)
 {
+    public static readonly TimeSpan DefaultQuietBeforeQuick = TimeSpan.FromMilliseconds(600);
+
     private readonly TimeSpan _stabilityDelay = stabilityDelay;
     private readonly TimeSpan _maxDirtyDuration = maxDirtyDuration ?? TimeSpan.FromTicks(stabilityDelay.Ticks * 4);
+    private readonly TimeSpan _quickDelay = quickDelay is { } quick && quick > TimeSpan.Zero && quick < stabilityDelay
+        ? quick
+        : stabilityDelay;
+    private readonly TimeSpan _quietBeforeQuick = quietBeforeQuick ?? DefaultQuietBeforeQuick;
     private bool _dirty;
+    private bool _quick;
     private TimeSpan _lastChangeAt;
     private TimeSpan _dirtySince;
+    private TimeSpan? _previousChangeAt;
+
+    private TimeSpan CurrentDelay => _quick ? _quickDelay : _stabilityDelay;
 
     public bool IsDirty => _dirty;
+
+    public TimeSpan LastChangeAt => _lastChangeAt;
 
     /// <summary>
     /// A dirty image may become ready between normal capture ticks (250 ms versus
@@ -603,7 +616,7 @@ public sealed class ChangeStabilizer(TimeSpan stabilityDelay, TimeSpan? maxDirty
         // A low configured FPS is a deliberate capture limit. Compare the full
         // interval, not the remaining delay after capture/processing consumed time.
         if (!_dirty || pollingInterval >= _stabilityDelay) return normalDelay;
-        var untilStable = _lastChangeAt + _stabilityDelay - elapsed;
+        var untilStable = _lastChangeAt + CurrentDelay - elapsed;
         return untilStable > TimeSpan.Zero && untilStable < normalDelay
             ? untilStable : normalDelay;
     }
@@ -616,9 +629,15 @@ public sealed class ChangeStabilizer(TimeSpan stabilityDelay, TimeSpan? maxDirty
             if (!_dirty)
             {
                 _dirtySince = elapsed;
+                _quick = _previousChangeAt is not { } before || elapsed - before >= _quietBeforeQuick;
+            }
+            else
+            {
+                _quick = false;
             }
             _dirty = true;
             _lastChangeAt = elapsed;
+            _previousChangeAt = elapsed;
 
             // Animowane tło: obraz zmienia się bez przerwy — przetwarzaj cyklicznie.
             if (elapsed - _dirtySince >= _maxDirtyDuration)
@@ -629,7 +648,7 @@ public sealed class ChangeStabilizer(TimeSpan stabilityDelay, TimeSpan? maxDirty
             return false;
         }
 
-        if (_dirty && elapsed - _lastChangeAt >= _stabilityDelay)
+        if (_dirty && elapsed - _lastChangeAt >= CurrentDelay)
         {
             _dirty = false;
             return true;
@@ -640,6 +659,8 @@ public sealed class ChangeStabilizer(TimeSpan stabilityDelay, TimeSpan? maxDirty
 
     public void ForceDirty(TimeSpan elapsed)
     {
+        _quick = false;
+        _previousChangeAt = elapsed;
         _dirty = true;
         _lastChangeAt = elapsed;
         _dirtySince = elapsed;
@@ -662,6 +683,8 @@ public sealed class ChangeStabilizer(TimeSpan stabilityDelay, TimeSpan? maxDirty
     public void MarkDirty(TimeSpan lastChangeAt, TimeSpan now)
     {
         var changedAt = lastChangeAt < now ? lastChangeAt : now;
+        _quick = false;
+        if (_previousChangeAt is not { } before || changedAt > before) _previousChangeAt = changedAt;
         _dirtySince = now;
         if (!_dirty || changedAt > _lastChangeAt) _lastChangeAt = changedAt;
         _dirty = true;

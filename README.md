@@ -11,9 +11,13 @@ gry, bez żadnej zmiany w plikach gry.
 [Instrukcja](docs/USER_GUIDE.md) · [Zmiany](CHANGELOG.md) ·
 [CI](https://github.com/KubaZx/Game_Translator/actions/workflows/ci.yml)
 
-**Wersja: 0.10.0** · Windows 10 2004+ / 11 · portable, bez instalacji · licencja MIT
+**Wersja: 0.10.1** · Windows 10 2004+ / 11 · portable, bez instalacji · licencja MIT
 
-**Nowe w 0.10.0:** czarny ekran gry nie odsłania innych okien, tryb live wstrzymuje się i chowa
+**Nowe w 0.10.1:** tekst, który program już zna, pojawia się około 2,5 raza szybciej (w powtórce
+151 ms zamiast 380 ms od zmiany sceny do napisu), a nowy tekst wskakujący po chwili spokoju czeka
+160 ms zamiast 250 ms.
+
+**W 0.10.0:** czarny ekran gry nie odsłania innych okien, tryb live wstrzymuje się i chowa
 napisy, gdy gra schodzi na drugi plan, błąd dostawcy wstrzymuje zapytania zamiast je powtarzać,
 limit znaków na sesję ustawiany w oknie, uszkodzony plik ustawień nie
 wyłącza po cichu trybu prywatnego, edytor słownika nie gubi danych — [wszystkie zmiany](CHANGELOG.md).
@@ -55,16 +59,16 @@ cache jest szukany pod tekstem z korpusu, więc różne odczyty tego samego zdan
 | Przechwycenie w ruchu kamery (Windows Graphics Capture, 4K) | ~18 ms pełna klatka (PrintWindow ~51 ms), <1 ms wycinek pod napisem |
 | Odświeżenie położenia napisu w ruchu (tło — w trybie zakrywania) | do ~30× na sekundę |
 | Sprawdzanie zmian na ekranie w live | 6× na sekundę (co ~167 ms); w ruchu kamery przy śledzeniu napisów 10× na sekundę |
-| Znany tekst (cache / słownik): od pojawienia się do gotowego napisu | ~0,3–0,45 s |
+| Znany tekst (cache / słownik): od pojawienia się do gotowego napisu | ~0,15–0,3 s (było ~0,3–0,45 s; w powtórce 151 ms zamiast 380 ms) |
 | Odczyt 20 napisów z cache | ~0,25 ms na klatkę (było 10–13 ms) |
-| Nowy tekst (pierwszy raz) | ~0,3–0,5 s + czas odpowiedzi dostawcy |
+| Nowy tekst (pierwszy raz) | ~0,25–0,5 s + czas odpowiedzi dostawcy (w powtórce po chwili spokoju 240 ms zamiast 375–382 ms) |
 | Nowy tekst z DeepL (Mock opóźniony o zmierzony czas DeepL) | ~0,50–0,59 s; model językowy bez rozumowania ~1,0–1,3 s |
 | Nowy tekst przy dostawcy odpowiadającym 2 s | ~2,3–2,5 s (było do 4,1 s) |
 | Pierwsza linia przy strumieniu modelu (5 linii; symulowany model: 0,9 s do pierwszej linii, potem 0,35 s na linię) | ~1,5 s, bez strumienia ~2,9 s |
 | Zniknięcie napisu, gdy tekst w grze się zmienił | ~12–170 ms |
 | Zniknięcie napisu przykrytego w grze panelem | ~14–18 ms (było ~0,3 s) |
 | Zniknięcie tłumaczenia, gdy napis zniknął z teksturowanego tła | 0,29–0,55 s (było ~0,9 s, ~6 s albo wcale) |
-| To samo, gdy w miejscu napisu zostaje coś jasnego (brak dowodu w pikselach) | ~0,87–3,2 s |
+| To samo, gdy w miejscu napisu zostaje coś jasnego (brak dowodu w pikselach) | 0,19–0,28 s (w 0.5.0 było ~0,87–3,2 s) |
 | Kwestia pisana literami (tryb zakrywania): pełne tłumaczenie po ostatniej literze | ok. 0,1–0,3 s |
 | Najdłuższa pauza OCR przy ciągłym ruchu kamery | 0,9 s przy śledzeniu napisów, poza tym (zapasowy zrzut ekranu) 2,5 s |
 | Pełne ponowne sprawdzenie ekranu | co 4 s, także gdy w innym miejscu ekranu coś się rusza (było: w takiej scenie ponad 10 s bez pełnego odczytu) |
@@ -210,7 +214,7 @@ dotnet run --project src/GameTranslatorOverlay.App
 - Linux: dodaj `-p:EnableWindowsTargeting=true` (testy DPAPI i OCR wymagają Windows).
 - Paczka portable: `./tools/package.ps1` → `dist/`.
 - Wydanie: tag `v*` zgodny z wersją w `Directory.Build.props` → CI buduje zip i dodaje go do Releases.
-- Testy: 2549 (1883 Core + 499 Infrastructure + 167 CorpusTool; na Linuksie 3 testy DPAPI są
+- Testy: 2570 (1904 Core + 499 Infrastructure + 167 CorpusTool; na Linuksie 3 testy DPAPI są
   pomijane), bez kluczy API i bez gry — wyłącznie dane syntetyczne. CI sprawdza pokrycie kodu
   (Core ≥ 91%, Infrastructure ≥ 80%). Szczegóły: [TESTING.md](docs/TESTING.md).
 - Benchmarki BenchmarkDotNet: `benchmarks/` — [BENCHMARKS.md](docs/BENCHMARKS.md).

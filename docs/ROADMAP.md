@@ -1,8 +1,13 @@
 # Roadmap — GameTranslatorOverlay
 
-## Obecny stan — 9 listopada 2026
+## Obecny stan — 10 listopada 2026
 
-Ostatnie wydanie to **0.10.0** (9 listopada 2026, runda 2026-11-09 (12)), pierwsza runda po
+Ostatnie wydanie to **0.10.1** (10 listopada 2026, runda 2026-11-09 (13)): wczesny odczyt
+znanego tekstu — napis dla tekstu z cache, słownika albo korpusu ok. 2,5 raza szybciej
+w powtórce (151 ms zamiast 380 ms) — i krótsze okno stabilności (160 ms) dla nowego tekstu
+po pojedynczej zmianie i chwili spokoju (240 ms zamiast 375–382 ms).
+
+Wcześniej **0.10.0** (9 listopada 2026, runda 2026-11-09 (12)), pierwsza runda po
 audycie gotowości do 1.0: czarny kadr gry nie przełącza już sesji na zrzut ekranu, tryb live
 wstrzymuje się i chowa nakładkę, gdy gra jest zasłonięta, zrzut ekranu ma trwałe ostrzeżenie,
 skrót live na nieznanym oknie wymaga potwierdzenia, błąd dostawcy wstrzymuje zapytania, limit
@@ -228,6 +233,15 @@ wizualnych na kolejnych grach.
     z testem pobranego pliku, instalator albo podpis (audyt 2026-11-09).
 47. Testy projektu aplikacji: ok. 11,5 tys. linii bez testów jednostkowych; kolejne decyzje
     wynosić do Core tak jak `CaptureRoute` i `GameVisibility` (audyt 2026-11-09).
+48. ✅ Szybszy napis dla znanego tekstu — runda 2026-11-09 (13). Otwarte: pomiar w grze
+    (panel Szybkość), wpływ dodatkowego rozpoznania tekstu na płynność gry (42), gęstsze
+    próbkowanie, wyłącznik w oknie (44). Punkt wyjścia: z 0,3–0,45 s od pojawienia się tekstu do napisu około
+    250 ms to celowe czekanie na stabilny obraz, a do 167 ms czekanie na próbkę (6 na sekundę).
+    Pomysł: wczesny odczyt zaraz po zmianie i pokazanie wyniku od razu, gdy tekst jest w cache,
+    słowniku albo korpusie; nowy tekst dalej czeka pełne okno, więc dostawca nie dostaje
+    odczytów z połowy animacji. Do zmierzenia w SceneReplay i w grze (panel Szybkość, „Zmiana →
+    napis”); gęstsze próbkowanie dopiero po pomiarze wpływu na grę (42) — pytanie autora
+    2026-11-09.
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -2142,3 +2156,75 @@ i `manual-correction` — zgodnie z oczekiwaniem; `ui-fonts background` — maks
 
 **Otwarte.** Sesja autora w grze (M56–M61 oraz zaległe M48–M55); lista z kierunku 40; kierunki
 39 i 41–45 przed 1.0, 46–47 po 1.0.
+
+### Runda 2026-11-09 (13) — wczesny odczyt znanego tekstu (wydanie 0.10.1)
+
+**Skąd.** Pytanie autora po 0.10.0: czy da się szybciej. Z czasu „znany tekst: 0,3–0,45 s”
+250 ms to czekanie na stabilny obraz (`ChangeStabilizer`), a do 167 ms czekanie na próbkę
+(6 na sekundę). Samo czekanie jest potrzebne tylko nowemu tekstowi — chroni dostawcę przed
+odczytami z połowy animacji.
+
+**Zrobione.**
+
+- `Vision/EarlyReadGate` (Core, z testami): po zmianie obrazu widzianej przez detektor uzbraja
+  jedną próbę wczesnego odczytu i budzi pętlę 80 ms po ostatniej zmianie. Ruch kamery, wymuszone
+  ponowne czytanie i zwykłe przetworzenie klatki próbę kasują; przy rytmie próbek nie szybszym niż
+  okno stabilności budzik nie działa.
+- Sesja: przy pierwszej próbce bez zmiany po tym terminie robi OCR tej klatki (sonda bez skutków
+  ubocznych: bloki z tego samego podziału linii, `TranslateLocalAsync`). Cały odczyt znany
+  lokalnie → klatka idzie zwykłą ścieżką `ProcessFrameAsync` z gotowym wynikiem OCR i zakazem
+  wysyłki (odczyt, który po pełnym podziale bloków okazałby się niepełny, jest porzucany jak
+  klatka nieaktualna i wraca po pełnym oknie). Odczyt nie w całości znany → wynik OCR, klatka
+  i region czekają (`EarlyCarry`), a zwykły odczyt po 250 ms używa ich zamiast czytać ekran
+  drugi raz, o ile żadna próbka po drodze nie pokazała zmiany ani ruchu, nie jest to pełny
+  skan okresowy i rozmiar okna jest ten sam.
+- `ChangeStabilizer`: krótsze okno (160 ms zamiast 250 ms), gdy seria zmian to jedna próbka,
+  a poprzednia zmiana była co najmniej 0,6 s wcześniej. Druga zmiana w serii, ruch
+  (`ForceDirty`), wymuszone ponowne czytanie i zmiana zgłoszona wstecz (`MarkDirty`) dają pełne
+  okno. Zwykły odczyt po krótkim oknie używa wyniku wczesnego odczytu, więc nowy tekst idzie
+  do dostawcy ok. 160 ms po zmianie plus przechwycenie.
+- SceneReplay: `--early-read-ms` i `--quick-stable-ms` (0 wyłącza) oraz pola `earlyReadMs`
+  i `quickStableMs` w nagłówku raportu.
+
+**Pomiary** (SceneReplay, ta sama wersja narzędzia, na przemian z opcją 0 i 80):
+
+- znany tekst (`aba`, powrót do sceny z cache, `finalReadyMs`): 380 → 151 ms (mediany, 3+3
+  przebiegi); wcześniejsza seria 5+5 przed drugim krokiem: 383 → 161 ms;
+- nowy tekst (`displayed --ocr windows --provider-delay-ms 0`, fazy 0/40/80/120/160 ms, po 2
+  przebiegi): mediana 385 → 377 ms, średnia 383 → 377 ms; przed drugim krokiem (bez ponownego
+  użycia wyniku) nowy tekst był o 12–44 ms wolniejszy;
+- zniknięcie starego napisu w tych samych 10 przebiegach: mediana 81 → 82 ms. W jednej fazie
+  wyglądało na pogorszenie (34–68 → ok. 80 ms): zmiana sceny w powtórce jest zsynchronizowana
+  z rytmem próbek, a wczesny odczyt ten rytm przesuwa — stąd pomiar po fazach;
+- zapytania do dostawcy bez zmian (3 w `aba`, 2 w `displayed`);
+- nowy tekst po chwili spokoju (`aba`, trzecia scena, 650 ms po poprzedniej zmianie; czas od
+  `scene_rendering` do publikacji, liczony z surowych zdarzeń): 0.10.0 — 375–382 ms, z wczesnym
+  odczytem — 329–332 ms, z krótszym oknem — 240 ms (mediany z 3–5 przebiegów na wariant);
+  znany tekst w serii z krótszym oknem 190 ms wobec 174 ms w tej samej serii bez niego —
+  krótsze okno nie zmienia ścieżki znanego tekstu, więc to najpewniej przesunięcie rytmu
+  próbek, ale osobnego pomiaru po fazach dla `aba` nie ma;
+- `displayed` (nowa scena zaraz po poprzedniej, brak spokoju): 380 → 377 ms, czyli krótsze okno
+  tam nie działa i niczego nie psuje;
+- stary napis, pod którym zostaje jasna plamka (`--bright-spot-px 12`, pomiar z rundy
+  2026-10-05 powtórzony na tym kodzie): `stale-junk` 193–221 ms, `stale-junk-ghost` 217–220 ms,
+  `stale-texture` 202–205 ms, `stale-newtext` 201–212 ms, `stale-busy` 275–281 ms; tabela
+  w README podawała jeszcze 0,87–3,2 s z 0.5.0. Dalszego skracania nie robiono: napis znika po
+  dwóch kolejnych próbkach bez liter, a krótszy odstęp między nimi dawałby miganie przy
+  chwilowym zasłonięciu.
+
+**Regresje.** 2570 xUnit (1904 Core + 499 Infrastructure + 167 CorpusTool), build bez ostrzeżeń.
+SceneReplay, 33 scenariusze po obu zmianach, wszystkie zgodne z oczekiwaniem: `typing` 2
+zapytania, `typing-nohold` 2 (po samym wczesnym odczycie 4; rozrzut 2–4 był też w 0.8.0),
+`stale-junk`/`stale-newtext`/`stale-newdirty`/`stale-blink` 199–218 ms, `stale-busy` 256 ms,
+`stale-fade` 396 ms, `stale-dim` i `stale-present-junk` bez zniknięcia, `displayed`/`inflight`/
+`noisy`/`aba`/`churn`/`stop` 35–37 ms, `pan-cut` 7/7, `moving-text` i `position-jitter` 0 px,
+`hud-motion`, `hud-motion-whiff`, `local-occlusion` i `local-occlusion-inflight` 0 strat,
+`local-reading` 2509 ms (przed krótszym oknem 2605 ms, Mock 2 s), `ocr-timing` mediana 229 ms,
+`black-frame` i `provider-failure` jak w rundzie 12.
+
+**Otwarte.** W grze z żywym tłem obraz rzadko „stoi”: wtedy ani wczesny odczyt, ani krótsze
+okno nie mają kiedy zadziałać i tempo wyznacza wymuszone przetwarzanie co 600 ms
+(`ForcedProcessInterval`) — do sprawdzenia w grze, ile zmian tam trafia. Okno testowe jest małe i OCR na nim trwa kilka–kilkanaście ms; w grze 4K
+rozpoznanie pełnej klatki trwa dłużej, więc zysk dla nowego tekstu (pominięty drugi OCR) może być
+większy, a koszt wczesnego odczytu na płynność gry jest niezmierzony (42). Do sprawdzenia w grze:
+M62 i raport z panelu Szybkość.

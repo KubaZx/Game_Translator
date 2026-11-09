@@ -2,6 +2,43 @@
 
 Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
+## [0.10.1] — 2026-11-10
+
+Szybszy napis: dla tekstu, który program już zna, i dla nowego tekstu, który wskakuje po chwili
+spokoju. Testy: 2570 xUnit (1904 Core + 499 Infrastructure + 167 CorpusTool), build bez
+ostrzeżeń. **W grze na żywo tego jeszcze nie
+oglądano** — czasy pochodzą z powtórek na oknie testowym (SceneReplay).
+
+### Nowe w 0.10.1
+
+- **Znany tekst pojawia się około 2,5 raza szybciej.** Dotąd każdy odczyt czekał, aż obraz
+  postoi bez zmian przez 250 ms. Teraz program czyta ekran już ok. 80 ms po ostatniej zmianie
+  i jeśli cały odczyt jest w cache, słowniku albo korpusie, pokazuje napis od razu. W powtórce
+  czas od zmiany sceny do napisu spadł z 380 ms do 151 ms (mediany z 3 przebiegów).
+- **Nowy tekst, który wskakuje po chwili spokoju, czeka krócej.** Gdy zmiana obrazu była
+  jednym skokiem, a przed nią obraz stał co najmniej 0,6 s, program czeka 160 ms zamiast
+  250 ms. Przy serii zmian (animacja, napis pisany literami, szybkie przechodzenie między
+  ekranami) zostaje pełne 250 ms, więc dostawca nie dostaje odczytów z połowy animacji.
+  Zwykły odczyt używa wyniku wczesnego odczytu, gdy obraz od tamtej chwili się nie zmienił,
+  i nie czyta ekranu drugi raz. W powtórce (dostawca natychmiastowy) nowy tekst po spokoju:
+  375–382 ms w 0.10.0, 240 ms teraz; nowy tekst zaraz po poprzedniej zmianie bez różnicy
+  (377–380 ms wobec 380–385 ms). Liczba zapytań do dostawcy się nie zmieniła, także przy
+  napisie pisanym literami.
+- Stary napis po zmianie sceny znika tak samo szybko jak w 0.10.0.
+- Tabela „Jak szybko reaguje” w README ma dzisiejsze liczby dla znikania starego napisu, pod
+  którym zostaje coś jasnego: 0,19–0,28 s. Wpis 0,87–3,2 s pochodził z wydania 0.5.0.
+- Narzędzia (dla deweloperów): SceneReplay — opcje `--early-read-ms` i `--quick-stable-ms` do
+  porównań z nowymi mechanizmami i bez nich.
+
+### Znane ograniczenia 0.10.1
+
+- Wczesny odczyt to dodatkowe rozpoznanie tekstu przy każdej zmianie ekranu, po której obraz
+  staje. Wpływu na płynność gry nie mierzono.
+- Gdy tekst znany pojawia się z animacją, napis może wskoczyć przed jej końcem i poprawić
+  położenie po zwykłym odczycie.
+- W profilach z liczbą analiz na sekundę 4 albo mniej wczesny odczyt nie działa (program
+  zachowuje ustawiony rytm).
+
 ## [0.10.0] — 2026-11-09
 
 Wydanie „bezpieczne granie”: pierwsza runda po audycie gotowości do 1.0. Program nie czyta już

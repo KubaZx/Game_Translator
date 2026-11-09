@@ -7,10 +7,13 @@ i wyświetla tłumaczenie nad grą — **nie dotykając plików ani procesu gry*
 `CorpusTool`, które uruchamiasz sam — patrz [Spolszczenie z wyprzedzeniem](#spolszczenie-z-wyprzedzeniem-korpus-gry).
 
 Projekt jest przeznaczony do różnych gier; nie wymaga profilu konkretnego tytułu.
-Instrukcja opisuje wydanie 0.10.0 — szczegóły w
+Instrukcja opisuje wydanie 0.10.1 — szczegóły w
 [historii zmian](https://github.com/KubaZx/Game_Translator/blob/main/CHANGELOG.md).
 
-**Nowe w 0.10.0** (w skrócie):
+**Nowe w 0.10.1:** tekst, który program już zna, pojawia się około 2,5 raza szybciej, a nowy
+tekst wskakujący po chwili spokoju czeka krócej ([opis](#tryb-live-automatyczny)).
+
+**W 0.10.0** (w skrócie):
 
 - **gra w tle = pauza**: po przejściu do innego okna live wstrzymuje czytanie i chowa napisy,
   a czarny ekran gry nie powoduje już czytania innych okien ([opis](#tryb-live-automatyczny)),
@@ -242,7 +245,9 @@ W panelu wyniku możesz:
 
 1. W sekcji **Gra** kliknij okno gry na liście **Uruchomione okna**, a potem **Start live**
    na **Pulpicie** — albo w grze wciśnij **Ctrl+Shift+L** (opis niżej).
-2. Program obserwuje okno kilka razy na sekundę; gdy pojawi się nowy, stabilny tekst,
+2. Program obserwuje okno kilka razy na sekundę. Tekst, który już zna (cache, słownik, korpus),
+   pokazuje zaraz po tym, jak obraz przestanie się zmieniać (ok. 0,1 s). Nowy tekst czeka, aż obraz
+   postoi 0,25 s (0,16 s, gdy zmiana była jednym skokiem po chwili spokoju); gdy pojawi się nowy, stabilny tekst,
    tłumaczy go automatycznie i pokazuje w nakładce.
 3. Karta **Wyświetlanie w trybie live** (sekcja **Wygląd nakładki**) wybiera układ:
    **Przy oryginale** (dymki przy tekście) albo **Napisy na dole** (pasek jak napisy filmowe —

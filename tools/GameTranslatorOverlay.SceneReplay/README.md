@@ -553,3 +553,25 @@ jest na pierwszym planie) — bramki „gra w tle” powtórki nie sprawdzają.
 GameTranslatorOverlay.SceneReplay.exe --scenario black-frame --output C:\pomiary\black-1.jsonl
 GameTranslatorOverlay.SceneReplay.exe --scenario provider-failure --output C:\pomiary\provider-1.jsonl
 ```
+
+## Wczesny odczyt znanego tekstu (0.10.1)
+
+`--early-read-ms 0..250` (tylko `displayed`, `inflight`, `noisy`, `aba`, `churn`, `stop`) ustawia
+opóźnienie wczesnego odczytu sesji; `0` wyłącza go, bez opcji działa wartość domyślna aplikacji
+(80 ms). Wartość trafia do nagłówka raportu (`earlyReadMs`). Do porównania „z i bez” na tej samej
+wersji narzędzia (`--quick-stable-ms 0..250` robi to samo dla krótszego okna stabilności po
+pojedynczej zmianie; `0` wyłącza je, domyślnie 160 ms):
+
+```
+GameTranslatorOverlay.SceneReplay.exe --scenario aba --provider-delay-ms 0 --early-read-ms 0 --output C:\pomiary\aba-bez.jsonl
+GameTranslatorOverlay.SceneReplay.exe --scenario aba --provider-delay-ms 0 --early-read-ms 80 --output C:\pomiary\aba-z.jsonl
+```
+
+W `aba` powrót do pierwszej sceny to tekst znany z cache: `finalReadyMs` mierzy czas od zmiany
+sceny do napisu. Nowy tekst mierz scenariuszem `displayed --provider-delay-ms 0` z kilkoma
+wartościami `--phase-ms` (0, 40, 80, 120, 160): zmiana sceny jest zsynchronizowana z rytmem próbek
+sesji, więc jedna faza pokazuje przesunięcie rytmu, a nie różnicę w szybkości. W `displayed`
+i przy pierwszej zmianie w `aba` nowa scena przychodzi zaraz po poprzedniej, więc krótsze okno
+tam nie działa; jego efekt widać w `aba` na trzeciej scenie (nowy tekst 650 ms po poprzedniej
+zmianie) — czas od zdarzenia `scene_rendering` sceny 3 do pierwszego `update` z tą sceną
+w `publishedScenes`.

@@ -53,6 +53,8 @@ internal static class Program
             Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink|typing|typing-nohold|pan-cut|motion-occlusion|motion-blur|quality-mark|quality-mark-clean|provider-failure|settings-change|manual-correction|black-frame] [--ocr scripted|windows]\n" +
                 "  --scenario ui-fonts --font-path sync|background (przestoj watku UI przy starcie live i nowym napisie)\n" +
                 "  [--provider-delay-ms 0..5000] [--phase-ms 0..200] [--ocr-delay-ms 100..600 only ocr-timing]\n" +
+                "  [--early-read-ms 0..250 only displayed|inflight|noisy|aba|churn|stop; 0 = bez wczesnego odczytu]\n" +
+                "  [--quick-stable-ms 0..250 te same scenariusze; 0 = bez krotszego okna po pojedynczej zmianie]\n" +
                 "  [--assets KATALOG_Z_inspect_crop.png] [--texture OBRAZ] [--texture-origin X,Y] [--bright-spot-px 4..14] only stale-*\n" +
                 "  [--fade-ms 100..1000 only stale-fade] [--dim-percent 10..90 only stale-dim] [--junk-run 1..3 only stale-present-junk]\n" +
                 "  --scenario stream|stream-refusal|stream-change|stream-partition [--stream on|off] [--stream-provider llm|claude] [--first-line-ms 0..5000] [--line-ms 0..2000]\n" +
@@ -71,6 +73,8 @@ internal static class Program
             var ocrMode = "scripted";
             var providerDelayMs = 2000;
             var phaseMs = 0;
+            int? earlyReadMs = null;
+            int? quickStableMs = null;
             var providerDelaySpecified = false;
             var phaseSpecified = false;
             var ocrDelayMs = 175;
@@ -111,6 +115,12 @@ internal static class Program
                     case "--phase-ms":
                         phaseMs = ParseMilliseconds(args[i], option, 200);
                         phaseSpecified = true;
+                        break;
+                    case "--early-read-ms":
+                        earlyReadMs = ParseMilliseconds(args[i], option, 250);
+                        break;
+                    case "--quick-stable-ms":
+                        quickStableMs = ParseMilliseconds(args[i], option, 250);
                         break;
                     case "--assets": assetsDirectory = args[i]; break;
                     case "--texture": texturePath = args[i]; break;
@@ -292,8 +302,8 @@ internal static class Program
                 throw new ArgumentException("Niezerowe --phase-ms jest dostepne tylko dla displayed oraz inflight.");
             if (scenario is ("noisy" or "aba" or "churn" or "stop") && ocrMode != "scripted")
                 throw new ArgumentException("Noisy, aba, churn and stop require scripted OCR.");
-            using var report = new Report(output, scenario, ocrMode, providerDelayMs, phaseMs);
-            return RunAsync(report, scenario, ocrMode, providerDelayMs, phaseMs).GetAwaiter().GetResult();
+            using var report = new Report(output, scenario, ocrMode, providerDelayMs, phaseMs, earlyReadMs, quickStableMs);
+            return RunAsync(report, scenario, ocrMode, providerDelayMs, phaseMs, earlyReadMs, quickStableMs).GetAwaiter().GetResult();
         }
         catch (ArgumentException ex)
         {
@@ -325,7 +335,10 @@ internal static class Program
         return (x, y);
     }
 
-    private static async Task<int> RunAsync(Report report, string scenario, string ocrMode, int providerDelayMs, int phaseMs)
+    private static readonly LiveSessionOptions SessionDefaults = new();
+
+    private static async Task<int> RunAsync(
+        Report report, string scenario, string ocrMode, int providerDelayMs, int phaseMs, int? earlyReadMs, int? quickStableMs)
     {
         var paths = new AppPaths(Path.Combine(Path.GetTempPath(), "gto-scenereplay-" + Guid.NewGuid().ToString("N")));
         var settings = new AppSettings { Provider = MockTranslationProvider.ProviderName, PrivateMode = true, ActiveProfileId = null, OcrUpscale = 1 };
@@ -348,7 +361,13 @@ internal static class Program
             sceneWindow = await SceneWindow.CreateAsync(expandedScenes: scenario == "churn");
             await sceneWindow.ChangeAsync(1, report);
             session = new LiveTranslationSession(orchestrator, ocr, sceneWindow.Handle,
-                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true }, report.Update, logging.CreateLogger("SceneReplay"));
+                new LiveSessionOptions
+                {
+                    RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true,
+                    EarlyKnownReadDelay = earlyReadMs is { } earlyMs ? TimeSpan.FromMilliseconds(earlyMs) : SessionDefaults.EarlyKnownReadDelay,
+                    QuickStabilityDelay = quickStableMs is { } quickMs ? TimeSpan.FromMilliseconds(quickMs) : SessionDefaults.QuickStabilityDelay,
+                },
+                report.Update, logging.CreateLogger("SceneReplay"));
             session.Start();
             await report.InitialDisplayed.Task.WaitAsync(TimeSpan.FromSeconds(20));
             if (phaseMs > 0) await Task.Delay(phaseMs);
@@ -572,7 +591,8 @@ internal static class Program
         public TaskCompletionSource GardenOcr { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource MiddleDisplayed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource FinalDisplayed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Report(string path, string scenario, string ocrMode, int providerDelayMs, int phaseMs)
+        public Report(
+            string path, string scenario, string ocrMode, int providerDelayMs, int phaseMs, int? earlyReadMs = null, int? quickStableMs = null)
         {
             _scenario = scenario;
             if (scenario == "noisy" && (!JunkFilter.IsMeaningful(NoisyMiddle)
@@ -582,7 +602,7 @@ internal static class Program
             _writer = new StreamWriter(new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) { AutoFlush = true };
             Event(new
             {
-                type = "header", scenario, ocrMode, provider = "Mock", providerDelayMs, phaseMs, cache = "fresh-memory", privateMode = true,
+                type = "header", scenario, ocrMode, provider = "Mock", providerDelayMs, phaseMs, earlyReadMs, quickStableMs, cache = "fresh-memory", privateMode = true,
                 phaseMeaning = "Requested wait after InitialDisplayed before the first scene 2 change; actual interval includes dispatch/render scheduling",
                 capture = "own-window-only", actualOverlayWindow = false, backgroundGrays = Enumerable.Range(1, 7).Select(scene => 20 + 18 * (scene - 1)).ToArray(),
                 sceneIntervalMs = scenario is ("aba" or "churn") ? 650 : (int?)null,

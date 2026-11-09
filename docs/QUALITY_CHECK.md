@@ -1,4 +1,7 @@
-# Sprawdzenie wydań 0.5.0–0.10.0 w grze — checklista (~140 min)
+# Sprawdzenie wydań 0.5.0–0.10.1 w grze — checklista (~145 min)
+
+**0.10.1 (szybszy napis, ~5 min):** przejdź M62 (szybszy napis dla znanego tekstu)
+z [MANUAL_TESTING.md](MANUAL_TESTING.md) i skopiuj raport z panelu Szybkość.
 
 **0.10.0 (gra w tle, czarny ekran, koszty, dane, ~25 min):** przejdź M56 (gra w tle i powrót),
 M57 (czarny ekran gry), M58 (gra, której okna nie da się przechwycić), M59 (błąd dostawcy
@@ -38,7 +41,7 @@ Wynik wystarczy zapisać w tabelach poniżej (✔ / ✘ / uwaga) i odesłać —
 
 ## 0. Przygotowanie (10 min)
 
-- [ ] Zainstalowane 0.10.0 z [Releases](https://github.com/KubaZx/Game_Translator/releases);
+- [ ] Zainstalowane 0.10.1 z [Releases](https://github.com/KubaZx/Game_Translator/releases);
       stare ustawienia i klucz są na miejscu (status „Klucz …: zapisany ✔”).
 - [ ] **Krój czcionki** pokazuje „Jak w grze (krój z profilu)” (ustawiony Segoe UI, dawny domyślny,
       przechodzi na niego raz; inny wybrany krój zostaje).

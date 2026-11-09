@@ -1,6 +1,6 @@
 # Testy i pomiary — GameTranslatorOverlay
 
-Stan sprawdzony 9 listopada 2026 (wydanie 0.10.0): **2549 testów xUnit** — **1883 Core**,
+Stan sprawdzony 9 listopada 2026 (wydanie 0.10.1): **2570 testów xUnit** — **1904 Core**,
 **499 Infrastructure** i **167 CorpusTool** — oraz kompilacja całego rozwiązania (z aplikacją
 WPF, narzędziami i benchmarkami) bez ostrzeżeń. Ta runda była weryfikowana na Windows
 (.NET 10 SDK): testy DPAPI (`[WindowsFact]`) wykonane, 0 pominiętych; powtórka `black-frame`

@@ -1306,3 +1306,19 @@ przyciskami, program startuje z włączonym trybem prywatnym i Cache-only, obok 
 jest zablokowany z komunikatem o brakującym tłumaczeniu, a zamknięcie pyta „Zapisać zmiany?”.
 W kroku 3 pierwsze wciśnięcie pokazuje „Nowe okno — wciśnij skrót jeszcze raz w ciągu 6 s…”
 i live nie startuje; dwa szybkie wciśnięcia startują live.
+
+## M62 — Szybszy napis dla znanego tekstu (0.10.1)
+
+**Kroki:**
+1. Tryb live w grze. Otwórz ekran z tekstem, który program już tłumaczył (menu, ekwipunek, ten sam
+   dialog drugi raz), zamknij go i otwórz ponownie kilka razy.
+2. Otwórz ekran z tekstem, którego program jeszcze nie widział.
+3. Popatrz na tekst pojawiający się z animacją (rozwijany dymek, napis pisany literami).
+4. Po sesji: sekcja **Pulpit → Szybkość**, **Kopiuj raport**.
+
+**Oczekiwany wynik:** w kroku 1 napisy pojawiają się wyraźnie szybciej niż w 0.10.0 (wiersz
+„Znany” i „Zmiana → napis” w panelu Szybkość). W kroku 2 czas jest taki jak dotąd albo krótszy
+(krótszy, gdy tekst wskakuje od razu po chwili bez zmian na ekranie),
+a licznik zapytań rośnie tak samo jak przedtem. W kroku 3 napis nie miga i nie pokazuje
+tłumaczenia połowy tekstu. Zapisz, jeśli napis wskakuje, znika i wraca albo gra wyraźnie zwalnia
+przy zmianach ekranu.
