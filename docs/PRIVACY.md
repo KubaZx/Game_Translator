@@ -14,8 +14,22 @@ lokalnie, i mówimy wprost, co opuszcza komputer**.
   PrintWindow). Gdy okno nie wspiera PrintWindow, a WGC jeszcze nie działa albo jest niedostępne,
   program robi zrzut ekranu (`CopyFromScreen`) w prostokącie okna gry — wtedy w kadrze mogą
   znaleźć się inne okna nad grą (ostrzeżenie pojawia się po 6 takich klatkach z rzędu albo od razu,
-  gdy WGC jest niedostępne). Przechwytywanie dzieje się tylko wtedy, gdy użytkownik tego zażąda
+  gdy WGC jest niedostępne; dopóki zrzut jest źródłem, okno programu pokazuje żółty znacznik
+  „⚠ Czytam zrzut ekranu…”). Przechwytywanie dzieje się tylko wtedy, gdy użytkownik tego zażąda
   (skrót/tryb tłumaczenia). Program niczego nie nagrywa.
+- Od 0.10.0 czarny albo jednolity kadr z okna gry jest traktowany jak obraz gry i nie uruchamia
+  zrzutu ekranu. Okno uznaje się za niewspierające PrintWindow dopiero po 3 kolejnych klatkach,
+  w których przechwycenie zawodzi, a na ekranie w miejscu gry widać treść; co 10 s program
+  próbuje wrócić do PrintWindow. Jednolita ramka WGC zastępuje obraz gry dopiero wtedy, gdy WGC
+  wcześniej w tej sesji oddało treść albo zrzut porównawczy też jest jednolity.
+- **Zrzut ekranu nie jest robiony, gdy gra jest zasłonięta**: gdy okno innego procesu na
+  pierwszym planie pokrywa co najmniej 15% okna gry. Po 2 takich cyklach tryb live wstrzymuje
+  też czytanie przez PrintWindow i WGC, czyści i chowa nakładkę („Live wstrzymany — gra w tle”)
+  i wznawia pracę po powrocie gry na pierwszy plan. Okno nad grą, które nie ma fokusu
+  (powiadomienie, nakładka innego programu), nie wstrzymuje live — przy zrzucie ekranu może
+  znaleźć się w kadrze.
+- Skrót live na oknie, którego program nie zna (nie jest zapamiętaną grą, procesem z profilu
+  ani oknem wybranym ręcznie), wymaga drugiego wciśnięcia w ciągu 6 s.
 
 ## OCR działa lokalnie
 
@@ -187,6 +201,10 @@ treść (np. czat w grze). Po włączeniu:
   w tym trybie nie trafią do niego także po wyłączeniu trybu prywatnego,
 - **bez zapamiętywania ostatniej gry** — nazwa procesu i tytuł okna są trzymane tylko w pamięci
   do zamknięcia programu (wartości zapisane wcześniej zostają w pliku),
+- **bez zapisu wyboru profilu** — profil wybrany ręcznie albo automatycznie działa do wyłączenia
+  trybu, a w `settings.json` zostaje profil zapisany wcześniej; log nie podaje identyfikatora
+  profilu,
+- **słownik tylko do odczytu** — edytor słownika niczego nie zapisuje,
 - **bez nowych własnych profili** — tworzenie, przemianowywanie i kopiowanie profili gier w oknie
   oraz zapis nazwy, procesów, tytułów okien i opisu w edytorze są zablokowane, bo zapisałyby na
   dysku nazwę gry, procesu albo tekst z tytułu okna (usuwać można; strojenie OCR, kroju, słownika,
@@ -202,6 +220,11 @@ treść (np. czat w grze). Po włączeniu:
   działa w pamięci,
 - `CorpusTool translate` odmawia pracy, gdy tryb prywatny jest włączony w `settings.json`
   (przebieg próbny `--dry-run` tylko ostrzega i niczego nie wysyła).
+
+Gdy pliku `settings.json` nie da się odczytać (uszkodzony albo zajęty), program startuje
+w trybie prywatnym i Cache-only i nie zapisuje ustawień, dopóki użytkownik nie zdecyduje, co
+zrobić z plikiem. Do 0.9.0 nieczytelny plik oznaczał ciche ustawienia domyślne, czyli wyłączony
+tryb prywatny.
 
 Uwaga: tryb prywatny nie zmienia faktu, że przy korzystaniu z zewnętrznego API rozpoznany
 tekst nadal jest wysyłany do dostawcy tłumaczeń. Strumieniowanie odpowiedzi modeli językowych

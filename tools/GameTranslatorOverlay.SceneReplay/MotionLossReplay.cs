@@ -70,7 +70,7 @@ internal static class MotionLossReplay
             await window.PanToAsync(0, glitch: false);
             report.SetTarget(CaptureGroundTruth(window.Handle, report));
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true, ReadLostBlocks = readLost },
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true, ReadLostBlocks = readLost },
                 report.Update, logging.CreateLogger("MotionLossReplay"));
             session.Start();
             await report.InitialDisplayed.Task.WaitAsync(TimeSpan.FromSeconds(20));

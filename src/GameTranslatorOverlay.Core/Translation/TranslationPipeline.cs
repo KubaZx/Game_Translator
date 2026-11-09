@@ -67,6 +67,16 @@ public enum OutcomeIssue
 
     /// <summary>Dostawca odpowiedział pustym tłumaczeniem.</summary>
     EmptyResult,
+
+    Skipped,
+}
+
+[Flags]
+public enum OutcomeNotice
+{
+    None = 0,
+    SessionLimitNear = 1,
+    CounterSkipped = 2,
 }
 
 public sealed record TranslationOutcome(
@@ -98,6 +108,8 @@ public sealed record TranslationOutcome(
     public IReadOnlyList<TranslationOutcomePart>? Parts { get; init; }
 
     public string? CacheKey { get; init; }
+
+    public OutcomeNotice Notices { get; init; }
 }
 
 /// <summary>
@@ -112,12 +124,19 @@ public sealed class TranslationPipeline(
     UsageTracker usage,
     TranslationPipelineOptions options,
     ILogger<TranslationPipeline>? logger = null,
-    CancellationToken cacheWriteCancellationToken = default)
+    CancellationToken cacheWriteCancellationToken = default,
+    TimeProvider? timeProvider = null)
 {
     private const string CacheOnlyMessage = "Tryb Cache-only — tego tekstu nie ma jeszcze w lokalnej bazie tłumaczeń.";
-    private const string SessionLimitMessage = "Osiągnięto limit znaków dla tej sesji. Zwiększ limit w ustawieniach albo zrestartuj sesję.";
+    private const string SessionLimitMessage = "Osiągnięto limit znaków dla tej sesji. Zwiększ go w polu „Limit znaków na sesję” (sekcja Tłumaczenie) albo uruchom aplikację ponownie.";
+    private const string NoLettersMessage = "Tekst bez liter nie jest wysyłany do dostawcy.";
+    private const string CounterSkippedMessage = "Zmieniający się licznik został pominięty.";
 
     private readonly ILogger _logger = logger ?? NullLogger<TranslationPipeline>.Instance;
+    private readonly ProviderCircuit _circuit = new(timeProvider);
+    private readonly FailedTextMemory _failedTexts = new(timeProvider);
+    private readonly VolatileCounterGate _counters = new(timeProvider);
+    private long _counterBatches;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _inFlight = new();
 
     // Ostatnie teksty wysłane do dostawcy tego pipeline'u razem z jego tłumaczeniami (od
@@ -175,6 +194,14 @@ public sealed class TranslationPipeline(
 
     public ITranslationProvider Provider => provider;
     public TranslationPipelineOptions Options => options;
+
+    public ProviderPauseStatus ProviderPause => _circuit.Status;
+
+    public void ResumeProvider()
+    {
+        _circuit.Resume();
+        _failedTexts.Clear();
+    }
 
     /// <summary>
     /// Płeć gracza, która wpływa na wynik tego dostawcy: ustawienie dla dostawcy świadomego
@@ -637,6 +664,7 @@ public sealed class TranslationPipeline(
         var anyProvider = false;
         var anyCache = false;
         var issues = TranslationQualityFlags.None;
+        var notices = OutcomeNotice.None;
         for (var k = 0; k < parts.Length; k++)
         {
             var unit = plan.Units[k];
@@ -646,6 +674,13 @@ public sealed class TranslationPipeline(
                 continue;
             }
             var outcome = unitOutcomes[k];
+            if (outcome is not null) notices |= outcome.Notices;
+            if (outcome is { TranslatedText: null, Issue: OutcomeIssue.Skipped } && !VolatileCounterGate.HasLetter(unit.Key))
+            {
+                parts[k] = new TranslationOutcomePart(unit.ScreenText, unit.Key, TranslationOrigin.Glossary, unit.FromCorpus);
+                translations[k] = unit.Key;
+                continue;
+            }
             if (outcome?.TranslatedText is not { } translated)
             {
                 parts[k] = new TranslationOutcomePart(unit.ScreenText, unit.Key, TranslationOrigin.Unavailable, unit.FromCorpus);
@@ -666,6 +701,7 @@ public sealed class TranslationPipeline(
                 FailureKind = failed.FailureKind,
                 Issue = failed.Issue,
                 Parts = parts,
+                Notices = notices,
             };
         }
 
@@ -675,6 +711,7 @@ public sealed class TranslationPipeline(
             QualityIssues = issues,
             Parts = parts,
             CacheKey = plan.CorrectionKey,
+            Notices = notices,
         };
     }
 
@@ -1124,6 +1161,7 @@ public sealed class TranslationPipeline(
         Action<string, TranslationOutcome?>? onPartial,
         CancellationToken cancellationToken)
     {
+        var batch = Interlocked.Increment(ref _counterBatches);
         var mine = new List<(string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)>();
         var awaited = new List<(string Source, string Normalized, Task<string> Task)>();
 
@@ -1165,8 +1203,9 @@ public sealed class TranslationPipeline(
                         toSend.Add(item);
                     }
                 }
-                if (toSend.Count > 0)
-                    await TranslateChunkAsync(toSend.ToArray(), sourceLanguage, targetLanguage, outcomes, staleFallbacks,
+                var cleared = ScreenBeforeSend(toSend, outcomes, batch);
+                if (cleared.Length > 0)
+                    await TranslateChunkAsync(cleared, sourceLanguage, targetLanguage, outcomes, staleFallbacks,
                             onPartial, cancellationToken)
                         .ConfigureAwait(false);
             }
@@ -1203,6 +1242,93 @@ public sealed class TranslationPipeline(
         }
     }
 
+    private (string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)[] ScreenBeforeSend(
+        List<(string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)> items,
+        Dictionary<string, TranslationOutcome> outcomes, long batch)
+    {
+        var passed = new List<(string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)>(items.Count);
+        var paused = _circuit.Status.IsPaused;
+        foreach (var item in items)
+        {
+            var (source, normalized, _, tcs) = item;
+            if (!VolatileCounterGate.HasLetter(normalized))
+            {
+                tcs.TrySetException(new TranslationException(TranslationFailureKind.Unknown, NoLettersMessage));
+                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, NoLettersMessage)
+                {
+                    Issue = OutcomeIssue.Skipped,
+                };
+                continue;
+            }
+
+            if (_failedTexts.TryGetBlock(normalized, out var failed))
+            {
+                if (failed.EmptyResult)
+                {
+                    tcs.TrySetException(new TranslationException(TranslationFailureKind.Unknown, TranslationQualityGate.EmptyResultMessage));
+                    outcomes[normalized] = new TranslationOutcome(
+                        source, normalized, null, TranslationOrigin.Unavailable, TranslationQualityGate.EmptyResultMessage)
+                    {
+                        Issue = OutcomeIssue.EmptyResult,
+                    };
+                }
+                else
+                {
+                    var repeated = new TranslationException(failed.Kind, failed.Message);
+                    tcs.TrySetException(repeated);
+                    outcomes[normalized] = new TranslationOutcome(
+                        source, normalized, null, TranslationOrigin.Unavailable, repeated.UserFriendlyMessage)
+                    {
+                        FailureKind = failed.Kind,
+                        Issue = OutcomeIssue.Provider,
+                    };
+                }
+                continue;
+            }
+
+            var decision = _counters.Evaluate(normalized, batch, commit: !paused);
+            if (decision.Action == CounterAction.Substitute)
+            {
+                tcs.TrySetResult(decision.Translation!);
+                outcomes[normalized] = new TranslationOutcome(source, normalized, decision.Translation, TranslationOrigin.Cache)
+                {
+                    Notices = OutcomeNotice.CounterSkipped,
+                };
+                continue;
+            }
+            if (decision.Action == CounterAction.Skip)
+            {
+                tcs.TrySetException(new TranslationException(TranslationFailureKind.Unknown, CounterSkippedMessage));
+                outcomes[normalized] = new TranslationOutcome(source, normalized, null, TranslationOrigin.Unavailable, CounterSkippedMessage)
+                {
+                    Issue = OutcomeIssue.Skipped,
+                    Notices = OutcomeNotice.CounterSkipped,
+                };
+                continue;
+            }
+
+            passed.Add(item);
+        }
+
+        if (passed.Count == 0) return [];
+        if (_circuit.TryAcquire() is { } pause)
+        {
+            var blocked = pause.ToException();
+            foreach (var (source, normalized, _, tcs) in passed)
+            {
+                tcs.TrySetException(blocked);
+                outcomes[normalized] = new TranslationOutcome(
+                    source, normalized, null, TranslationOrigin.Unavailable, blocked.UserFriendlyMessage)
+                {
+                    FailureKind = blocked.Kind,
+                    Issue = OutcomeIssue.Provider,
+                };
+            }
+            return [];
+        }
+        return passed.ToArray();
+    }
+
     /// <summary>
     /// Lokalne odmowy (limit sesji, pusty wynik) używają istniejących rodzajów błędów, ale
     /// czekający na ten sam tekst ma dostać to samo wyjaśnienie co właściciel zapytania,
@@ -1212,6 +1338,8 @@ public sealed class TranslationPipeline(
     {
         { Kind: TranslationFailureKind.QuotaExceeded, Message: SessionLimitMessage } => SessionLimitMessage,
         { Kind: TranslationFailureKind.Unknown, Message: TranslationQualityGate.EmptyResultMessage } => TranslationQualityGate.EmptyResultMessage,
+        { Kind: TranslationFailureKind.Unknown, Message: NoLettersMessage } => NoLettersMessage,
+        { Kind: TranslationFailureKind.Unknown, Message: CounterSkippedMessage } => CounterSkippedMessage,
         _ => ex.UserFriendlyMessage,
     };
 
@@ -1221,6 +1349,7 @@ public sealed class TranslationPipeline(
     {
         { Kind: TranslationFailureKind.QuotaExceeded, Message: SessionLimitMessage } => OutcomeIssue.SessionLimit,
         { Kind: TranslationFailureKind.Unknown, Message: TranslationQualityGate.EmptyResultMessage } => OutcomeIssue.EmptyResult,
+        { Kind: TranslationFailureKind.Unknown, Message: NoLettersMessage or CounterSkippedMessage } => OutcomeIssue.Skipped,
         _ => OutcomeIssue.Provider,
     };
 
@@ -1364,6 +1493,7 @@ public sealed class TranslationPipeline(
         {
             usage.RecordFailure();
             _logger.LogWarning(ex, "Dostawca {Provider} zwrócił błąd ({Kind})", provider.Name, ex.Kind);
+            RecordProviderFailure(ex.Kind, ex.Message, chunk);
             foreach (var (source, normalized, _, tcs) in chunk)
             {
                 tcs.TrySetException(ex);
@@ -1375,12 +1505,18 @@ public sealed class TranslationPipeline(
             }
             return;
         }
+        catch (Exception ex) when (ex is not TranslationException)
+        {
+            _circuit.Abandon();
+            throw;
+        }
 
         if (translations.Count != chunk.Length)
         {
             usage.RecordFailure();
             var mismatch = new TranslationException(TranslationFailureKind.Unknown,
                 $"Dostawca zwrócił {translations.Count} tłumaczeń dla {chunk.Length} tekstów.");
+            RecordProviderFailure(mismatch.Kind, mismatch.Message, chunk);
             foreach (var (source, normalized, _, tcs) in chunk)
             {
                 tcs.TrySetException(mismatch);
@@ -1394,6 +1530,8 @@ public sealed class TranslationPipeline(
         }
 
         reservation.Complete();
+        _circuit.RecordResponse();
+        var limitNotice = usage.TryTakeLimitWarning() ? OutcomeNotice.SessionLimitNear : OutcomeNotice.None;
         // Tylko udane odpowiedzi: błąd lub timeout zafałszowałby typowy czas dostawcy.
         usage.Latency.Record(LatencyStage.Provider,
             Stopwatch.GetElapsedTime(providerStarted).TotalMilliseconds);
@@ -1450,6 +1588,8 @@ public sealed class TranslationPipeline(
                 // tekst zostałby „przetłumaczony” na nic na zawsze) i liczy się jako porażka.
                 usage.RecordQualityIssue(quality);
                 usage.RecordFailure();
+                _failedTexts.RecordFailure(normalized,
+                    new FailedTextInfo(TranslationFailureKind.Unknown, TranslationQualityGate.EmptyResultMessage, EmptyResult: true));
                 tcs.TrySetException(new TranslationException(TranslationFailureKind.Unknown, TranslationQualityGate.EmptyResultMessage));
                 outcomes[normalized] = new TranslationOutcome(
                     source, normalized, null, TranslationOrigin.Unavailable, TranslationQualityGate.EmptyResultMessage)
@@ -1466,10 +1606,13 @@ public sealed class TranslationPipeline(
             }
 
             if (quality != TranslationQualityFlags.None) usage.RecordQualityIssue(quality);
+            _failedTexts.RecordSuccess(normalized);
+            if (quality == TranslationQualityFlags.None) _counters.RecordTranslated(normalized, translated);
             tcs.TrySetResult(translated);
             outcomes[normalized] = new TranslationOutcome(source, normalized, translated, TranslationOrigin.Provider)
             {
                 QualityIssues = quality,
+                Notices = limitNotice,
             };
 
             // Wynik z problemem jakości jest oznaczany, żeby następnym razem przetłumaczyć go
@@ -1490,6 +1633,16 @@ public sealed class TranslationPipeline(
                 RememberDegraded(normalized, sourceLanguage, targetLanguage, translated);
             }
         }
+    }
+
+    private void RecordProviderFailure(
+        TranslationFailureKind kind, string message,
+        (string Source, string Normalized, string Key, TaskCompletionSource<string> Tcs)[] chunk)
+    {
+        _circuit.RecordFailure(kind, message);
+        if (ProviderCircuit.IsPermanent(kind) || ProviderCircuit.IsTemporary(kind)) return;
+        var info = new FailedTextInfo(kind, message, EmptyResult: false);
+        foreach (var item in chunk) _failedTexts.RecordFailure(item.Normalized, info);
     }
 
     private async Task KeepStaleAsFinalAsync(
@@ -1565,6 +1718,7 @@ public sealed class TranslationPipeline(
             .Where(i => !skipRetry[i] && issues[i] != TranslationQualityFlags.None && !issues[i].HasFlag(TranslationQualityFlags.Empty))
             .ToList();
         if (flagged.Count == 0) return;
+        if (_circuit.Status.IsPaused) return;
 
         var retryTexts = flagged.Select(i => textsToSend[i]).ToList();
         using var reservation = usage.TryReserveApiCharacters(retryTexts.Sum(static t => t.Length));
@@ -1581,6 +1735,7 @@ public sealed class TranslationPipeline(
         catch (TranslationException ex)
         {
             _logger.LogWarning(ex, "Ponowienie tłumaczenia u dostawcy {Provider} nie powiodło się ({Kind})", provider.Name, ex.Kind);
+            _circuit.RecordFailure(ex.Kind, ex.Message);
             return;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

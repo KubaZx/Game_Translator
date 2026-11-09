@@ -6,6 +6,7 @@ using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using GameTranslatorOverlay.App.Interop;
 using GameTranslatorOverlay.Core.Ocr;
+using GameTranslatorOverlay.Core.Vision;
 using Size = System.Drawing.Size;
 
 namespace GameTranslatorOverlay.App.Capture;
@@ -69,6 +70,58 @@ public static class ScreenCapture
             return (CaptureScreenRegion(bounds), true);
         }
 
+        return (CropToVisibleFrame(printed, windowRect, bounds), false);
+    }
+
+    public static (Bitmap? Bitmap, PrintOutcome Outcome) PrintWindowFrame(IntPtr hwnd)
+    {
+        if (!NativeMethods.IsWindow(hwnd) || NativeMethods.IsIconic(hwnd)) return (null, PrintOutcome.Failed);
+
+        var bounds = GetWindowBounds(hwnd);
+        if (bounds.IsEmpty) return (null, PrintOutcome.Failed);
+
+        if (!NativeMethods.GetWindowRect(hwnd, out var windowRect)) return (null, PrintOutcome.Failed);
+        var windowWidth = windowRect.Right - windowRect.Left;
+        var windowHeight = windowRect.Bottom - windowRect.Top;
+        if (windowWidth <= 0 || windowHeight <= 0) return (null, PrintOutcome.Failed);
+
+        var printed = new Bitmap(windowWidth, windowHeight, PixelFormat.Format32bppArgb);
+        bool success;
+        using (var graphics = Graphics.FromImage(printed))
+        {
+            var hdc = graphics.GetHdc();
+            try
+            {
+                success = NativeMethods.PrintWindow(hwnd, hdc, NativeMethods.PW_RENDERFULLCONTENT);
+            }
+            finally
+            {
+                graphics.ReleaseHdc(hdc);
+            }
+        }
+
+        if (!success)
+        {
+            printed.Dispose();
+            return (null, PrintOutcome.Failed);
+        }
+
+        var outcome = LooksBlank(printed) ? PrintOutcome.Uniform : PrintOutcome.Content;
+        return (CropToVisibleFrame(printed, windowRect, bounds), outcome);
+    }
+
+    public static Bitmap? CaptureWindowScreen(IntPtr hwnd)
+    {
+        if (!NativeMethods.IsWindow(hwnd) || NativeMethods.IsIconic(hwnd)) return null;
+        var bounds = GetWindowBounds(hwnd);
+        return bounds.IsEmpty ? null : CaptureScreenRegion(bounds);
+    }
+
+    private static Bitmap CropToVisibleFrame(Bitmap printed, NativeMethods.RECT windowRect, RectPx bounds)
+    {
+        var windowWidth = windowRect.Right - windowRect.Left;
+        var windowHeight = windowRect.Bottom - windowRect.Top;
+
         // PrintWindow renderuje pełny prostokąt okna (z cieniem) — przycinamy do widocznej ramki.
         var crop = new Rectangle(
             Math.Max(0, bounds.X - windowRect.Left),
@@ -78,12 +131,12 @@ public static class ScreenCapture
 
         if (crop.Width <= 0 || crop.Height <= 0 || (crop.X == 0 && crop.Y == 0 && crop.Width == windowWidth && crop.Height == windowHeight))
         {
-            return (printed, false);
+            return printed;
         }
 
         try
         {
-            return (printed.Clone(crop, PixelFormat.Format32bppArgb), false);
+            return printed.Clone(crop, PixelFormat.Format32bppArgb);
         }
         finally
         {

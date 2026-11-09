@@ -176,8 +176,14 @@ public abstract class LlmTranslationProviderBase(LlmProviderOptions? options, IL
             IReadOnlyList<string?>? note = notes is not null ? [notes[i]] : null;
             var single = await CompleteAsync(systemPrompt, LlmTranslationPrompt.BuildUserMessage([text], previousLines, note), cancellationToken)
                 .ConfigureAwait(false);
-            var parsedSingle = LlmTranslationPrompt.ParseTranslations(single, 1) ?? throw UnreadableResponse(1);
-            singles.Add(parsedSingle[0]);
+            if (LlmTranslationPrompt.ParseTranslations(single, 1) is { } parsedSingle)
+            {
+                singles.Add(parsedSingle[0]);
+                continue;
+            }
+            Logger.LogWarning("{Provider}: odpowiedź dla pojedynczego tekstu {Index}/{Count} jest nieczytelna — zostaje bez tłumaczenia",
+                Name, i + 1, chunk.Length);
+            singles.Add(string.Empty);
         }
         return singles;
     }

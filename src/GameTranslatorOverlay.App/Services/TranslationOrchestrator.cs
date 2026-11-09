@@ -128,7 +128,31 @@ public sealed class TranslationOrchestrator(
         file is not null && System.IO.Path.GetFullPath(file).StartsWith(System.IO.Path.GetFullPath(ProfileCatalog.BundledDirectory), StringComparison.OrdinalIgnoreCase);
 
     private string ProfileLogName(GameProfile? profile) => profile is null ? "(brak)"
+        : settings.PrivateMode ? "(wybrany)"
         : IsBundledFile(ProfileFile(profile)) ? profile.Id : "(własny)";
+
+    private string? _userGlossaryLogged;
+
+    public string? UserGlossaryWarning { get; private set; }
+
+    private void LoadUserGlossary()
+    {
+        var load = userGlossaryStore.LoadChecked(settings.SourceLanguage, settings.TargetLanguage);
+        UserGlossaryWarning = load.SkippedNotice;
+        if (load.CanWrite)
+        {
+            _userGlossaryLogged = null;
+            glossaryService.LoadDocument(load.Document);
+            return;
+        }
+
+        var key = $"{load.Status}|{settings.SourceLanguage}|{settings.TargetLanguage}";
+        if (_userGlossaryLogged != key)
+        {
+            _userGlossaryLogged = key;
+            _logger.LogWarning("Słownik użytkownika został pominięty: {Status}", load.Status);
+        }
+    }
 
     private void LoadProfiles()
     {
@@ -154,20 +178,20 @@ public sealed class TranslationOrchestrator(
         var previousEpoch = Interlocked.Exchange(ref _pipelineEpoch, new CancellationTokenSource());
         previousEpoch.Cancel();
 
-        ActiveProfile = Profiles.FirstOrDefault(p => p.Id.Equals(settings.ActiveProfileId, StringComparison.OrdinalIgnoreCase));
+        ActiveProfile = Profiles.FirstOrDefault(p => !ProfileTemplates.IsTemplate(p) && p.Id.Equals(settings.ActiveProfileId, StringComparison.OrdinalIgnoreCase));
 
         var warnings = new List<string>();
         var fonts = OverlayFontRuleSet.Validate(ActiveProfile?.Overlay, Ui.OverlayFonts.IsAvailable);
         ActiveFontRules = fonts.Rules;
         var bundledProfile = ActiveProfile is not null && IsBundledFile(ProfileFile(ActiveProfile));
-        warnings.AddRange(fonts.Warnings.Select(w => bundledProfile ? $"Profil „{ActiveProfile?.Id}”: {w}" : $"Własny profil: {w}"));
+        warnings.AddRange(fonts.Warnings.Select(w => bundledProfile ? (settings.PrivateMode ? $"Wybrany profil: {w}" : $"Profil „{ActiveProfile?.Id}”: {w}") : $"Własny profil: {w}"));
         glossaryService.Clear();
         LoadGlossary("global", warnings);
         if (ActiveProfile?.Glossary is { Length: > 0 } profileGlossary)
         {
-            LoadGlossary(profileGlossary, warnings, hideName: !bundledProfile);
+            LoadGlossary(profileGlossary, warnings, hideName: !bundledProfile || settings.PrivateMode);
         }
-        glossaryService.LoadDocument(userGlossaryStore.Load(settings.SourceLanguage, settings.TargetLanguage));
+        LoadUserGlossary();
 
         // Terminy dodane w trybie prywatnym żyją tylko w pamięci — muszą przetrwać
         // każdą przebudowę pipeline'u do końca sesji aplikacji. Oznaczone jako sesyjne,
@@ -187,13 +211,15 @@ public sealed class TranslationOrchestrator(
             _privateCache = null;
         }
 
-        usage.SessionCharacterLimit = settings.SessionCharacterLimit;
+        usage.SessionCharacterLimit = ActiveProvider is OpenAiCompatibleTranslationProvider { UsesLocalServer: true }
+            ? null
+            : settings.SessionCharacterLimit;
 
         ActiveCorpus = ActiveProfile is { } profileWithCorpus && corpusCatalog is not null
             ? corpusCatalog.Load(profileWithCorpus.ContentId)
             : CorpusLoadResult.None;
         if (ActiveCorpus.Issue is { } corpusIssue)
-            warnings.Add(bundledProfile ? $"Korpus profilu „{ActiveProfile?.Id}”: {corpusIssue}" : $"Korpus własnego profilu: {corpusIssue}");
+            warnings.Add(bundledProfile ? (settings.PrivateMode ? $"Korpus wybranego profilu: {corpusIssue}" : $"Korpus profilu „{ActiveProfile?.Id}”: {corpusIssue}") : $"Korpus własnego profilu: {corpusIssue}");
 
         // Glosariusz DeepL jest przechowywany na koncie DeepL — tryb prywatny go nie tworzy.
         deepLProvider.Options.UseGlossary = !settings.PrivateMode;
@@ -428,6 +454,7 @@ public sealed class TranslationOrchestrator(
     public void WarmUpActiveProvider()
     {
         if (settings.CacheOnlyMode || ActiveProvider is not IWarmableTranslationProvider warmable) return;
+        if (ProviderPause.IsPaused) return;
 
         var now = Environment.TickCount64;
         var last = Interlocked.Read(ref _lastWarmUpTicks);
@@ -455,8 +482,20 @@ public sealed class TranslationOrchestrator(
         });
     }
 
-    public Task<ProviderStatus> TestActiveProviderAsync(CancellationToken cancellationToken = default) =>
-        ActiveProvider.TestConnectionAsync(cancellationToken);
+    public async Task<ProviderStatus> TestActiveProviderAsync(CancellationToken cancellationToken = default)
+    {
+        var status = await ActiveProvider.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+        if (status.IsOk) ResumeProvider();
+        return status;
+    }
+
+    public ProviderPauseStatus ProviderPause =>
+        Volatile.Read(ref _pipelineState)?.Pipeline.ProviderPause ?? ProviderPauseStatus.Running;
+
+    public void ResumeProvider() => Volatile.Read(ref _pipelineState)?.Pipeline.ResumeProvider();
+
+    public string? ProviderStateText =>
+        Core.Usage.ProviderStateText.Describe(ProviderPause, usage.LimitStatus, DateTimeOffset.UtcNow);
 
     /// <summary>
     /// Tłumaczy gotowe teksty przez AKTUALNY pipeline (słownik → cache → API).

@@ -83,9 +83,15 @@ public sealed class GlossaryCatalog(IReadOnlyList<string> rootDirectories)
     {
         var fileName = $"{sourceLanguage}-{targetLanguage}.json";
 
+        if (!ProfileTuningRules.IsContentId(glossaryId))
+        {
+            return (null, new CatalogIssue(fileName, "Nazwa słownika musi być nazwą folderu (litery, cyfry, myślniki), a nie ścieżką ani adresem."));
+        }
+
         foreach (var root in rootDirectories)
         {
             var path = Path.Combine(root, glossaryId, fileName);
+            if (!IsUnder(root, path)) continue;
             if (!File.Exists(path)) continue;
 
             try
@@ -105,6 +111,12 @@ public sealed class GlossaryCatalog(IReadOnlyList<string> rootDirectories)
         }
 
         return (null, new CatalogIssue(fileName, $"Nie znaleziono słownika „{glossaryId}” ({fileName})."));
+    }
+
+    private static bool IsUnder(string root, string path)
+    {
+        var rootFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(path).StartsWith(rootFull, StringComparison.OrdinalIgnoreCase);
     }
 
     public IReadOnlyList<string> ListIds(string sourceLanguage, string targetLanguage)
@@ -133,6 +145,36 @@ public sealed class GlossaryCatalog(IReadOnlyList<string> rootDirectories)
     }
 }
 
+public enum UserGlossaryStatus
+{
+    Ok,
+    Missing,
+    Unreadable,
+    Locked,
+    OtherLanguagePair,
+}
+
+public sealed record UserGlossaryLoad(GlossaryDocument Document, UserGlossaryStatus Status, string Path)
+{
+    public bool CanWrite => Status is UserGlossaryStatus.Ok or UserGlossaryStatus.Missing;
+
+    private string? Reason => Status switch
+    {
+        UserGlossaryStatus.Unreadable => "nie jest poprawnym plikiem słownika (uszkodzony JSON)",
+        UserGlossaryStatus.Locked => "jest zajęty przez inny program",
+        UserGlossaryStatus.OtherLanguagePair => "jest słownikiem innej pary języków",
+        _ => null,
+    };
+
+    public string? SkippedNotice => Reason is { } reason
+        ? $"⚠ Słownik użytkownika został pominięty: plik {System.IO.Path.GetFileName(Path)} {reason}. Popraw go albo przenieś w inne miejsce."
+        : null;
+
+    public string? EditorBlockMessage => Reason is { } reason
+        ? $"Nie otwieram słownika do edycji, bo plik {reason}. Zapis jest zablokowany, żeby go nie nadpisać. Plik leży tutaj: {Path}"
+        : null;
+}
+
 /// <summary>
 /// Prywatny słownik użytkownika — terminy dodawane z poziomu aplikacji.
 /// Trzymany w danych użytkownika, poza repozytorium.
@@ -141,14 +183,23 @@ public sealed class UserGlossaryStore(AppPaths paths)
 {
     private readonly Lock _gate = new();
 
-    public GlossaryDocument Load(string sourceLanguage, string targetLanguage)
+    public GlossaryDocument Load(string sourceLanguage, string targetLanguage) =>
+        LoadChecked(sourceLanguage, targetLanguage).Document;
+
+    public string GetBackupPath(string sourceLanguage, string targetLanguage) =>
+        paths.GetUserGlossaryPath(sourceLanguage, targetLanguage) + ".bak";
+
+    public string GetFilePath(string sourceLanguage, string targetLanguage) =>
+        paths.GetUserGlossaryPath(sourceLanguage, targetLanguage);
+
+    public UserGlossaryLoad LoadChecked(string sourceLanguage, string targetLanguage)
     {
         lock (_gate)
         {
             var path = paths.GetUserGlossaryPath(sourceLanguage, targetLanguage);
             if (!File.Exists(path))
             {
-                return CreateEmpty(sourceLanguage, targetLanguage);
+                return new UserGlossaryLoad(CreateEmpty(sourceLanguage, targetLanguage), UserGlossaryStatus.Missing, path);
             }
 
             try
@@ -160,14 +211,18 @@ public sealed class UserGlossaryStore(AppPaths paths)
                 if (!document.SourceLanguage.Equals(sourceLanguage, StringComparison.OrdinalIgnoreCase)
                     || !document.TargetLanguage.Equals(targetLanguage, StringComparison.OrdinalIgnoreCase))
                 {
-                    return CreateEmpty(sourceLanguage, targetLanguage);
+                    return new UserGlossaryLoad(CreateEmpty(sourceLanguage, targetLanguage), UserGlossaryStatus.OtherLanguagePair, path);
                 }
 
-                return document;
+                return new UserGlossaryLoad(document, UserGlossaryStatus.Ok, path);
             }
-            catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException or IOException)
+            catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException)
             {
-                return CreateEmpty(sourceLanguage, targetLanguage);
+                return new UserGlossaryLoad(CreateEmpty(sourceLanguage, targetLanguage), UserGlossaryStatus.Unreadable, path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return new UserGlossaryLoad(CreateEmpty(sourceLanguage, targetLanguage), UserGlossaryStatus.Locked, path);
             }
         }
     }
@@ -199,7 +254,9 @@ public sealed class UserGlossaryStore(AppPaths paths)
                 document.Name = "user";
             }
             paths.EnsureCreated();
-            WriteAtomic(paths.GetUserGlossaryPath(sourceLanguage, targetLanguage), GlossarySerializer.ToJson(document));
+            var path = paths.GetUserGlossaryPath(sourceLanguage, targetLanguage);
+            if (File.Exists(path)) File.Copy(path, path + ".bak", overwrite: true);
+            WriteAtomic(path, GlossarySerializer.ToJson(document));
         }
     }
 

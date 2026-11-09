@@ -56,7 +56,7 @@ internal static class QualityMarkReplay
             window = await TestWindow.CreateAsync(Source);
             await window.AfterRenderingAsync();
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true, StaticRescanInterval = TimeSpan.FromMilliseconds(500) },
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true, StaticRescanInterval = TimeSpan.FromMilliseconds(500) },
                 report.Update, logging.CreateLogger("QualityMarkReplay"));
             session.Start();
             await report.InitialDisplayed.Task.WaitAsync(TimeSpan.FromSeconds(20));

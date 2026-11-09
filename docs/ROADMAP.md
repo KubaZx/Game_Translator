@@ -1,8 +1,19 @@
 # Roadmap — GameTranslatorOverlay
 
-## Obecny stan — 17 października 2026
+## Obecny stan — 9 listopada 2026
 
-Ostatnie wydanie to **0.9.0** (17 października 2026, runda 2026-10-16 (11)): ręczna poprawka
+Ostatnie wydanie to **0.10.0** (9 listopada 2026, runda 2026-11-09 (12)), pierwsza runda po
+audycie gotowości do 1.0: czarny kadr gry nie przełącza już sesji na zrzut ekranu, tryb live
+wstrzymuje się i chowa nakładkę, gdy gra jest zasłonięta, zrzut ekranu ma trwałe ostrzeżenie,
+skrót live na nieznanym oknie wymaga potwierdzenia, błąd dostawcy wstrzymuje zapytania, limit
+znaków na sesję jest w oknie (domyślnie wyłączony), liczniki nie generują zapytań, nieczytelne
+ustawienia startują program w trybie prywatnym i Cache-only, baza i słownik nie przepadają po
+cichu, live zatrzymuje się dopiero po 10 s błędów i podaje powód, licencja MIT. **1.0 znaczy:
+autor gra z programem regularnie** — do 1.0 zostaje sesja w grze (M56–M61 i zaległe M48–M55)
+i poprawki tego, co w niej przeszkadza (kierunki 39 i 41–44). Wygoda obcego gracza (pierwsze
+uruchomienie, README z obrazami, czysty system) jest planem po 1.0 (kierunek 46).
+
+Wcześniej **0.9.0** (17 października 2026, runda 2026-10-16 (11)): ręczna poprawka
 widoczna nad grą od razu, pełny odczyt zaraz po przebudowie tłumaczenia (zmiana ustawień w trakcie
 live), kroje mierzone poza wątkiem UI i pętlą sesji, lokalny odczyt OCR wycinka dla napisu
 zgubionego przez śledzenie w ruchu, pełny edytor własnego profilu i kopia profilu z zestawu
@@ -191,6 +202,32 @@ wizualnych na kolejnych grach.
 39. Łatka bloku czekającego na lokalny odczyt w ruchu stoi w starym miejscu na przesuwającym się
     tle (MotionLab, prolog: błąd szwu w ruchu 8 → 12, p = 0,008) — przesuwać łatkę z prędkością
     śladu albo chować ją do rozstrzygnięcia — runda 2026-10-16 (11).
+
+40. ✅ Audyt gotowości do 1.0 (2026-11-09): prywatność i dane gracza, hamulce kosztów, licencja
+    i proces wydania — runda 2026-11-09 (12). Otwarte po rundzie: pauza „gra w tle” obejmuje
+    okno samego tłumacza (brak podglądu wyglądu na żywo na jednym monitorze); kliknięty pulpit
+    liczy się jak okno zasłaniające grę; okno bez fokusu nad grą (powiadomienie, nakładka)
+    wchodzi w kadr zrzutu ekranu; PrintWindow, który po dowodzie działania zacznie oddawać
+    jednolity obraz, zostawia sesję bez obrazu do restartu live; podstawione cyfry nie zmieniają
+    odmiany słów; okna pokazywane przy nieczytelnych ustawieniach i nowy edytor słownika
+    sprawdzone tylko kompilacją i testami logiki; pełny tekst licencji projekcji Windows SDK
+    nie jest dołączony (pakiet podaje tylko adres); uszkodzenie w głębi pliku bazy nie jest
+    wykrywane przy starcie (strażnik widzi tylko błąd otwarcia — do rozważenia `PRAGMA quick_check`).
+41. Stare tłumaczenie nad nową kwestią: napis poprzedniej linii dialogu bywa widoczny, gdy gra
+    pokazuje już następną — do odtworzenia w grze i w SceneReplay (audyt 2026-11-09).
+42. Pomiar wpływu na grę: liczba klatek i najgorszy 1% z programem i bez (PresentMon), osobno
+    PrintWindow, WGC i tryb „Na oryginale (zakrywa)” (audyt 2026-11-09).
+43. 1080p: odczyt OCR małego tekstu, automatyczne powiększenie i rozmiar nakładki na monitorze
+    Full HD — dotąd wszystko mierzono w 1440p i 4K (audyt 2026-11-09).
+44. Wyłączniki awaryjne w oknie: Windows Graphics Capture, śledzenie w ruchu, łatki — dziś
+    tylko w `settings.json` albo wcale (audyt 2026-11-09).
+45. Koszt strumieniowania u płatnego dostawcy: przerwana odpowiedź (zmiana sceny) jest płatna,
+    a licznik znaków sesji jej nie widzi; do zmierzenia i ewentualnego progu (audyt 2026-11-09).
+46. Po 1.0 — pierwsze pięć minut obcego gracza: prowadzenie przy pierwszym uruchomieniu (klucz,
+    pakiet OCR, wybór gry), README z obrazami, test na czystym systemie, wydanie jako szkic
+    z testem pobranego pliku, instalator albo podpis (audyt 2026-11-09).
+47. Testy projektu aplikacji: ok. 11,5 tys. linii bez testów jednostkowych; kolejne decyzje
+    wynosić do Core tak jak `CaptureRoute` i `GameVisibility` (audyt 2026-11-09).
 
 Przed implementacją każdego kierunku potrzebny jest pomiar wykonalności i kosztu.
 Silny ruch nadal może czyścić napisy bez pewnego dowodu ich niezmienności; obecna
@@ -2037,3 +2074,66 @@ pierwszym przechwyceniu); testy jednostkowe wygładzania prawdy MotionLab i rozs
 zgubionych w sesji; usuwanie starego napisu ok. 2 ms wolniej (38); kara ok. 2 s pod `localhost`
 (11); jedna z 84 linii Bielika nadal nieczytelna (format odpowiedzi nieustalony — LM Studio ucina
 treść w logu).
+
+### Runda 2026-11-09 (12) — po audycie gotowości do 1.0 (wydanie 0.10.0)
+
+**Skąd.** Audyt z 9 listopada 2026 (10 obszarów, znaleziska sprawdzone przez drugą parę oczu)
+wskazał cztery grupy przeszkód przed 1.0: program w pewnych sytuacjach czytał i tłumaczył nie
+grę, tylko inne okna; płatny dostawca dostawał zapytania bez sensu; dane gracza mogły przepaść
+po cichu; brakowało licencji i kontroli procesu wydania. Autor zdecydował, że 1.0 znaczy „gram
+z tym regularnie”, a licencją jest MIT.
+
+**Zrobione.**
+
+- *Czarny kadr.* `ScreenCapture.CaptureWindowEx` przy jednolitym obrazie z udanego PrintWindow
+  brał zrzut ekranu, a sesja zapamiętywała na stałe, że okno „nie wspiera PrintWindow”. Decyzję
+  przejął `CaptureRoute` (Core): jednolita klatka po klatce z treścią to obraz gry; stan „bez
+  PrintWindow” wymaga 3 kolejnych klatek potwierdzonych niejednolitym zrzutem porównawczym przy
+  widocznej grze i jest odwracalny (próba co 10 s, 2 klatki z treścią). `GraphicsFrameTrust`
+  robi to samo dla WGC: jednolita ramka bez wcześniejszej treści ustępuje PrintWindow, a w stanie
+  „bez PrintWindow” po 3 klatkach sprzecznych ze zrzutem WGC jest wyłączane do końca sesji.
+- *Gra w tle.* `GameVisibility` + `GamePauseGate`: okno innego procesu na pierwszym planie
+  pokrywające ≥ 15% okna gry przez 2 cykle wstrzymuje sesję, czyści stan sceny i chowa nakładkę;
+  zrzut ekranu nie jest robiony już przy pierwszym takim cyklu. Sondowanie w pauzie co 250 ms.
+- *Ostrzeżenie o zrzucie.* Trwały znacznik w oknie (`LiveUpdate.ReadingScreen`), komunikat nad
+  grą także dla okna mniejszego niż monitor; ostrzeżenie dopiero, gdy zrzut jest stałym źródłem
+  (6 klatek z rzędu albo WGC niedostępne), żeby krótki pomost przed pierwszą klatką WGC nie
+  straszył.
+- *Błędy sesji.* `LiveFailureBackoff`: przerwy 0,2/0,5/1/2 s, zatrzymanie po 10 s nieprzerwanych
+  błędów z powodem (`LiveStopReason`) nad grą i w zasobniku; wyjątek jednego bloku w śledzeniu
+  nie przerywa klatki; `LiveErrorTally` liczy pominięte wyjątki; log startu i stopu live.
+- *Koszty.* `ProviderCircuit`, `FailedTextMemory`, `VolatileCounterGate` w bramce
+  `TranslationPipeline.ScreenBeforeSend`; limit znaków na sesję w oknie z ostrzeżeniem przy 80%
+  (wykonany jako domyślne 100 000; decyzją autora przed wydaniem domyślnie wyłączony, jak
+  dotąd). Przy scalaniu próg dla liczby przy słowach podniesiony z 3 do 8
+  wariantów w 30 s, z podstawianiem cyfr i bez przedłużania wyciszenia — pierwotna reguła
+  zostawiała bez tłumaczenia trzecią i każdą kolejną podpowiedź przedmiotu o tej samej treści
+  z inną liczbą.
+- *Dane.* `JsonSettingsStore` (odczyt pole po polu, tryb bezpieczny, blokada zapisu, kopia z datą,
+  `settingsVersion`, nieznane pola), strażnik `user_version` i odkładanie uszkodzonej bazy
+  w `SqliteTranslationCache`, edytor słownika (`LoadChecked`, kopia `.bak`, pytanie przy
+  zamknięciu, odmowa terminu bez tłumaczenia), profil w trybie prywatnym tylko w pamięci, pole
+  `glossary` profilu jako nazwa, log startowy, okno błędu najwyżej raz na 60 s i nigdy w live.
+- *Wydanie.* `LICENSE` (MIT), teksty licencji bibliotek w paczce, `PathMap` w buildzie Release,
+  krok CI „tag = wersja”, potwierdzenie skrótu live (`LiveStartConfirmation`), podbicia pakietów.
+
+**Błędy złapane przy scalaniu** (każda gałąź osobno była zielona):
+
+- pole `sessionCharacterLimit` dostało atrybut wymuszający zapis wartości pustej, a kontrola pól
+  ustawień pomijała właściwości z tym atrybutem — zła wartość limitu czyniła cały plik
+  „nieczytelnym” (wykrył to test ustawień; filtr pomija teraz tylko pola wyłączone z zapisu);
+- scenariusz `provider-failure` powstał bez wyłączenia bramki widoczności i nie robił żadnego
+  odczytu (okno powtórki nie jest na pierwszym planie).
+
+**Pomiary.** SceneReplay, po jednym przebiegu: `black-frame` — 0 klatek ze zrzutu ekranu, bez
+ostrzeżenia; `provider-failure` — 15 odczytów ekranu, 1 zapytanie, wstrzymanie trwałe;
+`displayed`/`stop` — stary napis usunięty po 35–36 ms; `typing` — 2 zapytania; `stale-junk`,
+`stale-newtext`, `stale-busy` — usunięcie po 202–257 ms; `pan-cut` — 7/7 bez zniknięć, błąd
+0 px; `moving-text` — błąd 0 px; `quality-mark` — rożek na 8 blokach; `settings-change`
+i `manual-correction` — zgodnie z oczekiwaniem; `ui-fonts background` — maks. przestój wątku UI
+9,2 ms. MotionLab, UiPreview i gra na żywo — nie uruchamiane w tej rundzie.
+
+**Regresje.** 2549 xUnit (1883 Core + 499 Infrastructure + 167 CorpusTool), build bez ostrzeżeń.
+
+**Otwarte.** Sesja autora w grze (M56–M61 oraz zaległe M48–M55); lista z kierunku 40; kierunki
+39 i 41–45 przed 1.0, 46–47 po 1.0.

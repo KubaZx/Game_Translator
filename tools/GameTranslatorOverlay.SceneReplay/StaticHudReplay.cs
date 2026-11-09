@@ -59,7 +59,7 @@ internal static class StaticHudReplay
             window = await TestWindow.CreateAsync(report);
             await window.RenderAsync();
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true }, report.Update, logging.CreateLogger("StaticHudReplay"));
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true }, report.Update, logging.CreateLogger("StaticHudReplay"));
             session.Start();
             await report.InitialDisplayed.Task.WaitAsync(TimeSpan.FromSeconds(20));
             await window.BeginMotionAsync();

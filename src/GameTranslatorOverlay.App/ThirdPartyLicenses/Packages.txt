@@ -1,0 +1,199 @@
+Biblioteki i platforma rozprowadzane razem z GameTranslatorOverlay
+================================================================
+
+Poniżej: nazwa, wersja, rodzaj licencji i nota o prawach autorskich z metadanych pakietu.
+Pełne teksty licencji: MIT.txt, Apache-2.0.txt, SQLite-PublicDomain.txt;
+platforma .NET: DotNet-Runtime-LICENSE.txt i DotNet-Runtime-THIRD-PARTY-NOTICES.txt;
+kroje: LexendDeca-OFL.txt i ZillaSlab-OFL.txt.
+
+Anthropic 12.51.0
+  Licencja: MIT
+  Prawa autorskie: Copyright 2026 Anthropic
+
+H.GeneratedIcons.System.Drawing 2.4.1
+  Licencja: MIT
+  Prawa autorskie: (brak noty w metadanych pakietu; autor: havendv)
+
+H.NotifyIcon.Wpf 2.4.1
+  Licencja: MIT
+  Prawa autorskie: (brak noty w metadanych pakietu; autor: havendv)
+
+H.NotifyIcon 2.4.1
+  Licencja: MIT
+  Prawa autorskie: (brak noty w metadanych pakietu; autor: havendv)
+
+Microsoft.Data.Sqlite.Core 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Data.Sqlite 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.AI.Abstractions 10.5.1
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Configuration.Abstractions 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Configuration.Binder 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Configuration.CommandLine 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Configuration.EnvironmentVariables 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Configuration.FileExtensions 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Configuration.Json 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Configuration.UserSecrets 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Configuration 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.DependencyInjection.Abstractions 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.DependencyInjection 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Diagnostics.Abstractions 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Diagnostics 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.FileProviders.Abstractions 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.FileProviders.Physical 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.FileSystemGlobbing 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Hosting.Abstractions 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Hosting 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Logging.Abstractions 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Logging.Configuration 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Logging.Console 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Logging.Debug 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Logging.EventLog 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Logging.EventSource 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Logging 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Options.ConfigurationExtensions 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Options 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Extensions.Primitives 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+SQLite 3.53.4
+  Licencja: Public Domain
+  Prawa autorskie: Copyright 2014-2026 SourceGear, LLC
+
+SQLitePCLRaw.bundle_e_sqlite3 3.0.5
+  Licencja: Apache-2.0
+  Prawa autorskie: Copyright 2014-2026 SourceGear, LLC
+
+SQLitePCLRaw.config.e_sqlite3 3.0.5
+  Licencja: Apache-2.0
+  Prawa autorskie: Copyright 2014-2026 SourceGear, LLC
+
+SQLitePCLRaw.core 3.0.5
+  Licencja: Apache-2.0
+  Prawa autorskie: Copyright 2014-2025 SourceGear, LLC
+
+SQLitePCLRaw.provider.e_sqlite3 3.0.5
+  Licencja: Apache-2.0
+  Prawa autorskie: Copyright 2014-2025 SourceGear, LLC
+
+Serilog.Extensions.Hosting 10.0.0
+  Licencja: Apache-2.0
+  Prawa autorskie: (brak noty w metadanych pakietu; autor: Microsoft,Serilog Contributors)
+
+Serilog.Extensions.Logging 10.0.0
+  Licencja: Apache-2.0
+  Prawa autorskie: (brak noty w metadanych pakietu; autor: Microsoft,Serilog Contributors)
+
+Serilog.Sinks.File 7.0.0
+  Licencja: Apache-2.0
+  Prawa autorskie: (brak noty w metadanych pakietu; autor: Serilog Contributors)
+
+Serilog 4.3.0
+  Licencja: Apache-2.0
+  Prawa autorskie: Copyright © Serilog Contributors
+
+System.IO.Hashing 10.0.10
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.Windows.SDK.NET.Ref 10.0.19041.57
+  Licencja: Microsoft Windows SDK license (https://aka.ms/WinSDKLicenseURL)
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.
+
+Microsoft.NETCore.App.Runtime.win-x64 (.NET Runtime) 10.0.12
+  Licencja: MIT
+  Prawa autorskie: © .NET Foundation and Contributors
+
+Microsoft.WindowsDesktop.App.Runtime.win-x64 (WPF, Windows Forms) 10.0.12
+  Licencja: MIT
+  Prawa autorskie: © .NET Foundation and Contributors
+
+System.Security.Cryptography.ProtectedData (część platformy .NET) 10.0.14
+  Licencja: MIT
+  Prawa autorskie: © Microsoft Corporation. All rights reserved.

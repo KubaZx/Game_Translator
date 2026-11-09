@@ -16,6 +16,12 @@ updates:
           - xunit*
           - Microsoft.NET.Test.Sdk
           - coverlet*
+      microsoft-platform:
+        patterns:
+          - Microsoft.*
+          - System.*
+        exclude-patterns:
+          - Microsoft.NET.Test.Sdk
 
   - package-ecosystem: github-actions
     directory: /

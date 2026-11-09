@@ -11,11 +11,12 @@ gry, bez żadnej zmiany w plikach gry.
 [Instrukcja](docs/USER_GUIDE.md) · [Zmiany](CHANGELOG.md) ·
 [CI](https://github.com/KubaZx/Game_Translator/actions/workflows/ci.yml)
 
-**Wersja: 0.9.0** · Windows 10 2004+ / 11 · portable, bez instalacji
+**Wersja: 0.10.0** · Windows 10 2004+ / 11 · portable, bez instalacji · licencja MIT
 
-**Nowe w 0.9.0:** „Popraw” zmienia napis nad grą od razu, napisy wracają po ułamku sekundy, gdy
-zmiana ustawień przerwie tłumaczenie, napis zgubiony w ruchu kamery jest odczytywany lokalnie zamiast znikać, pełny
-edytor własnego profilu gry i kopia profilu z zestawu — [wszystkie zmiany](CHANGELOG.md).
+**Nowe w 0.10.0:** czarny ekran gry nie odsłania innych okien, tryb live wstrzymuje się i chowa
+napisy, gdy gra schodzi na drugi plan, błąd dostawcy wstrzymuje zapytania zamiast je powtarzać,
+limit znaków na sesję ustawiany w oknie, uszkodzony plik ustawień nie
+wyłącza po cichu trybu prywatnego, edytor słownika nie gubi danych — [wszystkie zmiany](CHANGELOG.md).
 
 ## Funkcje
 
@@ -208,8 +209,8 @@ dotnet run --project src/GameTranslatorOverlay.App
 
 - Linux: dodaj `-p:EnableWindowsTargeting=true` (testy DPAPI i OCR wymagają Windows).
 - Paczka portable: `./tools/package.ps1` → `dist/`.
-- Wydanie: tag `v*` → CI buduje zip i dodaje go do Releases.
-- Testy: 2285 (1675 Core + 443 Infrastructure + 167 CorpusTool; na Linuksie 3 testy DPAPI są
+- Wydanie: tag `v*` zgodny z wersją w `Directory.Build.props` → CI buduje zip i dodaje go do Releases.
+- Testy: 2549 (1883 Core + 499 Infrastructure + 167 CorpusTool; na Linuksie 3 testy DPAPI są
   pomijane), bez kluczy API i bez gry — wyłącznie dane syntetyczne. CI sprawdza pokrycie kodu
   (Core ≥ 91%, Infrastructure ≥ 80%). Szczegóły: [TESTING.md](docs/TESTING.md).
 - Benchmarki BenchmarkDotNet: `benchmarks/` — [BENCHMARKS.md](docs/BENCHMARKS.md).
@@ -249,3 +250,7 @@ Dokumenty: [Instrukcja](docs/USER_GUIDE.md) · [Dostawcy API](docs/API_PROVIDERS
 [Plan](docs/ROADMAP.md) · [Wizja](docs/PRODUCT_VISION.md) · [Testy ręczne](docs/MANUAL_TESTING.md) ·
 [Checklista wydania](docs/QUALITY_CHECK.md) · [Testy](docs/TESTING.md) ·
 [Benchmarki](docs/BENCHMARKS.md) · [Prywatność](docs/PRIVACY.md) · [Bezpieczeństwo](docs/SECURITY.md)
+
+## Licencja
+
+Projekt jest na licencji MIT — treść w pliku [LICENSE](LICENSE). Licencje użytych bibliotek: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); ich pełne teksty są w folderze `licenses` w paczce z programem.

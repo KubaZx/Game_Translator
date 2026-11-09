@@ -18,8 +18,11 @@ na ekranie**. Program:
    z korpusu),
 4. wyświetla wynik we **własnym, osobnym oknie** nad grą.
 
-Z perspektywy gry program jest nieodróżnialny od użytkownika patrzącego na ekran. Nie komunikuje
-się z procesem gry w żaden sposób i nie wpływa na jej działanie.
+Program działa jak osoba patrząca na ekran: czyta obraz i wyświetla osobne okno. Nie komunikuje
+się z procesem gry w żaden sposób i nie zmienia jej plików ani pamięci. Nie jest przy tym
+niewidoczny — to zwykły proces Windows z własnym oknem nad grą, a przechwytywanie i nakładka
+zużywają trochę mocy komputera. Zabezpieczenia gier online oceniają takie programy według
+własnych zasad ([Uwaga o grach online](USER_GUIDE.md#uwaga-o-grach-online)).
 
 **Wyjątek (ADR-014):** osobne narzędzie offline z `tools/` może — na polecenie użytkownika
 i przy wyłączonej grze — czytać pliki gry **wyłącznie do odczytu**, żeby zbudować lokalny korpus

@@ -89,7 +89,7 @@ internal static class TypingReplay
             orchestrator.Initialize();
             if (!orchestrator.ActiveCorpus.IsLoaded) throw new InvalidOperationException("Synthetic corpus did not load.");
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, AllowAutoUpscale = false, EnableDiagnostics = true, HoldTypingPrefixes = () => hold },
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, AllowAutoUpscale = false, EnableDiagnostics = true, HoldTypingPrefixes = () => hold },
                 report.Update, logging.CreateLogger("TypingReplay"));
             session.Start();
             await Task.Delay(1500);

@@ -20,10 +20,10 @@ dotnet publish src/GameTranslatorOverlay.App -c $Configuration -r win-x64 `
     -o "$root\publish"
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish zakonczyl sie bledem ($LASTEXITCODE)" }
 
-# PDB-y zawieraja lokalne sciezki dewelopera — nie dystrybuujemy ich.
+# Osadzone dane debugowania maja sciezki zrodel zmapowane na neutralny korzen (PathMap w Directory.Build.props); osobnych PDB-ow nie dystrybuujemy.
 Get-ChildItem "$root\publish" -Filter *.pdb | Remove-Item -Force
 
-Copy-Item "$root\README.md", "$root\THIRD-PARTY-NOTICES.md", "$root\CHANGELOG.md" -Destination "$root\publish" -Force
+Copy-Item "$root\README.md", "$root\THIRD-PARTY-NOTICES.md", "$root\CHANGELOG.md", "$root\LICENSE" -Destination "$root\publish" -Force
 Copy-Item "$root\docs\USER_GUIDE.md", "$root\docs\PRIVACY.md", "$root\docs\SECURITY.md" -Destination "$root\publish" -Force
 
 New-Item -ItemType Directory -Force "$root\dist" | Out-Null

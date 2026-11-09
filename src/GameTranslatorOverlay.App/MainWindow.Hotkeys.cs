@@ -368,16 +368,8 @@ public partial class MainWindow
     {
         var wasApplied = SettingsSnapshot() == _appliedSettingsJson;
         change();
-        try
-        {
-            _settingsStore.Save(_settings);
-            if (wasApplied) _appliedSettingsJson = SettingsSnapshot();
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning(ex, "Nie udało się zapisać skrótów w ustawieniach");
-            return false;
-        }
+        if (!PersistSettings()) return false;
+        if (wasApplied) _appliedSettingsJson = SettingsSnapshot();
+        return true;
     }
 }

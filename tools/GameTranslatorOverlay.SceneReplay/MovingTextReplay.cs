@@ -62,7 +62,7 @@ internal static class MovingTextReplay
             var initial = CaptureGroundTruth(window.Handle, report);
             report.SetInitialTarget(initial);
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true, StaticRescanInterval = TimeSpan.FromMilliseconds(600) },
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true, StaticRescanInterval = TimeSpan.FromMilliseconds(600) },
                 report.Update, logging.CreateLogger("MovingTextReplay"));
             session.Start();
             await report.InitialDisplayed.Task.WaitAsync(TimeSpan.FromSeconds(20));

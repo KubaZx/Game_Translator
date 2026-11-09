@@ -211,17 +211,17 @@ public class DialogMemoryTests
         var provider = new ScriptedContextualProvider(Polish);
         var (pipeline, _) = Create(provider, new TranslationPipelineOptions { MaxRecentContextTexts = 3 });
 
-        for (var i = 1; i <= 5; i++) await pipeline.TranslateAsync([$"Line {i}"], "en", "pl");
+        for (var i = 1; i <= 5; i++) await pipeline.TranslateAsync([$"Line {(char)('@' + i)}"], "en", "pl");
 
-        Assert.Equal(["Line 2", "Line 3", "Line 4"], provider.Contexts[^1].RecentExchanges.Select(static p => p.Source));
-        Assert.Equal(["PL Line 2", "PL Line 3", "PL Line 4"], provider.Contexts[^1].RecentExchanges.Select(static p => p.Translation));
+        Assert.Equal(["Line B", "Line C", "Line D"], provider.Contexts[^1].RecentExchanges.Select(static p => p.Source));
+        Assert.Equal(["PL Line B", "PL Line C", "PL Line D"], provider.Contexts[^1].RecentExchanges.Select(static p => p.Translation));
 
         var byChars = new ScriptedContextualProvider(Polish);
         var (charPipeline, _) = Create(byChars, new TranslationPipelineOptions { MaxRecentContextChars = 40 });
-        for (var i = 1; i <= 4; i++) await charPipeline.TranslateAsync([$"Line {i}"], "en", "pl");
+        for (var i = 1; i <= 4; i++) await charPipeline.TranslateAsync([$"Line {(char)('@' + i)}"], "en", "pl");
 
-        // Para „Line N” + „PL Line N” ma 15 znaków — w 40 mieszczą się dwie.
-        Assert.Equal(["Line 2", "Line 3"], byChars.Contexts[^1].RecentExchanges.Select(static p => p.Source));
+        // Para „Line X” + „PL Line X” ma 15 znaków — w 40 mieszczą się dwie.
+        Assert.Equal(["Line B", "Line C"], byChars.Contexts[^1].RecentExchanges.Select(static p => p.Source));
     }
 
     [Fact]
@@ -297,11 +297,11 @@ public class DialogMemoryTests
         var provider = new ScriptedContextualProvider(static (text, _) => "Bardzo długie tłumaczenie linii " + text);
         var (pipeline, _) = Create(provider, new TranslationPipelineOptions { MaxRecentContextChars = 40 });
 
-        for (var i = 1; i <= 4; i++) await pipeline.TranslateAsync([$"Line {i}"], "en", "pl");
+        for (var i = 1; i <= 4; i++) await pipeline.TranslateAsync([$"Line {(char)('@' + i)}"], "en", "pl");
 
         // Para ma 6 + 38 znaków — w 40 nie mieści się żadna, ale same źródła (6 znaków) tak.
         Assert.Empty(provider.Contexts[^1].RecentExchanges);
-        Assert.Equal(["Line 1", "Line 2", "Line 3"], provider.Contexts[^1].RecentTexts);
+        Assert.Equal(["Line A", "Line B", "Line C"], provider.Contexts[^1].RecentTexts);
     }
 
     [Fact]

@@ -34,6 +34,8 @@ public sealed record OverlayNotice(string DedupeKey, NoticeSeverity Severity, st
     /// </summary>
     public bool IsExplicitRequest { get; init; }
 
+    public bool ShowsWhenNoticesDisabled { get; init; }
+
     /// <summary>Czy komunikat ma się pokazać, gdy gracz sam schował nakładkę skrótem.</summary>
     public bool ShowsWhenHiddenByUser => IsCritical || IsExplicitRequest;
 }
@@ -68,6 +70,10 @@ public sealed class OverlayNoticePolicy
     private readonly HashSet<int> _cacheOnlyMisses = [];
     private bool _cacheOnlyMissesGrew;
     private bool _cacheDegradedShown;
+    private bool _limitNearPending;
+    private bool _limitNearShown;
+    private bool _counterSkippedPending;
+    private bool _counterSkippedShown;
 
     /// <summary>Ile różnych tekstów nie znalazło tłumaczenia w trybie Cache-only od startu.</summary>
     public int CacheOnlyMissCount => _cacheOnlyMisses.Count;
@@ -153,6 +159,25 @@ public sealed class OverlayNoticePolicy
                 return degraded;
             }
         }
+        foreach (var outcome in outcomes)
+        {
+            if (outcome.Notices.HasFlag(OutcomeNotice.SessionLimitNear) && !_limitNearShown) _limitNearPending = true;
+            if (outcome.Notices.HasFlag(OutcomeNotice.CounterSkipped) && !_counterSkippedShown) _counterSkippedPending = true;
+        }
+        if (_limitNearPending && OverlayNotices.SessionLimitNear() is var near && Offer(near, now))
+        {
+            _limitNearPending = false;
+            _limitNearShown = true;
+            RecordCacheOnlyMisses(misses);
+            return near;
+        }
+        if (_counterSkippedPending && OverlayNotices.CounterSkipped() is var counter && Offer(counter, now))
+        {
+            _counterSkippedPending = false;
+            _counterSkippedShown = true;
+            RecordCacheOnlyMisses(misses);
+            return counter;
+        }
         return OfferCacheOnlyMisses(misses, now);
     }
 
@@ -173,5 +198,9 @@ public sealed class OverlayNoticePolicy
         _cacheOnlyMisses.Clear();
         _cacheOnlyMissesGrew = false;
         _cacheDegradedShown = false;
+        _limitNearPending = false;
+        _limitNearShown = false;
+        _counterSkippedPending = false;
+        _counterSkippedShown = false;
     }
 }

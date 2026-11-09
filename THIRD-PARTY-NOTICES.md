@@ -1,22 +1,32 @@
 # Licencje bibliotek zewnętrznych
 
 GameTranslatorOverlay korzysta z poniższych bibliotek open source. Pełne teksty licencji
-znajdują się na stronach projektów.
+i noty o prawach autorskich są w folderze `licenses` w paczce z programem (w repozytorium:
+`src/GameTranslatorOverlay.App/ThirdPartyLicenses`): `Packages.txt` (każdy pakiet z wersją,
+licencją i notą), `MIT.txt`, `Apache-2.0.txt`, `SQLite-PublicDomain.txt` oraz noty platformy .NET
+(`DotNet-Runtime-LICENSE.txt`, `DotNet-Runtime-THIRD-PARTY-NOTICES.txt`).
 
 ## Aplikacja
 
-| Biblioteka | Licencja | Zastosowanie |
-|---|---|---|
-| .NET Runtime / WPF (Microsoft) | MIT | platforma aplikacji |
-| Microsoft.Extensions.Hosting / Logging | MIT | wstrzykiwanie zależności, logowanie |
-| Microsoft.Data.Sqlite | MIT | dostęp do bazy SQLite (cache tłumaczeń) |
-| SQLitePCLRaw.bundle_e_sqlite3 | Apache-2.0 | natywny silnik SQLite |
-| SQLite | Public Domain | silnik bazy danych |
-| System.Security.Cryptography.ProtectedData | MIT | szyfrowanie klucza API (DPAPI) |
-| System.IO.Hashing (Microsoft) | MIT | szybki skrót XxHash128 odcisku regionu tekstu w trybie live |
-| Serilog + Serilog.Extensions.Hosting + Serilog.Sinks.File | Apache-2.0 | logi diagnostyczne |
-| H.NotifyIcon.Wpf | MIT | ikona w zasobniku systemowym |
-| Anthropic (oficjalne SDK C#) + Microsoft.Extensions.AI.Abstractions | MIT | opcjonalny dostawca tłumaczeń Claude |
+| Biblioteka | Wersja | Licencja | Zastosowanie |
+|---|---|---|---|
+| .NET Runtime i WPF (Microsoft; dołączone do paczki) | 10.0.12 | MIT | platforma aplikacji |
+| Projekcje Windows SDK (`Microsoft.Windows.SDK.NET.Ref`) | 10.0.19041.57 | licencja Microsoft Windows SDK | dostęp do Windows OCR i systemowych API |
+| Microsoft.Extensions.Hosting | 10.0.10 | MIT | wstrzykiwanie zależności, host aplikacji |
+| Microsoft.Extensions.Logging.Abstractions | 10.0.10 | MIT | logowanie |
+| Microsoft.Extensions.* (Configuration, DependencyInjection, Diagnostics, FileProviders, Logging, Options, Primitives — zależności Hosting) | 10.0.10 | MIT | konfiguracja, opcje, dostawcy logów |
+| Microsoft.Data.Sqlite (+ Microsoft.Data.Sqlite.Core) | 10.0.10 | MIT | dostęp do bazy SQLite (cache tłumaczeń) |
+| SQLitePCLRaw.bundle_e_sqlite3 (+ config, core, provider) | 3.0.5 | Apache-2.0 | natywny silnik SQLite |
+| SQLite (`SQLite`, SourceGear) | 3.53.4 | Public Domain | silnik bazy danych |
+| System.Security.Cryptography.ProtectedData (Microsoft) | 10.0.14 | MIT | szyfrowanie klucza API (DPAPI) |
+| System.IO.Hashing (Microsoft) | 10.0.10 | MIT | szybki skrót XxHash128 odcisku regionu tekstu w trybie live |
+| Serilog | 4.3.0 | Apache-2.0 | logi diagnostyczne |
+| Serilog.Extensions.Hosting | 10.0.0 | Apache-2.0 | logi diagnostyczne w hoście aplikacji |
+| Serilog.Extensions.Logging | 10.0.0 | Apache-2.0 | most między Serilog a Microsoft.Extensions.Logging |
+| Serilog.Sinks.File | 7.0.0 | Apache-2.0 | zapis logów do pliku |
+| H.NotifyIcon.Wpf (+ H.NotifyIcon, H.GeneratedIcons.System.Drawing) | 2.4.1 | MIT | ikona w zasobniku systemowym |
+| Anthropic (oficjalne SDK C#) | 12.51.0 | MIT | opcjonalny dostawca tłumaczeń Claude |
+| Microsoft.Extensions.AI.Abstractions | 10.5.1 | MIT | abstrakcje używane przez SDK Anthropic |
 
 ## Czcionki dołączone do aplikacji
 

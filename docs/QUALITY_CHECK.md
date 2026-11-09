@@ -1,4 +1,9 @@
-# Sprawdzenie wydań 0.5.0–0.9.0 w grze — checklista (~115 min)
+# Sprawdzenie wydań 0.5.0–0.10.0 w grze — checklista (~140 min)
+
+**0.10.0 (gra w tle, czarny ekran, koszty, dane, ~25 min):** przejdź M56 (gra w tle i powrót),
+M57 (czarny ekran gry), M58 (gra, której okna nie da się przechwycić), M59 (błąd dostawcy
+i limit znaków), M60 (liczniki i podpowiedzi z liczbami) i M61 (uszkodzone ustawienia, słownik,
+skrót na obcym oknie) z [MANUAL_TESTING.md](MANUAL_TESTING.md).
 
 **0.9.0 (płynność, edytor profilu, ruch, ~20 min):** przejdź M52 (edytor własnego profilu i kopia
 profilu z zestawu), M53 („Popraw” w trakcie live), M54 (napis przysłonięty w ruchu kamery) i M55
@@ -33,7 +38,7 @@ Wynik wystarczy zapisać w tabelach poniżej (✔ / ✘ / uwaga) i odesłać —
 
 ## 0. Przygotowanie (10 min)
 
-- [ ] Zainstalowane 0.9.0 z [Releases](https://github.com/KubaZx/Game_Translator/releases);
+- [ ] Zainstalowane 0.10.0 z [Releases](https://github.com/KubaZx/Game_Translator/releases);
       stare ustawienia i klucz są na miejscu (status „Klucz …: zapisany ✔”).
 - [ ] **Krój czcionki** pokazuje „Jak w grze (krój z profilu)” (ustawiony Segoe UI, dawny domyślny,
       przechodzi na niego raz; inny wybrany krój zostaje).

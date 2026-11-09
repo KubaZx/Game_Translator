@@ -139,8 +139,15 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Verify tag matches version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag $env:GITHUB_REF_NAME nie odpowiada wersji v$version z Directory.Build.props." }
+
       # Artefakt musi być identyczny z paczką z tools/package.ps1: embedded PDB
-      # (osobne PDB-y zawierają lokalne ścieżki dewelopera), komplet dokumentów i licencji.
+      # (ścieżki źródeł zmapowane na neutralny korzeń przez PathMap), komplet dokumentów i licencji.
       - name: Publish portable win-x64
         run: >
           dotnet publish src/GameTranslatorOverlay.App -c Release -r win-x64
@@ -154,7 +161,7 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem publish -Filter *.pdb | Remove-Item -Force
-          Copy-Item README.md, THIRD-PARTY-NOTICES.md, CHANGELOG.md -Destination publish -Force
+          Copy-Item README.md, THIRD-PARTY-NOTICES.md, CHANGELOG.md, LICENSE -Destination publish -Force
           Copy-Item docs/USER_GUIDE.md, docs/PRIVACY.md, docs/SECURITY.md -Destination publish -Force
 
       - name: Upload artifact

@@ -7,6 +7,7 @@ using GameTranslatorOverlay.Core.Text;
 using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Core.Usage;
 using GameTranslatorOverlay.Core.Vision;
+using GameTranslatorOverlay.Core.Windows;
 using Microsoft.Extensions.Logging;
 
 namespace GameTranslatorOverlay.App.Services;
@@ -65,6 +66,8 @@ public sealed record LiveUpdate(
     public bool ClearSubtitle { get; init; }
     public bool PreserveSubtitleLifetime { get; init; }
     public bool SubtitleQualityWarning { get; init; }
+
+    public bool ReadingScreen { get; init; }
 
     /// <summary>
     /// Komunikat dla gracza w nakładce (błąd dostawcy, Cache-only, start/stop live) —
@@ -184,6 +187,8 @@ public sealed class LiveSessionOptions
 
     public bool PreferGraphicsCapture { get; init; }
 
+    public bool RequireGameVisible { get; init; } = true;
+
     public double FastTrackFps { get; init; } = 30;
 
     public TimeSpan TrackedMotionPause { get; init; } = TimeSpan.FromMilliseconds(900);
@@ -215,8 +220,6 @@ public sealed class LiveTranslationSession(
     Action<LiveUpdate> onUpdate,
     ILogger logger) : IDisposable
 {
-    private const int MaxConsecutiveFailures = 5;
-
     private readonly CancellationTokenSource _cts = new();
     private readonly Lock _lifetimeGate = new();
     private bool _disposed;
@@ -253,9 +256,19 @@ public sealed class LiveTranslationSession(
     private bool _graphicsCaptureUnavailable;
     private bool _graphicsCaptureAnnounced;
     private long _continuingMotionTimestamp;
-    private bool _printWindowFails;
-    private bool _printWindowFailsInitialized;
-    private int _screenFallbackStreak;
+    private bool _graphicsPreferred;
+    private bool _captureInitialized;
+    private readonly CaptureRoute _route = new();
+    private readonly GraphicsFrameTrust _graphicsTrust = new();
+    private int _screenFrameStreak;
+    private readonly GamePauseGate _pauseGate = new();
+    private readonly LiveFailureBackoff _backoff = new();
+    private readonly LiveErrorTally _errors = new();
+    private readonly long _startedTimestamp = Stopwatch.GetTimestamp();
+    private CaptureSourceKind _lastSource;
+    private LiveStopReason _stopReason = LiveStopReason.UserStop;
+    private string? _stopDetail;
+    private bool _captureThrew;
     private long _fastTrackFrame;
     private long _capturedGraphicsFrame = -1;
     private TimeSpan _lastFastTrackAt;
@@ -303,7 +316,6 @@ public sealed class LiveTranslationSession(
     private TimeSpan _cycleTime;
     private RectPx _lastEmittedBounds;
     private bool _warnedAboutScreenFallback;
-    private int _consecutiveFailures;
     private readonly LiveSceneValidity _sceneValidity = new(options.SceneCutThreshold, options.MotionThreshold);
     private readonly HashSet<string> _invalidatedTranslations = new(StringComparer.OrdinalIgnoreCase);
     private bool _refreshAfterBusyChanges;
@@ -405,11 +417,39 @@ public sealed class LiveTranslationSession(
         if (notice is not null) options.NoticeEcho?.Remember(notice.Text);
     }
 
-    private void EmitStopped(string statusLine, Stopwatch clock) =>
+    private void EmitStopped(string statusLine, Stopwatch clock, LiveStopReason reason, string? detail = null)
+    {
+        _stopReason = reason;
+        _stopDetail = detail;
         onUpdate(new LiveUpdate(statusLine, ClearOverlay: true, Stopped: true)
         {
-            Notice = AcceptNotice(OverlayNotices.LiveStopped(), clock.Elapsed),
+            Notice = AcceptNotice(OverlayNotices.LiveStoppedBecause(reason, detail), clock.Elapsed),
         });
+    }
+
+    private TimeSpan SessionElapsed => Stopwatch.GetElapsedTime(_startedTimestamp);
+
+    private void ReportSwallowed(LiveErrorCategory category, Exception exception)
+    {
+        if (_errors.Record(category, exception.GetType()))
+            logger.LogWarning("Live: pominięty wyjątek w kategorii {Category} ({Type}) — kolejne tej kategorii tylko w podsumowaniu sesji",
+                category, exception.GetType().Name);
+    }
+
+    private GameVisibilityState ReadGameVisibility()
+    {
+        if (!options.RequireGameVisible) return GameVisibilityState.Visible;
+        var foreground = NativeMethods.GetForegroundWindow();
+        if (foreground == IntPtr.Zero) return GameVisibilityState.Visible;
+        var root = NativeMethods.GetAncestor(foreground, NativeMethods.GA_ROOT);
+        if (root != IntPtr.Zero) foreground = root;
+        if (foreground == gameWindowHandle) return GameVisibilityState.Visible;
+        NativeMethods.GetWindowThreadProcessId(foreground, out var foregroundProcess);
+        NativeMethods.GetWindowThreadProcessId(gameWindowHandle, out var gameProcess);
+        var game = new WindowPlacement((int)gameProcess, ScreenCapture.GetWindowBounds(gameWindowHandle));
+        var front = new WindowPlacement((int)foregroundProcess, ScreenCapture.GetWindowBounds(foreground));
+        return GameVisibility.Evaluate(game, front);
+    }
 
     private void EmitScreenFallbackWarning(string statusLine, Stopwatch clock, CancellationToken cancellationToken)
     {
@@ -417,7 +457,10 @@ public sealed class LiveTranslationSession(
         var fullscreen = !window.IsEmpty && OverlayNotices.CoversWholeMonitor(window, Displays.FromRect(window).Bounds);
         if (!fullscreen)
         {
-            Emit(new LiveUpdate(statusLine), cancellationToken);
+            Emit(new LiveUpdate(statusLine, WindowBounds: window)
+            {
+                Notice = AcceptNotice(OverlayNotices.ReadingScreen(), clock.Elapsed),
+            }, cancellationToken);
             return;
         }
         logger.LogWarning("Gra zajmuje cały monitor i nie wspiera PrintWindow — zalecany tryb okna bez ramki");
@@ -431,7 +474,7 @@ public sealed class LiveTranslationSession(
     {
         // Po zatrzymaniu sesji żadna aktualizacja nie może już malować po nakładce.
         if (cancellationToken.IsCancellationRequested && !update.Stopped) return;
-        onUpdate(update);
+        onUpdate(update with { ReadingScreen = _route.ReadsScreen(SessionElapsed) });
     }
 
     private IReadOnlyList<LiveDisplayBlock> BuildDisplayList(RectPx bounds) =>
@@ -497,7 +540,7 @@ public sealed class LiveTranslationSession(
         block.SourceText.Length > 0
         && string.Equals(block.NormalizedTranslation, block.SourceText, StringComparison.OrdinalIgnoreCase);
 
-    private static IReadOnlyList<GlyphCover?> BuildCovers(
+    private IReadOnlyList<GlyphCover?> BuildCovers(
         OcrBitmap frame, IReadOnlyList<KeyedTextBlock> keyed, RectPx ocrRegion, double scaleBack,
         IReadOnlyList<(RectPx Box, GlyphCover? Cover)?> previous, bool allowSoft = true, bool patch = true)
     {
@@ -535,6 +578,7 @@ public sealed class LiveTranslationSession(
             }
             catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or InvalidOperationException or OverflowException)
             {
+                ReportSwallowed(LiveErrorCategory.GlyphCover, ex);
                 covers[i] = null;
             }
         });
@@ -553,10 +597,12 @@ public sealed class LiveTranslationSession(
             if (!ocrProvider.IsLanguageAvailable(orchestrator.SourceLanguage))
             {
                 EmitStopped(
-                    $"Brak pakietu OCR dla języka „{orchestrator.SourceLanguage}” — tryb live zatrzymany.", clock);
+                    $"Brak pakietu OCR dla języka „{orchestrator.SourceLanguage}” — tryb live zatrzymany.", clock,
+                    LiveStopReason.MissingOcrPack, orchestrator.SourceLanguage);
                 return;
             }
 
+            LogSessionStarted();
             Emit(new LiveUpdate("Live: start — czekam na pierwszą klatkę.")
             {
                 Notice = AcceptNotice(OverlayNotices.LiveStarted(), clock.Elapsed),
@@ -568,7 +614,7 @@ public sealed class LiveTranslationSession(
 
                 if (!NativeMethods.IsWindow(gameWindowHandle))
                 {
-                    EmitStopped("Okno gry zostało zamknięte — tryb live zatrzymany.", clock);
+                    EmitStopped("Okno gry zostało zamknięte — tryb live zatrzymany.", clock, LiveStopReason.WindowClosed);
                     return;
                 }
 
@@ -577,25 +623,7 @@ public sealed class LiveTranslationSession(
                     if (!wasMinimized)
                     {
                         wasMinimized = true;
-                        _previousGrid = null;
-                        _changeDetector.Reset();
-                        _motionDeadline.Reset();
-                        _sceneValidity.Reset();
-                        _ghosts.Clear();
-                        _readings.Clear();
-                        _heldPrefixes.Clear();
-                        _tracks.Clear();
-                        CancelLostReads();
-                        _movedAt.Clear();
-                        _subtitleContent.Clear();
-                        _readingRetryRequested = false;
-                        _invalidatedTranslations.Clear();
-                        stabilizer.Reset();
-                        _changeToText.Reset();
-                        _lastObservedChangeAt = null;
-                        _displayed.Clear();
-                        _blockFingerprints.Clear();
-                        _absenceSuspects.Clear();
+                        ResetSceneState(stabilizer);
                         Emit(new LiveUpdate("Gra zminimalizowana — nakładka ukryta, czekam na powrót.",
                             ClearOverlay: true), cancellationToken);
                     }
@@ -609,13 +637,32 @@ public sealed class LiveTranslationSession(
                     stabilizer.ForceDirty(clock.Elapsed);
                 }
 
+                switch (_pauseGate.Observe(ReadGameVisibility()))
+                {
+                    case GamePauseTransition.Paused:
+                        ResetSceneState(stabilizer);
+                        Emit(new LiveUpdate("Live wstrzymany — gra w tle", ClearOverlay: true, HideOverlay: true), cancellationToken);
+                        break;
+                    case GamePauseTransition.Resumed:
+                        stabilizer.ForceDirty(clock.Elapsed);
+                        Emit(new LiveUpdate("Live: gra wróciła na pierwszy plan — wznawiam.", Blocks: [],
+                            WindowBounds: ScreenCapture.GetWindowBounds(gameWindowHandle)), cancellationToken);
+                        break;
+                }
+                if (_pauseGate.IsPaused)
+                {
+                    await Task.Delay(interval < PausedPollInterval ? interval : PausedPollInterval, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 try
                 {
                     await ApplyCorrectionsAsync(clock, cancellationToken).ConfigureAwait(false);
                     var (changedFraction, strongFraction, significantFraction, processed) = await RunCycleAsync(
                         stabilizer, clock, cancellationToken).ConfigureAwait(false);
 
-                    _consecutiveFailures = 0;
+                    _backoff.RecordSuccess();
+                    _captureThrew = false;
                     if (!processed)
                     {
                         Emit(new LiveUpdate(
@@ -643,16 +690,21 @@ public sealed class LiveTranslationSession(
                 {
                     // Pojedyncza czkawka (SQLITE_BUSY, przejściowy błąd WinRT/GDI) nie może
                     // ubić wielogodzinnej sesji — pomijamy klatkę i jedziemy dalej.
-                    _consecutiveFailures++;
-                    logger.LogWarning(ex, "Błąd cyklu live ({Count}/{Max})", _consecutiveFailures, MaxConsecutiveFailures);
+                    var captureFailure = _captureThrew;
+                    _captureThrew = false;
+                    var step = _backoff.RecordFailure(clock.Elapsed);
+                    logger.LogWarning(ex, "Błąd cyklu live (kolejny z rzędu: {Count}, trwa {Seconds:0.0} s z {Limit:0} s)",
+                        _backoff.Failures, _backoff.FailingFor(clock.Elapsed).TotalSeconds, LiveFailureBackoff.StopAfter.TotalSeconds);
                     WithdrawProvisional(_displayed.Where(static p => p.Value.Provisional).Select(static p => p.Key).ToList(),
                         "Live: pominięto klatkę z powodu błędu (szczegóły w logu).", cancellationToken);
-                    if (_consecutiveFailures >= MaxConsecutiveFailures)
+                    if (step.Stop)
                     {
-                        EmitStopped("Tryb live zatrzymany po serii błędów — szczegóły w logu diagnostycznym.", clock);
+                        EmitStopped("Tryb live zatrzymany po serii błędów — szczegóły w logu diagnostycznym.", clock,
+                            captureFailure ? LiveStopReason.CaptureError : LiveStopReason.ErrorSeries);
                         return;
                     }
                     Emit(new LiveUpdate("Live: pominięto klatkę z powodu błędu (szczegóły w logu)."), cancellationToken);
+                    await Task.Delay(step.Delay, cancellationToken).ConfigureAwait(false);
                 }
 
                 var now = clock.Elapsed;
@@ -679,10 +731,11 @@ public sealed class LiveTranslationSession(
         catch (Exception ex)
         {
             logger.LogError(ex, "Błąd pętli trybu live");
-            EmitStopped("Tryb live zatrzymany przez błąd — szczegóły w logu diagnostycznym.", clock);
+            EmitStopped("Tryb live zatrzymany przez błąd — szczegóły w logu diagnostycznym.", clock, LiveStopReason.UnexpectedError);
         }
         finally
         {
+            LogSessionStopped();
             // Completion includes obsolete provider work. Keep its token alive until
             // all tasks finish, including when the window closes or the loop fails.
             _cts.Cancel();
@@ -694,6 +747,48 @@ public sealed class LiveTranslationSession(
             _graphicsCapture?.Dispose();
             _graphicsCapture = null;
         }
+    }
+
+    private static readonly TimeSpan PausedPollInterval = TimeSpan.FromMilliseconds(250);
+
+    private void ResetSceneState(ChangeStabilizer stabilizer)
+    {
+        _previousGrid = null;
+        _changeDetector.Reset();
+        _motionDeadline.Reset();
+        _sceneValidity.Reset();
+        _ghosts.Clear();
+        _readings.Clear();
+        _heldPrefixes.Clear();
+        _tracks.Clear();
+        CancelLostReads();
+        _movedAt.Clear();
+        _subtitleContent.Clear();
+        _readingRetryRequested = false;
+        _invalidatedTranslations.Clear();
+        stabilizer.Reset();
+        _changeToText.Reset();
+        _lastObservedChangeAt = null;
+        _displayed.Clear();
+        _blockFingerprints.Clear();
+        _absenceSuspects.Clear();
+    }
+
+    private void LogSessionStarted()
+    {
+        var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
+        logger.LogInformation("Live: start — źródło przechwytywania {Source}, okno gry {Width}x{Height} px",
+            options.PreferGraphicsCapture && options.UseGraphicsCapture ? CaptureSourceKind.GraphicsCapture : CaptureSourceKind.PrintWindow,
+            bounds.Width, bounds.Height);
+    }
+
+    private void LogSessionStopped()
+    {
+        var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
+        logger.LogInformation("Live: stop — powód {Reason}, ostatnie źródło przechwytywania {Source}, okno gry {Width}x{Height} px",
+            _stopReason, _lastSource, bounds.Width, bounds.Height);
+        if (_errors.Total > 0)
+            logger.LogWarning("Live: wyjątki pominięte w tej sesji ({Total}): {Summary}", _errors.Total, _errors.Describe());
     }
 
     private static readonly TimeSpan GraphicsCaptureStaleAfter = TimeSpan.FromSeconds(1.5);
@@ -735,7 +830,7 @@ public sealed class LiveTranslationSession(
 
     private void ReleaseIdleGraphicsCapture()
     {
-        if (_graphicsCapture is not { } source || _lastFrameMoving || _printWindowFails
+        if (_graphicsCapture is not { } source || _lastFrameMoving || _graphicsPreferred || _route.NoPrintWindow
             || Stopwatch.GetElapsedTime(_continuingMotionTimestamp) < GraphicsCaptureIdle) return;
         source.Dispose();
         _graphicsCapture = null;
@@ -745,65 +840,148 @@ public sealed class LiveTranslationSession(
 
     private (System.Drawing.Bitmap? Bitmap, bool UsedScreenFallback) CaptureGameFrame()
     {
-        if (!_printWindowFailsInitialized)
+        try
         {
-            _printWindowFailsInitialized = true;
-            _printWindowFails = options.PreferGraphicsCapture && options.UseGraphicsCapture;
+            return CaptureGameFrameCore();
         }
-        ReleaseIdleGraphicsCapture();
-        if ((_lastFrameMoving || _printWindowFails) && GraphicsCapture() is { } source
-            && source.SinceLastFrame < GraphicsCaptureStaleAfter
-            && (_printWindowFails || source.FrameCount != _capturedGraphicsFrame)
-            && NativeMethods.IsWindow(gameWindowHandle) && !NativeMethods.IsIconic(gameWindowHandle))
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
-            var frames = source.FrameCount;
-            System.Drawing.Bitmap? frame = null;
-            try
-            {
-                frame = source.CaptureFull(bounds.Width, bounds.Height);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Windows Graphics Capture: błąd odczytu klatki — wracam do PrintWindow");
-                source.Dispose();
-                _graphicsCapture = null;
-                _graphicsCaptureUnavailable = true;
-            }
-            if (frame is not null)
-            {
-                if (!ScreenCapture.LooksBlank(frame))
-                {
-                    _fastTrackFrame = frames;
-                    _capturedGraphicsFrame = frames;
-                    return (frame, false);
-                }
-                frame.Dispose();
-            }
+            _captureThrew = true;
+            throw;
         }
-        var captured = ScreenCapture.CaptureWindowEx(gameWindowHandle);
-        if (captured.UsedScreenFallback && captured.Bitmap is not null && !_printWindowFails)
-        {
-            _printWindowFails = true;
-            if (GraphicsCapture() is not null)
-                logger.LogInformation("Okno gry nie wspiera PrintWindow — tryb live przechodzi na Windows Graphics Capture");
-        }
-        return captured;
     }
 
-    private bool ShouldWarnScreenFallback(bool usedScreenFallback)
+    private (System.Drawing.Bitmap? Bitmap, bool UsedScreenFallback) CaptureGameFrameCore()
     {
-        if (!usedScreenFallback)
+        if (!_captureInitialized)
         {
-            _screenFallbackStreak = 0;
-            return false;
+            _captureInitialized = true;
+            _graphicsPreferred = options.PreferGraphicsCapture && options.UseGraphicsCapture;
         }
-        _screenFallbackStreak++;
-        return !_warnedAboutScreenFallback
-            && (!options.UseGraphicsCapture || _graphicsCaptureUnavailable || _screenFallbackStreak >= ScreenFallbackWarningStreak);
+        var now = SessionElapsed;
+        ReleaseIdleGraphicsCapture();
+        if (!_route.NoPrintWindow && (_lastFrameMoving || _graphicsPreferred)
+            && TryGraphicsFrame(requireNewFrame: !_graphicsPreferred) is { } graphics)
+        {
+            var trusted = _graphicsTrust.Observe(
+                GraphicsFrameIsUniform(graphics.Frame), printWindowWorks: true, gameVisible: true, static () => true);
+            if (trusted == GraphicsFrameVerdict.Use) return (AcceptGraphicsFrame(graphics), false);
+            graphics.Frame.Dispose();
+        }
+        if (!_route.ShouldTryPrintWindow(now)) return FallbackFrame(null, now);
+
+        var visible = ReadGameVisibility() == GameVisibilityState.Visible;
+        var (printed, outcome) = ScreenCapture.PrintWindowFrame(gameWindowHandle);
+        System.Drawing.Bitmap? comparison = null;
+        var verdict = _route.Observe(outcome, visible, now, () =>
+        {
+            comparison = ScreenCapture.CaptureWindowScreen(gameWindowHandle);
+            return comparison is null || ScreenCapture.LooksBlank(comparison);
+        });
+        if (verdict.EnteredNoPrintWindow)
+            logger.LogInformation("Okno gry nie wspiera PrintWindow (potwierdzone na {Frames} kolejnych klatkach) — źródłem zastępczym jest Windows Graphics Capture albo zrzut ekranu",
+                CaptureRoute.ConfirmationFrames);
+        if (verdict.LeftNoPrintWindow)
+        {
+            _warnedAboutScreenFallback = false;
+            logger.LogInformation("PrintWindow znów działa — tryb live wraca do zwykłego przechwytywania okna");
+        }
+        switch (verdict.Choice)
+        {
+            case CaptureFrameChoice.Printed:
+                comparison?.Dispose();
+                _screenFrameStreak = 0;
+                _lastSource = CaptureSourceKind.PrintWindow;
+                return (printed, false);
+            case CaptureFrameChoice.Skip:
+                comparison?.Dispose();
+                printed?.Dispose();
+                return (null, false);
+            default:
+                printed?.Dispose();
+                return FallbackFrame(comparison, now);
+        }
+    }
+
+    private (System.Drawing.Bitmap Frame, long Count)? TryGraphicsFrame(bool requireNewFrame)
+    {
+        if (GraphicsCapture() is not { } source || source.SinceLastFrame >= GraphicsCaptureStaleAfter
+            || (requireNewFrame && source.FrameCount == _capturedGraphicsFrame)
+            || !NativeMethods.IsWindow(gameWindowHandle) || NativeMethods.IsIconic(gameWindowHandle))
+        {
+            return null;
+        }
+        var bounds = ScreenCapture.GetWindowBounds(gameWindowHandle);
+        var frames = source.FrameCount;
+        System.Drawing.Bitmap? frame = null;
+        try
+        {
+            frame = source.CaptureFull(bounds.Width, bounds.Height);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Windows Graphics Capture: błąd odczytu klatki — wracam do PrintWindow");
+            source.Dispose();
+            _graphicsCapture = null;
+            _graphicsCaptureUnavailable = true;
+        }
+        if (frame is null) return null;
+        return (frame, frames);
+    }
+
+    private bool GraphicsFrameIsUniform(System.Drawing.Bitmap frame) =>
+        !_graphicsTrust.Proven && ScreenCapture.LooksBlank(frame);
+
+    private System.Drawing.Bitmap AcceptGraphicsFrame((System.Drawing.Bitmap Frame, long Count) graphics)
+    {
+        _fastTrackFrame = graphics.Count;
+        _capturedGraphicsFrame = graphics.Count;
+        _screenFrameStreak = 0;
+        _lastSource = CaptureSourceKind.GraphicsCapture;
+        return graphics.Frame;
+    }
+
+    private (System.Drawing.Bitmap? Bitmap, bool UsedScreenFallback) FallbackFrame(System.Drawing.Bitmap? comparison, TimeSpan now)
+    {
+        var visible = ReadGameVisibility() == GameVisibilityState.Visible;
+        if (TryGraphicsFrame(requireNewFrame: false) is { } graphics)
+        {
+            var trusted = _graphicsTrust.Observe(GraphicsFrameIsUniform(graphics.Frame), printWindowWorks: false, visible, () =>
+            {
+                comparison ??= ScreenCapture.CaptureWindowScreen(gameWindowHandle);
+                return comparison is null || ScreenCapture.LooksBlank(comparison);
+            });
+            if (trusted != GraphicsFrameVerdict.Abandon)
+            {
+                comparison?.Dispose();
+                return (AcceptGraphicsFrame(graphics), false);
+            }
+            graphics.Frame.Dispose();
+            _graphicsCapture?.Dispose();
+            _graphicsCapture = null;
+            _graphicsCaptureUnavailable = true;
+            logger.LogInformation("Windows Graphics Capture oddaje pusty obraz, choć na ekranie widać grę — do końca tej sesji live czyta zrzut ekranu");
+        }
+        if (!visible)
+        {
+            comparison?.Dispose();
+            return (null, false);
+        }
+        var screen = comparison ?? ScreenCapture.CaptureWindowScreen(gameWindowHandle);
+        if (screen is null) return (null, false);
+        _screenFrameStreak++;
+        if (ScreenReadConfirmed) _route.NoteScreenFrame(now);
+        _lastSource = CaptureSourceKind.ScreenCapture;
+        return (screen, true);
     }
 
     private const int ScreenFallbackWarningStreak = 6;
+
+    private bool ScreenReadConfirmed =>
+        !options.UseGraphicsCapture || _graphicsCaptureUnavailable || _screenFrameStreak >= ScreenFallbackWarningStreak;
+
+    private bool ShouldWarnScreenFallback(bool usedScreenFallback) =>
+        usedScreenFallback && !_warnedAboutScreenFallback && ScreenReadConfirmed;
 
     private bool FastTrackReady =>
         _lastFrameMoving && _graphicsCapture is { IsClosed: false } && TracksBlocks
@@ -828,6 +1006,7 @@ public sealed class LiveTranslationSession(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            ReportSwallowed(LiveErrorCategory.FastTracking, ex);
             logger.LogDebug(ex, "Szybkie śledzenie napisów pominięte");
         }
         return true;
@@ -1276,15 +1455,23 @@ public sealed class LiveTranslationSession(
         Parallel.For(0, jobs.Count, parallel, i =>
         {
             var job = jobs[i];
-            if (!job.Fresh && !isMoving && job.State!.Absences == 0 && job.State.Signature.Length > 0
-                && GlyphCover.SignatureDifference(job.State.Signature, job.Signature) < 1.5)
+            try
             {
-                outcomes[i] = new TrackOutcome(null, null, Unchanged: true);
-                return;
+                if (!job.Fresh && !isMoving && job.State!.Absences == 0 && job.State.Signature.Length > 0
+                    && GlyphCover.SignatureDifference(job.State.Signature, job.Signature) < 1.5)
+                {
+                    outcomes[i] = new TrackOutcome(null, null, Unchanged: true);
+                    return;
+                }
+                var field = new GlyphField(job.Region, job.Area.X, job.Area.Y);
+                var match = GlyphFollow.Locate(job.Track, field, job.Plan, refreshOnly);
+                outcomes[i] = new TrackOutcome(match, GlyphFollow.Follow(job.Cover, match, job.Region, job.Area, renderPatches), Unchanged: false);
             }
-            var field = new GlyphField(job.Region, job.Area.X, job.Area.Y);
-            var match = GlyphFollow.Locate(job.Track, field, job.Plan, refreshOnly);
-            outcomes[i] = new TrackOutcome(match, GlyphFollow.Follow(job.Cover, match, job.Region, job.Area, renderPatches), Unchanged: false);
+            catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+            {
+                ReportSwallowed(LiveErrorCategory.BlockTracking, ex);
+                outcomes[i] = new TrackOutcome(null, null, Unchanged: false);
+            }
         });
 
         var changed = resumed;
@@ -1473,7 +1660,11 @@ public sealed class LiveTranslationSession(
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            if (!cancellationToken.IsCancellationRequested) logger.LogDebug(ex, "Lokalny odczyt zgubionego napisu pominięty");
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                ReportSwallowed(LiveErrorCategory.LostTextRead, ex);
+                logger.LogDebug(ex, "Lokalny odczyt zgubionego napisu pominięty");
+            }
             var elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             return new LostReadResult(null, elapsed, elapsed);
         }
@@ -2298,6 +2489,7 @@ public sealed class LiveTranslationSession(
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
+                            ReportSwallowed(LiveErrorCategory.GlyphCover, ex);
                             logger.LogDebug(ex, "Łatka napisu nie powstała");
                         }
                         return earlyCovers;
@@ -2344,6 +2536,7 @@ public sealed class LiveTranslationSession(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                ReportSwallowed(LiveErrorCategory.GlyphCover, ex);
                 logger.LogDebug(ex, "Łatka napisu nie powstała");
             }
             coverWaitMs = waitWatch.Elapsed.TotalMilliseconds;
@@ -2815,6 +3008,7 @@ public sealed class LiveTranslationSession(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            ReportSwallowed(LiveErrorCategory.Correction, ex);
             logger.LogDebug("Poprawka nie trafiła od razu do wyświetlanych napisów ({Type}) — pojawi się przy kolejnym odczycie",
                 ex.GetType().Name);
             return;

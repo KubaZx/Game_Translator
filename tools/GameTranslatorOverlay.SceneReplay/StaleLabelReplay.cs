@@ -109,7 +109,7 @@ internal static class StaleLabelReplay
             scripted?.Calibrate(truth);
             if (report.Busy) await window.StartAnimationAsync();
             if (report.Underlay) await window.StartUnderlayAsync();
-            var options = new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true };
+            var options = new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true };
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle, options,
                 report.Update, logging.CreateLogger("StaleLabelReplay"));
             session.Start();

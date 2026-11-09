@@ -220,6 +220,7 @@ internal sealed class ReplayRunner(Recording recording, ReplayOptions options)
             var upscale = OcrScaling.ResolvePreference(profile?.Ocr?.Upscale, settings.OcrUpscale);
             var sessionOptions = new LiveSessionOptions
             {
+                RequireGameVisible = false,
                 Fps = profile?.ChangeDetection?.Fps ?? 6,
                 ChangeThreshold = profile?.ChangeDetection?.Threshold ?? 0.0,
                 OcrUpscale = upscale.Preferred,

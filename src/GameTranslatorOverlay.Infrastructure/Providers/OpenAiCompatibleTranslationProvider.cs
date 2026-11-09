@@ -32,6 +32,9 @@ public sealed class OpenAiCompatibleTranslationProvider(
 
     public LlmUsageTotals Usage { get; } = new();
 
+    public bool UsesLocalServer =>
+        LlmEndpoint.TryNormalize(endpointAccessor(), out var baseUri, out _) && LlmEndpoint.IsLoopback(baseUri!);
+
     public LlmServerOptions? ActiveServerOptions() =>
         LlmEndpoint.TryNormalize(endpointAccessor(), out var baseUri, out _) ? ServerOptionsFor(baseUri!) : null;
 

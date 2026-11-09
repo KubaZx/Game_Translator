@@ -136,7 +136,7 @@ internal static class StreamReplay
             window = await TestWindow.CreateAsync();
             await window.AfterRenderingAsync();
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true }, report.Update, logging.CreateLogger("StreamReplay"));
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true }, report.Update, logging.CreateLogger("StreamReplay"));
             session.Start();
             await Task.Delay(1500);
             await window.ShowLinesAsync(Lines, report);

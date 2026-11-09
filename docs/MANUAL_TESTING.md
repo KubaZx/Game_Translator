@@ -637,7 +637,7 @@ Zatrzymany serwer daje komunikat o uruchomieniu Ollamy/LM Studio, zły model —
 ## M25 — Claude
 
 **Kroki:** zapisz klucz Anthropic, kliknij Testuj, przetłumacz opis przedmiotu z profilem PoE2;
-zmień model na `claude-haiku-4-5` i powtórz.
+zmień model na `claude-haiku-5-5` i powtórz.
 
 **Oczekiwany wynik:** test podaje nazwę modelu; tłumaczenie używa terminów ze słownika PoE2;
 zmiana modelu działa bez restartu. Zły klucz daje komunikat o kluczu, nie wyjątek.
@@ -1230,3 +1230,79 @@ po ok. 0,7 s. Zapisz, jeśli tłumaczenie zostaje na ścianie, gdy napisu już n
 **Oczekiwany wynik:** napisy wracają po ułamku sekundy (plus czas dostawcy), a nie po kilku
 sekundach; przy serii zmian — jeden odczyt po ostatniej zmianie, bez migania. Okno aplikacji nie
 przycina się przy starcie live (kursor i przewijanie płynne).
+
+## M56 — Gra w tle i powrót (0.10.0)
+
+**Kroki:**
+1. Tryb live w grze, na ekranie widać przetłumaczone napisy.
+2. Alt+Tab do przeglądarki albo innego okna leżącego na tym samym monitorze co gra.
+3. Wróć do gry.
+4. Jeśli masz drugi monitor: kliknij okno na drugim monitorze, nie zasłaniając gry.
+
+**Oczekiwany wynik:** po kroku 2 napisy znikają najpóźniej po ok. pół sekundy i nie wiszą nad
+innym oknem, status live mówi „Live wstrzymany — gra w tle”, wskaźnik pokazuje pauzę. Po kroku 3
+napisy wracają same w ciągu ok. sekundy. W kroku 4 live działa dalej. Zapisz, jeśli pauzę
+wywołuje coś, co gry nie zasłania (nakładka innego programu, powiadomienie).
+
+## M57 — Czarny ekran gry (0.10.0)
+
+**Kroki:**
+1. Tryb live w grze uruchomionej w oknie albo w oknie bez ramki; nad grą zostaw małe okno
+   innego programu z tekstem (np. notatnik „zawsze na wierzchu” albo powiadomienie).
+2. Doprowadź do ekranu ładowania albo ciemnego przejścia sceny trwającego kilka sekund.
+
+**Oczekiwany wynik:** napisy znikają razem z treścią gry i wracają po ekranie ładowania. W oknie
+programu nie pojawia się znacznik „⚠ Czytam zrzut ekranu…”, w logu nie ma wpisu „Okno gry nie
+wspiera PrintWindow”, a tekst z okna leżącego nad grą nie jest tłumaczony.
+
+## M58 — Gra, której okna nie da się przechwycić (0.10.0)
+
+**Kroki:**
+1. Uruchom grę w wyłącznym pełnym ekranie (jeśli gra ma taki tryb) i włącz live skrótem.
+2. Poczekaj kilkanaście sekund na ekranie z tekstem.
+
+**Oczekiwany wynik:** tłumaczenie działa (przez Windows Graphics Capture albo zrzut ekranu). Gdy
+źródłem jest zrzut ekranu, nad grą pojawia się „⚠ Pełny ekran: czytam zrzut — przełącz na okno bez
+ramki”, a w oknie programu żółty znacznik pod statusem live. Zapisz, jeśli napisy w ogóle się nie
+pojawiają albo znikają na stałe po zmianie trybu wyświetlania w trakcie sesji.
+
+## M59 — Błąd dostawcy i limit znaków (0.10.0)
+
+**Kroki:**
+1. Wpisz błędny klucz dostawcy, zapisz, włącz live na ekranie z tekstem i poczekaj minutę.
+2. Wpisz poprawny klucz i zapisz.
+3. Ustaw **Limit znaków na sesję** na małą liczbę (np. 300) i tłumacz nowe teksty.
+
+**Oczekiwany wynik:** w kroku 1 licznik zapytań API rośnie o 1 i stoi; pod statusem klucza widać
+„Dostawca wstrzymany…”, a nad grą raz „⚠ Klucz … został odrzucony”. Po kroku 2 tłumaczenie rusza
+bez restartu live. W kroku 3 przy ok. 80% pojawia się jedno ostrzeżenie, a po wyczerpaniu „⚠ Limit
+znaków sesji wyczerpany — zmień w Tłumaczeniu”; zwiększenie limitu przywraca tłumaczenie.
+
+## M60 — Liczniki i podpowiedzi z liczbami (0.10.0)
+
+**Kroki:**
+1. Tryb live na ekranie z zegarem albo licznikiem zmieniającym się co sekundę; obserwuj licznik
+   zapytań API przez minutę.
+2. Najedź kolejno na 5–6 przedmiotów, których opisy różnią się tylko liczbą (np. wymagany poziom).
+
+**Oczekiwany wynik:** w kroku 1 liczba zapytań przestaje rosnąć po kilku wariantach, a tłumaczenie
+licznika pokazuje aktualne cyfry (raz pojawia się „ℹ Licznik na ekranie zmienia się — tłumaczę go
+rzadziej”). W kroku 2 każdy opis jest przetłumaczony. Zapisz teksty, które zostały bez
+tłumaczenia albo z wyraźnie złą odmianą.
+
+## M61 — Uszkodzone ustawienia, słownik i skrót na obcym oknie (0.10.0)
+
+**Kroki:**
+1. Zamknij program, zrób kopię `settings.json`, usuń z oryginału ostatni znak `}` i uruchom
+   program. Wybierz **Zostaw plik — poprawię go sam**, zamknij program, przywróć kopię.
+2. **Dane i słownik → Słownik…**: dodaj termin bez tłumaczenia i kliknij **Zapisz**; potem zmień
+   coś i zamknij okno krzyżykiem.
+3. Przejdź do okna, którego program nie zna (np. notatnik), i wciśnij skrót live raz, a po
+   10 s dwa razy pod rząd.
+
+**Oczekiwany wynik:** w kroku 1 pojawia się okno „Plik ustawień jest uszkodzony” z dwoma
+przyciskami, program startuje z włączonym trybem prywatnym i Cache-only, obok pliku leży kopia
+`settings.json.corrupt-…bak`, a po przywróceniu kopii ustawienia są jak przedtem. W kroku 2 zapis
+jest zablokowany z komunikatem o brakującym tłumaczeniu, a zamknięcie pyta „Zapisać zmiany?”.
+W kroku 3 pierwsze wciśnięcie pokazuje „Nowe okno — wciśnij skrót jeszcze raz w ciągu 6 s…”
+i live nie startuje; dwa szybkie wciśnięcia startują live.

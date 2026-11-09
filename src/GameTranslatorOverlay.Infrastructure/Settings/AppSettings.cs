@@ -6,6 +6,16 @@ namespace GameTranslatorOverlay.Infrastructure.Settings;
 
 public sealed class AppSettings
 {
+    public const int CurrentSettingsVersion = 1;
+
+    public int SettingsVersion { get; set; } = CurrentSettingsVersion;
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? UnknownFields { get; set; }
+
+    [JsonIgnore]
+    public string? PersistedActiveProfileId { get; set; }
+
     public string SourceLanguage { get; set; } = "en";
     public string TargetLanguage { get; set; } = "pl";
     public string Provider { get; set; } = "DeepL";
@@ -52,6 +62,7 @@ public sealed class AppSettings
 
     /// <summary>Czy użytkownik zobaczył już obowiązkowe zastrzeżenie (SECURITY.md) przy pierwszym starcie.</summary>
     public bool DisclaimerAcknowledged { get; set; }
+
     public long? SessionCharacterLimit { get; set; }
 
     /// <summary>panel | overlay</summary>
@@ -131,6 +142,7 @@ public sealed class AppSettings
         nameof(ResultAutoHideSeconds), nameof(SubtitleSeconds), nameof(ShowOverlayNotices), nameof(ShowQualityMarks),
         nameof(TranslateHotkey), nameof(ToggleOverlayHotkey), nameof(LiveToggleHotkey),
         nameof(LastGameProcess), nameof(LastGameTitle), nameof(DisclaimerAcknowledged), nameof(StreamLlmResponses),
+        nameof(SettingsVersion),
     ];
 
     /// <summary>
@@ -143,56 +155,5 @@ public sealed class AppSettings
         var node = JsonSerializer.SerializeToNode(this)!.AsObject();
         foreach (var name in PresentationOnly) node.Remove(name);
         return node.ToJsonString();
-    }
-}
-
-public sealed class JsonSettingsStore(AppPaths paths)
-{
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true,
-    };
-
-    public AppSettings Load()
-    {
-        if (!File.Exists(paths.SettingsPath)) return new AppSettings();
-
-        try
-        {
-            var json = File.ReadAllText(paths.SettingsPath);
-            var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
-            if (!json.Contains("\"overlayFontRevision\"", StringComparison.OrdinalIgnoreCase)) settings.OverlayFontRevision = 0;
-            settings.MigrateOverlayFont();
-            return settings;
-        }
-        catch (Exception ex) when (ex is JsonException or IOException)
-        {
-            // Uszkodzony plik ustawień nie może blokować startu — odkładamy kopię i wracamy do domyślnych.
-            try
-            {
-                File.Copy(paths.SettingsPath, paths.SettingsPath + ".corrupt.bak", overwrite: true);
-            }
-            catch (IOException)
-            {
-                // Kopia zapasowa jest tylko ułatwieniem diagnostyki.
-            }
-            return new AppSettings();
-        }
-    }
-
-    public void Save(AppSettings settings)
-    {
-        paths.EnsureCreated();
-        // Zapis przez plik tymczasowy + atomowa podmiana: przerwanie w trakcie (crash,
-        // zanik zasilania) nie może zostawić uciętego JSON-a, który przy starcie po cichu
-        // resetuje wszystkie ustawienia do domyślnych.
-        var temp = paths.SettingsPath + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(settings, JsonOptions));
-        File.Move(temp, paths.SettingsPath, overwrite: true);
     }
 }

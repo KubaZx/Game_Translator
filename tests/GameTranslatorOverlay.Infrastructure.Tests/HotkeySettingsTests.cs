@@ -61,7 +61,7 @@ public sealed class HotkeySettingsTests : IDisposable
     {
         var paths = new AppPaths(_temp.Path);
         var store = new JsonSettingsStore(paths);
-        store.Save(new AppSettings { Provider = "Mock", PrivateMode = true, ActiveProfileId = "mroczna-latarnia" });
+        store.Save(new AppSettings { Provider = "Mock", PrivateMode = true, ActiveProfileId = "mroczna-latarnia", PersistedActiveProfileId = "mroczna-latarnia" });
 
         var settings = store.Load();
         settings.LiveToggleHotkey = "Ctrl+Alt+L";

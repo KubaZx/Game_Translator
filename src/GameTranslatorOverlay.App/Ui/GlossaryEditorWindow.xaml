@@ -13,7 +13,8 @@
         FontSize="13"
         UseLayoutRounding="True"
         ui:WindowTheme.DarkFrame="True"
-        WindowStartupLocation="CenterOwner">
+        WindowStartupLocation="CenterOwner"
+        Closing="OnWindowClosing">
   <Window.Resources>
     <Style x:Key="CellText" TargetType="TextBlock">
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
@@ -38,13 +39,14 @@
     </Grid>
 
     <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0" LastChildFill="False">
-      <Button DockPanel.Dock="Right" Content="Zapisz i zamknij" Style="{StaticResource Btn.Primary}" ui:Visuals.Glyph="&#xE74E;"
+      <Button x:Name="BtnSave" DockPanel.Dock="Right" Content="Zapisz i zamknij" Style="{StaticResource Btn.Primary}" ui:Visuals.Glyph="&#xE74E;"
               Click="OnSaveClick" Margin="12,0,0,0" VerticalAlignment="Bottom" />
+      <Button x:Name="BtnCancel" DockPanel.Dock="Right" Content="Anuluj" Click="OnCancelClick" Margin="12,0,0,0" VerticalAlignment="Bottom" />
       <WrapPanel Margin="0,0,0,-8">
-        <Button Content="Dodaj wiersz" ui:Visuals.Glyph="&#xE710;" Click="OnAddRowClick" Margin="0,0,8,8" />
-        <Button Content="Usuń zaznaczone" Style="{StaticResource Btn.Danger}" ui:Visuals.Glyph="&#xE74D;" Click="OnDeleteRowClick" Margin="0,0,8,8" />
-        <Button Content="Importuj JSON…" Style="{StaticResource Btn.Ghost}" ui:Visuals.Glyph="&#xE8B5;" Click="OnImportClick" Margin="0,0,4,8" />
-        <Button Content="Eksportuj JSON…" Style="{StaticResource Btn.Ghost}" ui:Visuals.Glyph="&#xEDE1;" Click="OnExportClick" Margin="0,0,4,8" />
+        <Button x:Name="BtnAddRow" Content="Dodaj wiersz" ui:Visuals.Glyph="&#xE710;" Click="OnAddRowClick" Margin="0,0,8,8" />
+        <Button x:Name="BtnDeleteRow" Content="Usuń zaznaczone" Style="{StaticResource Btn.Danger}" ui:Visuals.Glyph="&#xE74D;" Click="OnDeleteRowClick" Margin="0,0,8,8" />
+        <Button x:Name="BtnImport" Content="Importuj JSON…" Style="{StaticResource Btn.Ghost}" ui:Visuals.Glyph="&#xE8B5;" Click="OnImportClick" Margin="0,0,4,8" />
+        <Button x:Name="BtnExport" Content="Eksportuj JSON…" Style="{StaticResource Btn.Ghost}" ui:Visuals.Glyph="&#xEDE1;" Click="OnExportClick" Margin="0,0,4,8" />
       </WrapPanel>
     </DockPanel>
 

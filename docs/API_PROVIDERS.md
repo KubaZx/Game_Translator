@@ -273,7 +273,7 @@ Provider tłumaczy odpowiedzi HTTP na czytelne komunikaty i zachowania:
 | Sytuacja | Znaczenie | Zachowanie programu |
 |---|---|---|
 | `403` | zły lub nieaktywny klucz API | komunikat „sprawdź klucz w ustawieniach"; tłumaczenie stoi do poprawy klucza |
-| `456` | wyczerpany limit znaków konta | komunikat o wyczerpaniu limitu; program przechodzi w tryb Cache-only do końca okresu |
+| `456` | wyczerpany limit znaków konta | komunikat o wyczerpaniu limitu; od 0.10.0 zapytania do dostawcy są wstrzymane do zapisania klucza, zmiany ustawień, udanego testu połączenia albo ponownego startu live |
 | `429` | rate limit (za dużo żądań) | ograniczony retry z odczekaniem; przy powtarzającym się 429 — spowolnienie wysyłki |
 | `5xx` | awaria po stronie DeepL | ograniczony retry; potem czytelny komunikat, cache i słownik dalej działają |
 | timeout | brak odpowiedzi w czasie | anulowanie żądania, ograniczony retry, komunikat |
@@ -542,14 +542,32 @@ na kilku warstwach:
    ustabilizowanie, zamiast generować serię żądań.
 6. **Anulowanie nieaktualnych zadań** — gdy region/klatka się zmieni, stare zadania są
    anulowane (`CancellationToken`), zanim zdążą kosztować.
-7. **Limity** — konfigurowalny limit miesięczny oraz limit znaków na sesję; po przekroczeniu
-   program przestaje wysyłać do API.
+7. **Limit znaków na sesję** — pole w sekcji **Tłumaczenie**, domyślnie puste (bez limitu);
+   liczba znaków liczona od uruchomienia programu, nie dotyczy serwera LLM pod adresem tego
+   komputera. Przy 80% jedno ostrzeżenie, po przekroczeniu program przestaje wysyłać do API.
+   Limitu miesięcznego w programie nie ma — pilnuje go konto u dostawcy.
 8. **Licznik użycia + ostrzeżenia** — bieżące zużycie (m.in. z `/v2/usage`) widoczne w UI,
    z ostrzeżeniami przy zbliżaniu się do limitu.
 9. **Tryb Cache-only** — nic nie wychodzi do sieci; działają tylko cache, słownik i korekty.
 10. **Ręczny stop sieci** — jeden przełącznik natychmiast zatrzymuje całą komunikację z API.
 11. **Limit ponowień jakości** — tekst z trwałym problemem jakości kosztuje najwyżej 3 zapytania
     u modeli językowych i 2 u DeepL/Azure/Google (`qa-final` kończy ponowienia).
+12. **Wyłącznik dostawcy** (od 0.10.0, `ProviderCircuit`) — błąd trwały (brak albo zły klucz,
+    wyczerpany limit konta, nieznany model, zła konfiguracja) wstrzymuje zapytania do zapisania
+    klucza, przebudowy tłumaczenia (zmiana ustawień), udanego testu połączenia albo ponownego
+    startu live. Błąd chwilowy (limit tempa, sieć, przekroczony czas, niedostępna usługa) daje
+    przerwy 5, 15 i 60 s (potem stale 60 s) z jedną próbną partią po każdej; udana odpowiedź
+    zeruje przerwy.
+13. **Pamięć nieudanych tekstów** (`FailedTextMemory`) — tekst, przy którym dostawca zawiódł
+    z powodu samego tekstu (za długi, odrzucone zapytanie, odmowa filtra, błąd nierozpoznany,
+    pusty wynik), po 2 porażkach z rzędu nie jest wysyłany przez 5 minut (do 512 tekstów).
+14. **Liczniki** (`VolatileCounterGate`) — teksty różniące się tylko cyframi mają wspólną maskę.
+    Zegar, ułamek i procent: trzeci różny wariant w 30 s wycisza maskę na 10 minut (każdy
+    kolejny wariant to przedłuża) i dostaje ostatnie tłumaczenie z nowymi cyframi. Liczba przy
+    słowach: ósmy wariant w 30 s wycisza maskę na 10 minut bez przedłużania; cyfry są
+    podstawiane, gdy tłumaczenie zawiera te same ciągi cyfr co źródło, w tej samej kolejności,
+    w innym razie tekst zostaje bez tłumaczenia. Warianty z jednego odczytu ekranu liczą się
+    jako jedno zdarzenie. Tekst bez żadnej litery nie jest wysyłany.
 12. **Pamięć awaryjna przy zepsutej bazie** — gdy cache SQLite nie działa, wyniki są pamiętane
     w RAM (do 2000 tekstów, do przebudowy pipeline'u), żeby ten sam tekst nie szedł drugi raz.
 13. **Korpus gry (ADR-014)** — przy aktywnym profilu z korpusem różne odczyty tego samego zdania

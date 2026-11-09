@@ -18,7 +18,6 @@ public sealed class AppPaths
     public string RootDirectory { get; }
     public string LogsDirectory => Path.Combine(RootDirectory, "logs");
     public string SecretsDirectory => Path.Combine(RootDirectory, "secrets");
-    public string DebugCapturesDirectory => Path.Combine(RootDirectory, "debug-captures");
     public string DatabasePath => Path.Combine(RootDirectory, "cache.db");
     public string SettingsPath => Path.Combine(RootDirectory, "settings.json");
     public string CorpusDirectory => Path.Combine(RootDirectory, "corpus");

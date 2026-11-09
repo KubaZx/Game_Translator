@@ -9,7 +9,7 @@ namespace GameTranslatorOverlay.Core.Tests;
 public sealed class UsageReservationTests
 {
     private const string SessionLimitMessage =
-        "Osiągnięto limit znaków dla tej sesji. Zwiększ limit w ustawieniach albo zrestartuj sesję.";
+        "Osiągnięto limit znaków dla tej sesji. Zwiększ go w polu „Limit znaków na sesję” (sekcja Tłumaczenie) albo uruchom aplikację ponownie.";
 
     [Theory]
     [InlineData(false)]

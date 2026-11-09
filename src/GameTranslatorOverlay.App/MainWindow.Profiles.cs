@@ -35,7 +35,7 @@ public partial class MainWindow
         try
         {
             var profileNames = new List<string> { NoProfileLabel };
-            profileNames.AddRange(_orchestrator.Profiles.Select(static p => p.Name));
+            profileNames.AddRange(_orchestrator.Profiles.Where(static p => !ProfileTemplates.IsTemplate(p)).Select(static p => p.Name));
             CmbProfile.ItemsSource = profileNames;
             CmbProfile.SelectedItem = _orchestrator.ActiveProfile?.Name ?? NoProfileLabel;
         }
@@ -651,16 +651,8 @@ public partial class MainWindow
         _orchestrator.ReloadProfiles();
         if (_orchestrator.ActiveProfile is null) _settings.ActiveProfileId = null;
         RefreshProfileList();
-        try
-        {
-            _settingsStore.Save(_settings);
-            MarkSettingsApplied();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _appliedPipelineJson = _settings.PipelineSnapshot();
-            _logger.LogWarning(ex, "Nie udało się zapisać ustawień po zmianie profili");
-        }
+        if (PersistSettings()) MarkSettingsApplied();
+        else _appliedPipelineJson = _settings.PipelineSnapshot();
         UpdateGameProfileCard();
     }
 }

@@ -40,6 +40,32 @@ public sealed class TranslationProviderCatalogTests : IDisposable
     }
 
     [Fact]
+    public void Podpowiedz_Claude_wymienia_modele_a_lista_zawiera_tanie_warianty()
+    {
+        var hint = TranslationProviderCatalog.Claude.KeyHint;
+        foreach (var model in new[] { "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5" })
+        {
+            Assert.Contains(model, hint);
+            Assert.Contains(model, TranslationProviderCatalog.SuggestedClaudeModels);
+        }
+        Assert.Equal("claude-opus-5-5", ClaudeTranslationProvider.DefaultModel);
+    }
+
+    [Fact]
+    public void Gotowe_adresy_serwerow_lokalnych_uzywaja_adresu_IPv4_i_przechodza_walidacje()
+    {
+        foreach (var name in new[] { "Ollama", "LM Studio" })
+        {
+            var preset = Assert.Single(TranslationProviderCatalog.LlmPresets, p => p.Name == name);
+            Assert.StartsWith("http://127.0.0.1:", preset.Endpoint);
+            Assert.True(LlmEndpoint.TryNormalize(preset.Endpoint, out var uri, out _));
+            Assert.True(LlmEndpoint.IsLoopback(uri!));
+        }
+        Assert.True(LlmEndpoint.TryNormalize("http://localhost:11434/v1", out var legacy, out _));
+        Assert.True(LlmEndpoint.IsLoopback(legacy!));
+    }
+
+    [Fact]
     public void Gotowe_adresy_LLM_przechodza_walidacje()
     {
         Assert.All(TranslationProviderCatalog.LlmPresets, static preset =>

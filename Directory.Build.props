@@ -4,8 +4,12 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.9.0</Version>
+    <Version>0.10.0</Version>
     <Product>GameTranslatorOverlay</Product>
     <Copyright>© 2026 GameTranslatorOverlay</Copyright>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PathMap>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)'))=/_/</PathMap>
   </PropertyGroup>
 </Project>

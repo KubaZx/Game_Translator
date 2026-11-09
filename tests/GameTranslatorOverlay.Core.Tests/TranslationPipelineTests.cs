@@ -353,9 +353,9 @@ public class TranslationPipelineTests
             new GlossaryService(), new InMemoryTranslationCache(), provider, new UsageTracker(),
             new TranslationPipelineOptions { MaxRecentContextTexts = 3 });
 
-        for (var i = 1; i <= 5; i++) await pipeline.TranslateAsync([$"Line {i}"], "en", "pl");
+        for (var i = 1; i <= 5; i++) await pipeline.TranslateAsync([$"Line {(char)('@' + i)}"], "en", "pl");
 
-        Assert.Equal(["Line 2", "Line 3", "Line 4"], provider.Contexts[^1].RecentTexts);
+        Assert.Equal(["Line B", "Line C", "Line D"], provider.Contexts[^1].RecentTexts);
     }
 
     [Fact]

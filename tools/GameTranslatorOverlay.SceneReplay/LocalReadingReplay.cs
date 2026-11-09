@@ -62,6 +62,7 @@ internal static class LocalReadingReplay
             await window.AfterRenderingAsync();
             var options = new LiveSessionOptions
             {
+                RequireGameVisible = false,
                 OcrUpscale = 1, EnableDiagnostics = true,
                 StaticRescanInterval = TimeSpan.FromMilliseconds(report.Whiff ? 500 : report.Jitter ? 600 : 4000),
             };

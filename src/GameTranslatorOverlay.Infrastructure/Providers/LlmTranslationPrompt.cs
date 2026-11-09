@@ -76,15 +76,16 @@ public static partial class LlmTranslationPrompt
         builder.AppendLine("- Leave names, codes and strings that need no translation unchanged.");
         builder.AppendLine("- Add no notes, explanations or quotes.");
 
-        if (!string.IsNullOrWhiteSpace(context.GameName))
+        var gameName = CleanGameName(context.GameName);
+        if (gameName is not null)
         {
             builder.AppendLine();
-            builder.AppendLine($"Game: {context.GameName.Trim()}");
+            builder.AppendLine($"Game: {gameName}");
         }
 
         if (!string.IsNullOrWhiteSpace(context.Scene))
         {
-            if (string.IsNullOrWhiteSpace(context.GameName)) builder.AppendLine();
+            if (gameName is null) builder.AppendLine();
             builder.AppendLine($"Scene: {OneLine(context.Scene)}");
         }
 
@@ -263,6 +264,35 @@ public static partial class LlmTranslationPrompt
     }
 
     private static string StripReasoning(string text) => ThinkBlockRegex().Replace(text, string.Empty);
+
+    public const int MaxGameNameLength = 80;
+
+    public static string? CleanGameName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var builder = new StringBuilder(name.Length);
+        foreach (var ch in name)
+        {
+            var separator = char.IsControl(ch) || char.IsWhiteSpace(ch)
+                || char.GetUnicodeCategory(ch) is System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator;
+            if (separator)
+            {
+                if (builder.Length > 0 && builder[^1] != ' ') builder.Append(' ');
+            }
+            else
+            {
+                builder.Append(ch);
+            }
+        }
+        var cleaned = builder.ToString().Trim();
+        if (cleaned.Length > MaxGameNameLength)
+        {
+            var end = MaxGameNameLength;
+            if (char.IsHighSurrogate(cleaned[end - 1])) end--;
+            cleaned = cleaned[..end].TrimEnd();
+        }
+        return cleaned.Length == 0 ? null : cleaned;
+    }
 
     private static string OneLine(string text) => text.Replace('\n', ' ').Replace('\r', ' ').Trim();
 

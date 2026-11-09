@@ -531,3 +531,25 @@ GameTranslatorOverlay.SceneReplay.exe --scenario ui-fonts --font-path background
 
 Wynik zależy od DPI monitora i od tego, co proces zdążył już narysować; nie obejmuje rysowania
 przez kompozytor ani łatek zbudowanych z prawdziwej klatki gry.
+
+## Czarny kadr i błąd dostawcy (0.10.0)
+
+Oba scenariusze odrzucają `--provider-delay-ms`, `--phase-ms` i `--ocr-delay-ms`. Sesja live działa
+w nich z `RequireGameVisible = false` (jak we wszystkich powtórkach na własnym oknie, które nie
+jest na pierwszym planie) — bramki „gra w tle” powtórki nie sprawdzają.
+
+- `black-frame` (`BlackFrameReplay.cs`, Windows OCR, Mock 200 ms): okno z tekstem „Inspect this
+  gate” → ok. 2 s całkowicie czarnego kadru → okno z tekstem „Garden clue opens the next door”.
+  Oczekiwane: `screenFallbackFrames = 0`, `screenReadingWarning = false`, `readingScreenUpdates = 0`,
+  `warningTexts = 0`, `expectedBehavior = true`. Sprawdza, że czarny kadr z udanego PrintWindow nie
+  przełącza sesji na zrzut ekranu.
+- `provider-failure` (`ProviderFailureReplay.cs`, scripted OCR, dostawca testowy zawsze
+  odrzucający klucz): 8 s obserwacji przy odczycie co 500 ms. Oczekiwane: `providerRequests = 1`,
+  `failedRequests = 1`, `translatedBlocks = 0`, `pauseKind = Permanent`,
+  `pauseFailure = InvalidApiKey`, `expectedBehavior = true`. Sprawdza, że po błędzie trwałym
+  kolejne odczyty ekranu nie wysyłają zapytań.
+
+```
+GameTranslatorOverlay.SceneReplay.exe --scenario black-frame --output C:\pomiary\black-1.jsonl
+GameTranslatorOverlay.SceneReplay.exe --scenario provider-failure --output C:\pomiary\provider-1.jsonl
+```

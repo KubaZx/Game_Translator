@@ -1,10 +1,15 @@
 # Testy i pomiary — GameTranslatorOverlay
 
-Stan sprawdzony 17 października 2026 (wydanie 0.9.0): **2285 testów xUnit** — **1675 Core**,
-**443 Infrastructure** i **167 CorpusTool** — oraz kompilacja całego rozwiązania (z aplikacją
+Stan sprawdzony 9 listopada 2026 (wydanie 0.10.0): **2549 testów xUnit** — **1883 Core**,
+**499 Infrastructure** i **167 CorpusTool** — oraz kompilacja całego rozwiązania (z aplikacją
 WPF, narzędziami i benchmarkami) bez ostrzeżeń. Ta runda była weryfikowana na Windows
-(.NET 10 SDK): testy DPAPI (`[WindowsFact]`) wykonane, 0 pominiętych; smoke test Windows OCR
-z Mockiem zakończony wynikiem OK. Projekty Infrastructure i CorpusTool uruchamiają klasy testów
+(.NET 10 SDK): testy DPAPI (`[WindowsFact]`) wykonane, 0 pominiętych; powtórka `black-frame`
+(Windows OCR z Mockiem) zakończona wynikiem OK. Paczka 0.10.0 została uruchomiona na osobnym
+folderze danych z czterema plikami ustawień — poprawnym, uciętym, z nowszej wersji i ze złymi
+wartościami pól: okna informacji otwierają się, plik nie jest nadpisywany, a ucięty dostaje
+kopię z datą; na kopii prawdziwej bazy tłumaczeń (8 tys. wpisów) baza po uruchomieniu przechodzi
+`PRAGMA integrity_check`. Edytor słownika i tryb live w grze nie były w tej rundzie uruchamiane
+ręcznie. Projekty Infrastructure i CorpusTool uruchamiają klasy testów
 po kolei (`tests/*/AssemblyInfo.cs`, `CollectionBehavior(DisableTestParallelization = true)`):
 testy bazy w `Dispose` czyszczą globalnie pule połączeń SQLite (`SqliteConnection.ClearAllPools`),
 a przy równoległych klasach zamykało to połączenie innego testu (`ObjectDisposedException`

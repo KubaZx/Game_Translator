@@ -50,7 +50,7 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink|typing|typing-nohold|pan-cut|motion-occlusion|motion-blur|quality-mark|quality-mark-clean|settings-change|manual-correction] [--ocr scripted|windows]\n" +
+            Console.WriteLine("SceneReplay --output NOWY.jsonl [--scenario displayed|inflight|noisy|aba|churn|stop|local-reading|reading-jitter|reading-whiff|ocr-timing|local-occlusion|local-occlusion-hover|local-occlusion-inflight|moving-text|position-jitter|hud-motion|hud-motion-whiff|hud-motion-small-whiff|stale-junk|stale-junk-ghost|stale-texture|stale-newtext|stale-busy|stale-fade|stale-dim|stale-newdirty|stale-present-junk|stale-blink|typing|typing-nohold|pan-cut|motion-occlusion|motion-blur|quality-mark|quality-mark-clean|provider-failure|settings-change|manual-correction|black-frame] [--ocr scripted|windows]\n" +
                 "  --scenario ui-fonts --font-path sync|background (przestoj watku UI przy starcie live i nowym napisie)\n" +
                 "  [--provider-delay-ms 0..5000] [--phase-ms 0..200] [--ocr-delay-ms 100..600 only ocr-timing]\n" +
                 "  [--assets KATALOG_Z_inspect_crop.png] [--texture OBRAZ] [--texture-origin X,Y] [--bright-spot-px 4..14] only stale-*\n" +
@@ -222,6 +222,12 @@ internal static class Program
                     throw new ArgumentException("HUD motion uses Windows OCR and Mock 200; optional timing overrides are not supported.");
                 return StaticHudReplay.Run(output, scenario != "hud-motion", scenario == "hud-motion-small-whiff");
             }
+            if (scenario == "black-frame")
+            {
+                if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "windows"))
+                    throw new ArgumentException("black-frame uses Windows OCR and Mock 200; timing overrides are not supported.");
+                return BlackFrameReplay.Run(output);
+            }
             if (scenario is "typing" or "typing-nohold")
             {
                 if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
@@ -245,6 +251,12 @@ internal static class Program
                 if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
                     throw new ArgumentException("Quality mark uses scripted OCR and an instant scripted provider; timing overrides are not supported.");
                 return QualityMarkReplay.Run(output, scenario == "quality-mark");
+            }
+            if (scenario == "provider-failure")
+            {
+                if (providerDelaySpecified || phaseSpecified || ocrDelaySpecified || (args.Contains("--ocr") && ocrMode != "scripted"))
+                    throw new ArgumentException("provider-failure uses scripted OCR and a provider that always rejects the key; timing overrides are not supported.");
+                return ProviderFailureReplay.Run(output);
             }
             if (ReactionReplay.Scenarios.Contains(scenario))
             {
@@ -336,7 +348,7 @@ internal static class Program
             sceneWindow = await SceneWindow.CreateAsync(expandedScenes: scenario == "churn");
             await sceneWindow.ChangeAsync(1, report);
             session = new LiveTranslationSession(orchestrator, ocr, sceneWindow.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true }, report.Update, logging.CreateLogger("SceneReplay"));
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true }, report.Update, logging.CreateLogger("SceneReplay"));
             session.Start();
             await report.InitialDisplayed.Task.WaitAsync(TimeSpan.FromSeconds(20));
             if (phaseMs > 0) await Task.Delay(phaseMs);

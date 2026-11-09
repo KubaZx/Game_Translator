@@ -61,7 +61,7 @@ internal static class PanCutReplay
             await window.PanToAsync(0);
             report.SetInitialTarget(CaptureGroundTruth(window.Handle, report));
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true },
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true },
                 report.Update, logging.CreateLogger("PanCutReplay"));
             session.Start();
             await report.InitialDisplayed.Task.WaitAsync(TimeSpan.FromSeconds(20));

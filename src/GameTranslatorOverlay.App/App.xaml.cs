@@ -5,12 +5,14 @@ using System.Windows.Threading;
 using GameTranslatorOverlay.App.Hotkeys;
 using GameTranslatorOverlay.App.Ocr;
 using GameTranslatorOverlay.App.Services;
+using GameTranslatorOverlay.App.Ui;
 using GameTranslatorOverlay.Core.Glossary;
 using GameTranslatorOverlay.Core.Ocr;
 using GameTranslatorOverlay.Core.Translation;
 using GameTranslatorOverlay.Core.Usage;
 using GameTranslatorOverlay.Infrastructure.Caching;
 using GameTranslatorOverlay.Infrastructure.Content;
+using GameTranslatorOverlay.Infrastructure.Diagnostics;
 using GameTranslatorOverlay.Infrastructure.Providers;
 using GameTranslatorOverlay.Infrastructure.Secrets;
 using GameTranslatorOverlay.Infrastructure.Settings;
@@ -19,6 +21,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using Serilog.Events;
 
 namespace GameTranslatorOverlay.App;
 
@@ -32,36 +35,64 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // Druga kopia aplikacji dublowałaby skróty globalne, nakładkę i dostęp do bazy —
-        // pilnujemy pojedynczej instancji.
-        _singleInstanceMutex = new Mutex(initiallyOwned: true, @"Local\GameTranslatorOverlay.SingleInstance", out var isFirstInstance);
-        if (!isFirstInstance)
-        {
-            MessageBox.Show(
-                "GameTranslatorOverlay już działa.\n\nSprawdź ikonę z dymkiem „PL” w zasobniku systemowym (przy zegarze) — " +
-                "kliknij ją, aby przywrócić okno.",
-                "GameTranslatorOverlay", MessageBoxButton.OK, MessageBoxImage.Information);
-            Shutdown(0);
-            return;
-        }
-
-        _paths = new AppPaths();
-        _paths.EnsureCreated();
-
-        Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Information()
-            .WriteTo.File(
-                Path.Combine(_paths.LogsDirectory, "app-.log"),
-                rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 7)
-            .CreateLogger();
-
         DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += (_, args) =>
         {
             Log.Error(args.Exception, "Nieobsłużony wyjątek zadania w tle");
             args.SetObserved();
         };
+
+        // Druga kopia aplikacji dublowałaby skróty globalne, nakładkę i dostęp do bazy —
+        // pilnujemy pojedynczej instancji.
+        try
+        {
+            _singleInstanceMutex = new Mutex(initiallyOwned: true, @"Local\GameTranslatorOverlay.SingleInstance", out var isFirstInstance);
+            if (!isFirstInstance)
+            {
+                MessageBox.Show(
+                    "GameTranslatorOverlay już działa.\n\nSprawdź ikonę z dymkiem „PL” w zasobniku systemowym (przy zegarze) — " +
+                    "kliknij ją, aby przywrócić okno.",
+                    "GameTranslatorOverlay", MessageBoxButton.OK, MessageBoxImage.Information);
+                Shutdown(0);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Nie udało się sprawdzić, czy program już działa.\n\n" + ex.Message +
+                "\n\nUruchom program ponownie. Jeśli błąd wraca, uruchom komputer od nowa.",
+                "GameTranslatorOverlay", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
+
+        try
+        {
+            _paths = new AppPaths();
+            _paths.EnsureCreated();
+
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Information()
+                .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+                .WriteTo.File(
+                    Path.Combine(_paths.LogsDirectory, "app-.log"),
+                    rollingInterval: RollingInterval.Day,
+                    retainedFileCountLimit: 7)
+                .CreateLogger();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            MessageBox.Show(
+                "Nie udało się przygotować folderu danych programu.\n\n" + ex.Message +
+                "\n\nSprawdź, czy dysk ma wolne miejsce i czy masz prawo zapisu do folderu %LOCALAPPDATA%\\" + AppPaths.AppFolderName + ".",
+                "GameTranslatorOverlay", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
+
+        LogStartupReport();
 
         try
         {
@@ -72,10 +103,19 @@ public partial class App : Application
                 .Build();
             _host.Start();
 
+            var settingsStore = _host.Services.GetRequiredService<JsonSettingsStore>();
+            _ = _host.Services.GetRequiredService<AppSettings>();
+            ShowSettingsNotice(settingsStore);
+
             var cache = _host.Services.GetRequiredService<SqliteTranslationCache>();
             try
             {
                 cache.Initialize();
+                if (cache.RecoveryNotice is { } recovery)
+                {
+                    MessageBox.Show(recovery, "GameTranslatorOverlay — cache",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
             }
             catch (CacheStorageException ex)
             {
@@ -98,6 +138,32 @@ public partial class App : Application
                 "GameTranslatorOverlay", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
+    }
+
+    private static void LogStartupReport()
+    {
+        try
+        {
+            Log.Information("{StartupReport}", StartupDiagnostics.Describe());
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Nie udało się zebrać danych startowych");
+        }
+    }
+
+    private void ShowSettingsNotice(JsonSettingsStore settingsStore)
+    {
+        if (settingsStore.LastLoad is not { NeedsAttention: true } load
+            || SettingsLoadMessages.Describe(load) is not { } notice)
+        {
+            return;
+        }
+
+        var window = new SettingsNoticeWindow(notice);
+        MainWindow = null;
+        window.ShowDialog();
+        if (window.Choice == SettingsNoticeChoice.StartFromDefaults) settingsStore.AllowSaving();
     }
 
     private static void ConfigureServices(IServiceCollection services, AppPaths paths)
@@ -159,14 +225,32 @@ public partial class App : Application
     private static Func<string?> ApiKey(IServiceProvider sp, TranslationProviderInfo provider) =>
         () => sp.GetRequiredService<ISecretsStore>().Load(provider.SecretName!);
 
+    private readonly ErrorDialogThrottle _errorDialogThrottle = new();
+
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         Log.Error(e.Exception, "Nieobsłużony wyjątek interfejsu");
+        e.Handled = true;
+
+        var window = MainWindow as global::GameTranslatorOverlay.App.MainWindow;
+        var liveRunning = window?.IsLiveRunning == true;
+        if (!_errorDialogThrottle.TryAcquire(DateTime.UtcNow, liveRunning))
+        {
+            window?.ReportUnexpectedError();
+            return;
+        }
+
         MessageBox.Show(
             "Wystąpił nieoczekiwany błąd. Aplikacja spróbuje działać dalej.\n\n" +
             "Szczegóły znajdziesz w logu: " + (_paths?.LogsDirectory ?? "%LOCALAPPDATA%\\" + AppPaths.AppFolderName + "\\logs"),
             "GameTranslatorOverlay", MessageBoxButton.OK, MessageBoxImage.Error);
-        e.Handled = true;
+    }
+
+    private static void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception exception) Log.Fatal(exception, "Nieobsłużony wyjątek — program się zamyka");
+        else Log.Fatal("Nieobsłużony wyjątek nieznanego typu — program się zamyka");
+        if (e.IsTerminating) Log.CloseAndFlush();
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -187,6 +271,7 @@ public partial class App : Application
         }
         finally
         {
+            Log.Information("Zamknięcie programu");
             Log.CloseAndFlush();
             _singleInstanceMutex?.Dispose();
         }

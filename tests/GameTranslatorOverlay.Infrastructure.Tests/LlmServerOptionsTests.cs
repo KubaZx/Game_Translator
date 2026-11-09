@@ -221,13 +221,15 @@ public sealed class LlmServerOptionsTests : IDisposable
 
         var ollama = Assert.Single(TranslationProviderCatalog.LlmPresets, static p => p.Name == "Ollama");
         Assert.Equal("none", ollama.ServerOptionsForHost()!.ReasoningEffort);
-        Assert.Equal("localhost:11434", ollama.ServerOptionsForHost()!.Host);
+        Assert.Equal("127.0.0.1:11434", ollama.ServerOptionsForHost()!.Host);
 
         var openAi = Assert.Single(TranslationProviderCatalog.LlmPresets, static p => p.Name == "OpenAI");
         Assert.Null(openAi.ServerOptionsForHost());
         Assert.Null(openAi.Model);
 
         Assert.Same(deepSeek, TranslationProviderCatalog.FindLlmPreset(new Uri("https://API.deepseek.com/v1/")));
+        Assert.Same(ollama, TranslationProviderCatalog.FindLlmPreset(new Uri("http://localhost:11434/v1/")));
+        Assert.Same(ollama, TranslationProviderCatalog.FindLlmPreset(new Uri("http://127.0.0.1:11434/v1/")));
         Assert.Null(TranslationProviderCatalog.FindLlmPreset(new Uri("https://openrouter.ai/api/v1/")));
     }
 

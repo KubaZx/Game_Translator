@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using GameTranslatorOverlay.App.Services;
@@ -38,12 +39,16 @@ public partial class GlossaryEditorWindow : Window
     private readonly string _sourceLanguage;
     private readonly string _targetLanguage;
     private readonly ObservableCollection<GlossaryTermRow> _rows = [];
+    private bool _readOnly;
+    private string _savedSignature = string.Empty;
+    private bool _closeConfirmed;
 
     public GlossaryEditorWindow(
         UserGlossaryStore store,
         TranslationOrchestrator orchestrator,
         string sourceLanguage,
-        string targetLanguage)
+        string targetLanguage,
+        bool privateMode = false)
     {
         InitializeComponent();
         _store = store;
@@ -56,7 +61,8 @@ public partial class GlossaryEditorWindow : Window
             "(bez API) i ma pierwszeństwo przed tłumaczeniem online. Ręczne korekty tłumaczeń są ważniejsze od terminów. " +
             "Wyższy priorytet wygrywa przy konfliktach.";
 
-        foreach (var term in _store.Load(sourceLanguage, targetLanguage).Terms)
+        var load = _store.LoadChecked(sourceLanguage, targetLanguage);
+        foreach (var term in load.Document.Terms)
         {
             _rows.Add(new GlossaryTermRow
             {
@@ -71,7 +77,53 @@ public partial class GlossaryEditorWindow : Window
 
         TermsGrid.ItemsSource = _rows;
         UpdateConflictInfo();
+
+        if (!load.CanWrite)
+        {
+            LockEditor(load.EditorBlockMessage ?? string.Empty);
+        }
+        else if (privateMode)
+        {
+            LockEditor("Tryb prywatny: słownik jest tylko do odczytu — terminy w tym trybie dodajesz z panelu wyniku i działają do końca sesji.");
+        }
+        _savedSignature = Signature();
     }
+
+    private void LockEditor(string message)
+    {
+        _readOnly = true;
+        TermsGrid.IsReadOnly = true;
+        BtnSave.IsEnabled = false;
+        BtnAddRow.IsEnabled = false;
+        BtnDeleteRow.IsEnabled = false;
+        BtnImport.IsEnabled = false;
+        BtnExport.IsEnabled = false;
+        TxtInfo.Text = message;
+    }
+
+    private string Signature() => string.Join(
+        "\n", _rows.Select(static r => $"{r.Source}\u001f{r.Target}\u001f{r.Priority}\u001f{r.CaseSensitive}\u001f{r.Note}\u001f{r.Scope}"));
+
+    private bool HasUnsavedChanges()
+    {
+        if (_readOnly) return false;
+        var committed = TermsGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, true);
+        return !committed || Signature() != _savedSignature;
+    }
+
+    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (_closeConfirmed || !HasUnsavedChanges()) return;
+
+        var answer = MessageBox.Show(this, "Zapisać zmiany?", "Słownik użytkownika",
+            MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (answer == MessageBoxResult.Cancel || (answer == MessageBoxResult.Yes && !TrySave()))
+        {
+            e.Cancel = true;
+        }
+    }
+
+    private void OnCancelClick(object sender, RoutedEventArgs e) => Close();
 
     private void OnAddRowClick(object sender, RoutedEventArgs e)
     {
@@ -191,11 +243,43 @@ public partial class GlossaryEditorWindow : Window
 
     private void OnSaveClick(object sender, RoutedEventArgs e)
     {
-        if (!TryCommitPendingEdit()) return;
-
-        _store.ReplaceAll(BuildDocument(), _sourceLanguage, _targetLanguage);
-        _orchestrator.RebuildPipeline();
+        if (!TrySave()) return;
+        _closeConfirmed = true;
         Close();
+    }
+
+    private bool TrySave()
+    {
+        if (_readOnly || !TryCommitPendingEdit()) return false;
+
+        if (GlossaryRowCheck.FirstProblem(_rows.Select(static r => ((string?)r.Source, (string?)r.Target))) is { } problem)
+        {
+            TxtInfo.Text = problem.Message;
+            TermsGrid.SelectedItem = _rows[problem.Index];
+            TermsGrid.ScrollIntoView(_rows[problem.Index]);
+            return false;
+        }
+
+        var current = _store.LoadChecked(_sourceLanguage, _targetLanguage);
+        if (!current.CanWrite)
+        {
+            TxtInfo.Text = (current.EditorBlockMessage ?? string.Empty) + " Zmiany zostają w oknie — wyeksportuj je, jeśli chcesz je zachować.";
+            return false;
+        }
+
+        try
+        {
+            _store.ReplaceAll(BuildDocument(), _sourceLanguage, _targetLanguage);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            TxtInfo.Text = "Nie udało się zapisać słownika (plik jest zajęty albo brakuje miejsca). Zmiany zostają w oknie — spróbuj ponownie.";
+            return false;
+        }
+
+        _savedSignature = Signature();
+        _orchestrator.RebuildPipeline();
+        return true;
     }
 
     private GlossaryDocument BuildDocument()

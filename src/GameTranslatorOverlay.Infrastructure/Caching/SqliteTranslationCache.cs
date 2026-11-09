@@ -68,18 +68,107 @@ public sealed class SqliteTranslationCache : ITranslationCache
             if (_initialized) return;
             try
             {
-                using var connection = OpenConnection(initializing: true);
-                Migrate(connection);
+                OpenAndMigrate();
                 _initialized = true;
+            }
+            catch (SqliteException ex) when (IsCorruption(ex))
+            {
+                _logger.LogWarning(ex, "Baza cache jest uszkodzona — odkładam plik i zakładam nową");
+                QuarantineDatabase(ex);
+                try
+                {
+                    OpenAndMigrate();
+                    _initialized = true;
+                }
+                catch (SqliteException retry)
+                {
+                    throw OpenFailure(retry);
+                }
             }
             catch (SqliteException ex)
             {
-                throw new CacheStorageException(
-                    $"Nie udało się otworzyć bazy cache ({_databasePath}). Plik może być uszkodzony albo zablokowany — " +
-                    "zamknij inne kopie aplikacji, a w ostateczności usuń plik: aplikacja utworzy nową, pustą bazę.",
-                    ex);
+                throw OpenFailure(ex);
             }
         }
+    }
+
+    public const int CurrentSchemaVersion = 1;
+
+    private const int SqliteCorrupt = 11;
+    private const int SqliteNotADatabase = 26;
+
+    public string? RecoveryNotice { get; private set; }
+
+    public string? QuarantinedDatabasePath { get; private set; }
+
+    private static bool IsCorruption(SqliteException ex) => ex.SqliteErrorCode is SqliteCorrupt or SqliteNotADatabase;
+
+    private void OpenAndMigrate()
+    {
+        using (var probe = OpenConnection())
+        {
+            using var versionCommand = probe.CreateCommand();
+            versionCommand.CommandText = "PRAGMA user_version;";
+            EnsureNotNewer(Convert.ToInt64(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture));
+        }
+
+        using var connection = OpenConnection(initializing: true);
+        Migrate(connection);
+    }
+
+    private static void EnsureNotNewer(long version)
+    {
+        if (version > CurrentSchemaVersion)
+        {
+            throw new CacheStorageException(
+                "Baza cache pochodzi z nowszej wersji programu — ta wersja nie będzie jej zapisywać, żeby jej nie uszkodzić. " +
+                "Tłumaczenia będą działać, ale bez zapamiętywania na dysku. Zainstaluj nowszą wersję programu " +
+                "albo przenieś plik cache.db w inne miejsce.");
+        }
+    }
+
+    private static CacheStorageException OpenFailure(SqliteException ex) => new(
+        "Nie udało się otworzyć bazy cache. Plik może być zablokowany przez inną kopię programu — " +
+        "zamknij ją i uruchom program ponownie. Tłumaczenia będą działać, ale bez zapamiętywania na dysku.",
+        ex);
+
+    private void QuarantineDatabase(SqliteException cause)
+    {
+        using (var poolKey = new SqliteConnection(_connectionString))
+        {
+            SqliteConnection.ClearPool(poolKey);
+        }
+
+        var directory = Path.GetDirectoryName(_databasePath) ?? string.Empty;
+        var name = Path.GetFileNameWithoutExtension(_databasePath);
+        var extension = Path.GetExtension(_databasePath);
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        var target = Path.Combine(directory, $"{name}.corrupt-{stamp}{extension}");
+        for (var attempt = 2; File.Exists(target) || File.Exists(target + "-wal") || File.Exists(target + "-shm"); attempt++)
+        {
+            target = Path.Combine(directory, $"{name}.corrupt-{stamp}-{attempt}{extension}");
+        }
+
+        try
+        {
+            foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+            {
+                if (File.Exists(_databasePath + suffix)) File.Move(_databasePath + suffix, target + suffix);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new CacheStorageException(
+                "Baza cache jest uszkodzona, a program nie mógł jej odłożyć, bo plik jest używany. " +
+                "Zamknij inne kopie programu i uruchom go ponownie. Tłumaczenia będą działać, ale bez zapamiętywania na dysku.",
+                cause);
+        }
+
+        QuarantinedDatabasePath = target;
+        RecoveryNotice =
+            "Baza cache była uszkodzona. Odłożyłem ją do pliku „" + Path.GetFileName(target) + "” w folderze danych programu " +
+            "i założyłem nową, pustą bazę. Zapamiętane tłumaczenia i ręczne poprawki z kopii można odzyskać " +
+            "(to zwykła baza SQLite).";
     }
 
     private SqliteConnection OpenConnection(bool initializing = false)
@@ -114,6 +203,8 @@ public sealed class SqliteTranslationCache : ITranslationCache
         using var versionCommand = connection.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
         var version = Convert.ToInt64(versionCommand.ExecuteScalar(), CultureInfo.InvariantCulture);
+
+        EnsureNotNewer(version);
 
         if (version < 1)
         {

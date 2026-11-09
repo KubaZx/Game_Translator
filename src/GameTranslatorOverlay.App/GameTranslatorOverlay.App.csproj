@@ -28,6 +28,7 @@
     <Resource Include="Fonts\*.ttf" />
     <None Include="Fonts\OFL.txt" Link="licenses\LexendDeca-OFL.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fonts\ZillaSlab-OFL.txt" Link="licenses\ZillaSlab-OFL.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="ThirdPartyLicenses\*.txt" Link="licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

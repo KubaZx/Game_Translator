@@ -72,7 +72,7 @@ internal static class LocalOcclusionReplay
                 throw new OcrLanguageNotAvailableException(settings.SourceLanguage);
             window = await TestWindow.CreateAsync();
             await window.AfterRenderingAsync();
-            var options = new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true };
+            var options = new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true };
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle, options,
                 report.Update, logging.CreateLogger("LocalOcclusionReplay"));
             session.Start();

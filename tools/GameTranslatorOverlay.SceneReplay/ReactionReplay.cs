@@ -76,7 +76,7 @@ internal static class ReactionReplay
             window = await TestWindow.CreateAsync(LabelA, ColorA);
             await window.AfterRenderingAsync();
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true },
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true },
                 report.Update, logging.CreateLogger("ReactionReplay"));
             session.Start();
             if (correction) await RunCorrectionAsync(report, orchestrator, usage, provider);

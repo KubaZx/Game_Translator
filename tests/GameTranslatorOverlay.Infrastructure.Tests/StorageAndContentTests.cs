@@ -90,7 +90,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void Uszkodzony_plik_ustawien_wraca_do_domyslnych_z_kopia_zapasowa()
+    public void Uszkodzony_plik_ustawien_startuje_prywatnie_z_kopia_zapasowa()
     {
         var paths = new AppPaths(_temp.Path);
         paths.EnsureCreated();
@@ -98,8 +98,9 @@ public sealed class JsonSettingsStoreTests : IDisposable
 
         var loaded = new JsonSettingsStore(paths).Load();
 
-        Assert.Equal("DeepL", loaded.Provider);
-        Assert.True(File.Exists(paths.SettingsPath + ".corrupt.bak"));
+        Assert.True(loaded.PrivateMode);
+        Assert.True(loaded.CacheOnlyMode);
+        Assert.Single(Directory.GetFiles(_temp.Path, "settings.json.corrupt-*.bak"));
     }
 
     [Fact]

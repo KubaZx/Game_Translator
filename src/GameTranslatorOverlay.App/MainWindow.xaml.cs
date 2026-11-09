@@ -71,6 +71,8 @@ public partial class MainWindow : Window
     private bool _translateHotkeyRegistered;
     private bool _overlayHotkeyRegistered;
     private bool _liveHotkeyBusy;
+    private readonly LiveStartConfirmation _liveStartConfirmation = new();
+    private readonly HashSet<string> _manuallyChosenProcesses = new(StringComparer.OrdinalIgnoreCase);
 
     // Programowe zaznaczenie zapamiętanej gry po odświeżeniu listy NIE jest wyborem użytkownika:
     // nie może przełączać profilu (zapis settings.json + przebudowa pipeline'u bez kliknięcia).
@@ -140,6 +142,7 @@ public partial class MainWindow : Window
         TxtAzureRegion.Text = _settings.AzureRegion ?? string.Empty;
         TxtLlmEndpoint.Text = _settings.LlmEndpoint;
         TxtLlmModel.Text = _settings.LlmModel ?? string.Empty;
+        TxtSessionLimit.Text = _settings.SessionCharacterLimit?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         CmbClaudeModel.ItemsSource = TranslationProviderCatalog.SuggestedClaudeModels;
         CmbClaudeModel.Text = _settings.ClaudeModel;
         foreach (var llmPreset in TranslationProviderCatalog.LlmPresets)
@@ -219,9 +222,11 @@ public partial class MainWindow : Window
         {
             ShowDisclaimer();
             _settings.DisclaimerAcknowledged = true;
-            _settingsStore.Save(_settings);
+            PersistSettings();
         }
         MarkSettingsApplied();
+        if (_settingsStore.SavingBlocked) SetStatus(SettingsLoadMessages.SavingBlockedStatus);
+        else if (_orchestrator.UserGlossaryWarning is { } glossaryWarning) SetStatus(glossaryWarning);
     }
 
     /// <summary>
@@ -394,7 +399,7 @@ public partial class MainWindow : Window
     /// <summary>Pokazuje komunikat w nakładce, o ile gracz ich nie wyłączył.</summary>
     private void ShowOverlayNotice(OverlayNotice? notice, RectPx anchor)
     {
-        if (notice is null || !_settings.ShowOverlayNotices) return;
+        if (notice is null || (!_settings.ShowOverlayNotices && !notice.ShowsWhenNoticesDisabled)) return;
         // Najpierw filtr, potem ekran: następna klatka OCR może już widzieć komunikat.
         _noticeEcho.Remember(notice.Text);
         _overlay.ShowNotice(notice, anchor);
@@ -703,6 +708,7 @@ public partial class MainWindow : Window
         }
 
         _secrets.Save(secretName, key.Trim());
+        _orchestrator.ResumeProvider();
         PwdApiKey.Clear();
         if (llmEndpoint is not null)
         {
@@ -718,8 +724,46 @@ public partial class MainWindow : Window
     /// <summary>Zapis zmian, które dostawcy czytają na bieżąco (np. serwer klucza LLM).</summary>
     private void SaveSettingsWithoutRebuild()
     {
-        _settingsStore.Save(_settings);
+        PersistSettings();
         MarkSettingsApplied();
+    }
+
+    private bool PersistSettings()
+    {
+        try
+        {
+            _settingsStore.Save(_settings);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Nie udało się zapisać ustawień");
+            SetStatus(SettingsLoadMessages.SaveFailedStatus);
+            return false;
+        }
+    }
+
+    public bool IsLiveRunning => _liveSession is not null;
+
+    public void ReportUnexpectedError() =>
+        SetStatus("⚠ Wystąpił nieoczekiwany błąd — szczegóły znajdziesz w logu diagnostycznym.");
+
+    private void RestorePersistedProfileSelection()
+    {
+        var persisted = _settings.PersistedActiveProfileId;
+        var name = _orchestrator.Profiles
+            .FirstOrDefault(p => string.Equals(p.Id, persisted, StringComparison.OrdinalIgnoreCase))?.Name ?? NoProfileLabel;
+        if (CmbProfile.SelectedItem as string == name) return;
+        var wasLoading = _loadingUi;
+        _loadingUi = true;
+        try
+        {
+            CmbProfile.SelectedItem = name;
+        }
+        finally
+        {
+            _loadingUi = wasLoading;
+        }
     }
 
     /// <summary>
@@ -780,7 +824,7 @@ public partial class MainWindow : Window
 
         PwdApiKey.IsEnabled = BtnSaveKey.IsEnabled = BtnDeleteKey.IsEnabled = provider.UsesApiKey;
         TxtProviderHint.Text = provider.UsesApiKey
-            ? provider.KeyHint + " Klucz jest szyfrowany przez Windows (DPAPI) i nie opuszcza tego komputera."
+            ? provider.KeyHint + " Klucz jest szyfrowany przez Windows (DPAPI) i jest wysyłany wyłącznie do wybranego dostawcy."
             : provider.KeyHint;
         UpdateKeyStatus();
     }
@@ -870,6 +914,20 @@ public partial class MainWindow : Window
             warning = endpointError;
         }
         _settings.LlmModel = TxtLlmModel.Text.Trim() is { Length: > 0 } llmModel ? llmModel : null;
+        var limitText = new string(TxtSessionLimit.Text.Where(static c => !char.IsWhiteSpace(c)).ToArray());
+        if (limitText.Length == 0)
+        {
+            _settings.SessionCharacterLimit = null;
+        }
+        else if (long.TryParse(limitText, NumberStyles.None, CultureInfo.InvariantCulture, out var sessionLimit) && sessionLimit > 0)
+        {
+            _settings.SessionCharacterLimit = sessionLimit;
+        }
+        else
+        {
+            TxtSessionLimit.Text = _settings.SessionCharacterLimit?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+            warning = "Limit znaków podaj jako dodatnią liczbę całkowitą albo zostaw pole puste.";
+        }
         _settings.ClaudeModel = CmbClaudeModel.Text.Trim() is { Length: > 0 } claudeModel
             ? claudeModel
             : ClaudeTranslationProvider.DefaultModel;
@@ -891,6 +949,7 @@ public partial class MainWindow : Window
             _qualityWarnings.Clear();
             _qualityWarningsVersion = -1;
             SyncQualityWarnings();
+            if (!_settings.PrivateMode) RestorePersistedProfileSelection();
         }
 
         var selectedProfileName = CmbProfile.SelectedItem as string;
@@ -923,26 +982,38 @@ public partial class MainWindow : Window
             return;
         }
 
-        _settingsStore.Save(_settings);
         // Sam wygląd (czcionka, tło, styl live…) nakładka czyta na bieżąco — bez przebudowy,
         // która wyczyściłaby pamięć dialogu i anulowała tłumaczenia w locie.
         var pipelineSnapshot = _settings.PipelineSnapshot();
-        if (pipelineSnapshot == _appliedPipelineJson)
+        var rebuild = pipelineSnapshot != _appliedPipelineJson;
+        if (rebuild)
         {
-            _appliedSettingsJson = snapshot;
+            _orchestrator.RebuildPipeline();
+            _appliedPipelineJson = pipelineSnapshot;
+            UpdateGameProfileCard();
+        }
+
+        if (!PersistSettings()) return;
+        _appliedSettingsJson = snapshot;
+
+        if (_settingsStore.SavingBlocked)
+        {
+            SetStatus(warning is not null ? "⚠ " + warning : SettingsLoadMessages.SavingBlockedStatus);
+            return;
+        }
+
+        if (!rebuild)
+        {
             SetStatus(warning is not null ? "⚠ " + warning : "Wygląd zapisany.");
             return;
         }
-        _orchestrator.RebuildPipeline();
-        _appliedSettingsJson = snapshot;
-        _appliedPipelineJson = pipelineSnapshot;
-        UpdateGameProfileCard();
 
         var profileInfo = _orchestrator.ActiveProfile is { } profile ? $", profil: {profile.Name}" : string.Empty;
         if (_orchestrator.ActiveCorpus.IsLoaded) profileInfo += $", korpus: {_orchestrator.ActiveCorpus.Texts:N0} tekstów";
         SetStatus(warning is not null
             ? "⚠ " + warning
-            : $"Ustawienia zapisane (dostawca: {CurrentProviderInfo.DisplayName}{profileInfo}).");
+            : _orchestrator.UserGlossaryWarning
+              ?? $"Ustawienia zapisane (dostawca: {CurrentProviderInfo.DisplayName}{profileInfo}).");
     }
 
     private async void OnStatusTimerTick(object? sender, EventArgs e)
@@ -1006,6 +1077,9 @@ public partial class MainWindow : Window
         TxtChipQuality.Text = $"Ostrzeżenia {warnings.ToString("N0", culture)}";
         TxtStatQuality.Text = warnings.ToString("N0", culture);
         TxtStatRetries.Text = _usage.QualityIssues.Retries.ToString("N0", culture);
+        var providerState = _orchestrator.ProviderStateText;
+        TxtProviderState.Text = providerState ?? string.Empty;
+        TxtProviderState.Visibility = providerState is null ? Visibility.Collapsed : Visibility.Visible;
         var warningBrush = (System.Windows.Media.Brush)FindResource(warnings > 0 ? "Brush.Warning" : "Brush.TextMuted");
         TxtChipQuality.Foreground = warningBrush;
         TxtStatQuality.Foreground = warnings > 0 ? warningBrush : (System.Windows.Media.Brush)FindResource("Brush.Text");
@@ -1156,6 +1230,7 @@ public partial class MainWindow : Window
         TxtProfileEditError.Text = string.Empty;
         UpdateGameProfileCard();
         if (_loadingUi || _preselectingRememberedGame || WindowsList.SelectedItem is not TargetWindow window) return;
+        _manuallyChosenProcesses.Add(LiveTargetResolver.NormalizeProcessName(window.ProcessName));
         ApplyProfileAutoSelection(window);
     }
 
@@ -1250,6 +1325,14 @@ public partial class MainWindow : Window
                 return;
             }
 
+            var decision = _liveStartConfirmation.Evaluate(
+                target.Handle, resolution.Reason, IsKnownLiveProcess(target.ProcessName), DateTimeOffset.UtcNow);
+            if (decision == LiveStartDecision.AskForConfirmation)
+            {
+                ShowLiveStartConfirmation(target);
+                return;
+            }
+
             // Listę podmieniamy dopiero, gdy jest cel — inaczej skrót wciśnięty z pulpitu
             // skasowałby ręczne zaznaczenie gry na liście.
             WindowsList.ItemsSource = windows;
@@ -1270,6 +1353,24 @@ public partial class MainWindow : Window
         {
             _liveHotkeyBusy = false;
         }
+    }
+
+    private bool IsKnownLiveProcess(string processName) =>
+        LiveTargetResolver.SameProcess(RememberedGameProcess, processName)
+        || _manuallyChosenProcesses.Contains(LiveTargetResolver.NormalizeProcessName(processName))
+        || _orchestrator.Profiles.SelectMany(static p => p.ProcessNames).Any(name => LiveTargetResolver.SameProcess(name, processName));
+
+    private void ShowLiveStartConfirmation(TargetWindow target)
+    {
+        var message = LiveStartConfirmation.Message;
+        SetStatus(message);
+        TxtLiveStatus.Text = message;
+        ShowTrayNotification(message);
+        var notice = new OverlayNotice("live-start-confirmation", NoticeSeverity.Warning, message, LiveStartConfirmation.ConfirmationWindow)
+        {
+            IsExplicitRequest = true,
+        };
+        _overlay.ShowNotice(notice, NativeMethods.IsIconic(target.Handle) ? default : ScreenCapture.GetWindowBounds(target.Handle));
     }
 
     private void ShowTrayNotification(string message)
@@ -1308,16 +1409,7 @@ public partial class MainWindow : Window
         var wasApplied = SettingsSnapshot() == _appliedSettingsJson;
         _settings.LastGameProcess = window.ProcessName;
         _settings.LastGameTitle = window.Title;
-        try
-        {
-            _settingsStore.Save(_settings);
-            if (wasApplied) _appliedSettingsJson = SettingsSnapshot();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Brak zapamiętanej gry nie może blokować trybu live.
-            _logger.LogWarning(ex, "Nie udało się zapisać ostatniej gry w ustawieniach");
-        }
+        if (PersistSettings() && wasApplied) _appliedSettingsJson = SettingsSnapshot();
     }
 
     private void OnStartLiveClick(object sender, RoutedEventArgs e)
@@ -1328,6 +1420,7 @@ public partial class MainWindow : Window
             SetStatus("Najpierw wybierz okno gry w sekcji „Gra”.");
             return;
         }
+        _manuallyChosenProcesses.Add(LiveTargetResolver.NormalizeProcessName(window.ProcessName));
         StartLive(window);
     }
 
@@ -1369,6 +1462,7 @@ public partial class MainWindow : Window
             _logger.LogWarning("Wykluczenie nakładki z przechwytywania nie działa na tym systemie — aktywny filtr anty-sprzężeniowy");
         }
 
+        _orchestrator.ResumeProvider();
         _orchestrator.WarmUpActiveProvider();
 
         LiveTranslationSession? session = null;
@@ -1388,7 +1482,7 @@ public partial class MainWindow : Window
                             // Aktualizacje nieaktywnej (zatrzymanej/wymienionej) sesji nie mogą
                             // malować po nakładce ani ubijać nowej sesji.
                             if (!ReferenceEquals(session, _liveSession)) return;
-                            HandleLiveUpdate(update);
+                            HandleLiveUpdateSafely(update);
                         });
                     }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
                 }
@@ -1396,6 +1490,7 @@ public partial class MainWindow : Window
             _logger);
         _liveSession = session;
         _liveWindowHandle = window.Handle;
+        _liveUpdateFailures = 0;
         session.Start();
 
         UpdateLiveControls();
@@ -1454,9 +1549,28 @@ public partial class MainWindow : Window
         };
     }
 
+    private int _liveUpdateFailures;
+
+    private void HandleLiveUpdateSafely(LiveUpdate update)
+    {
+        try
+        {
+            HandleLiveUpdate(update);
+        }
+        catch (Exception ex)
+        {
+            _liveUpdateFailures++;
+            if (_liveUpdateFailures is 1 or 10 or 100 or 1000)
+                _logger.LogWarning("Błąd obsługi aktualizacji live ({Type}), wystąpień w tej sesji: {Count}", ex.GetType().Name, _liveUpdateFailures);
+            if (_liveUpdateFailures == 1) TxtLiveStatus.Text = "Live: błąd wyświetlania — szczegóły w logu diagnostycznym.";
+            if (update.Stopped) StopLiveSession();
+        }
+    }
+
     private void HandleLiveUpdate(LiveUpdate update)
     {
         TxtLiveStatus.Text = update.StatusLine;
+        TxtLiveScreenWarning.Visibility = update.ReadingScreen && !update.Stopped ? Visibility.Visible : Visibility.Collapsed;
 
         if (update.ClearOverlay)
         {
@@ -1482,6 +1596,7 @@ public partial class MainWindow : Window
         }
         if (update.Stopped)
         {
+            if (update.Notice is { ShowsWhenNoticesDisabled: true } stopNotice) ShowTrayNotification(stopNotice.Text);
             StopLiveSession();
             return;
         }
@@ -1535,6 +1650,7 @@ public partial class MainWindow : Window
         _liveSession?.Dispose();
         _liveSession = null;
         _liveWindowHandle = IntPtr.Zero;
+        TxtLiveScreenWarning.Visibility = Visibility.Collapsed;
         UpdateLiveControls();
         SetLiveIndicator(LiveIndicatorState.Idle);
     }
@@ -1553,7 +1669,7 @@ public partial class MainWindow : Window
     private void OnOpenGlossaryEditorClick(object sender, RoutedEventArgs e)
     {
         var editor = new GlossaryEditorWindow(
-            _userGlossaryStore, _orchestrator, _settings.SourceLanguage, _settings.TargetLanguage)
+            _userGlossaryStore, _orchestrator, _settings.SourceLanguage, _settings.TargetLanguage, _settings.PrivateMode)
         {
             Owner = this,
         };
@@ -1659,7 +1775,7 @@ public partial class MainWindow : Window
         RegionSelectWindow.CloseActive();
         _overlay.Close();
         _panel.ForceClose();
-        _settingsStore.Save(_settings);
+        PersistSettings();
         // _previewBitmap celowo bez Dispose: operacja OCR w tle mogłaby jeszcze z niej
         // korzystać (use-after-dispose = twardy crash GDI+), a proces i tak się kończy.
     }

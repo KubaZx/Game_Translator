@@ -11,6 +11,18 @@ public sealed record QualityIssueSummary(long Empty, long NumbersChanged, long U
     public long Total => Empty + NumbersChanged + Untranslated + Runaway;
 }
 
+public enum SessionLimitLevel
+{
+    None,
+    Near,
+    Exhausted,
+}
+
+public sealed record SessionLimitStatus(SessionLimitLevel Level, long Used, long? Limit)
+{
+    public int Percent => Limit is > 0 ? (int)Math.Min(100, Used * 100 / Limit.Value) : 0;
+}
+
 /// <summary>Thread-safe local session counters and admission budget for provider requests.</summary>
 public sealed class UsageTracker
 {
@@ -27,6 +39,9 @@ public sealed class UsageTracker
     private long _qualityUntranslated;
     private long _qualityRunaway;
     private long _qualityRetries;
+    private bool _limitWarningTaken;
+
+    public const double LimitWarningFraction = 0.8;
 
     public long ApiRequests { get { lock (_budgetGate) return _apiRequests; } }
     public long ApiCharacters { get { lock (_budgetGate) return _apiCharacters; } }
@@ -53,7 +68,42 @@ public sealed class UsageTracker
     public long? SessionCharacterLimit
     {
         get { lock (_budgetGate) return _sessionCharacterLimit; }
-        set { lock (_budgetGate) _sessionCharacterLimit = value; }
+        set
+        {
+            lock (_budgetGate)
+            {
+                if (_sessionCharacterLimit != value) _limitWarningTaken = false;
+                _sessionCharacterLimit = value;
+            }
+        }
+    }
+
+    public SessionLimitStatus LimitStatus
+    {
+        get
+        {
+            lock (_budgetGate)
+            {
+                return new SessionLimitStatus(LevelUnderLock(), _apiCharacters, _sessionCharacterLimit);
+            }
+        }
+    }
+
+    public bool TryTakeLimitWarning()
+    {
+        lock (_budgetGate)
+        {
+            if (_limitWarningTaken || LevelUnderLock() != SessionLimitLevel.Near) return false;
+            _limitWarningTaken = true;
+            return true;
+        }
+    }
+
+    private SessionLimitLevel LevelUnderLock()
+    {
+        if (_sessionCharacterLimit is not { } limit) return SessionLimitLevel.None;
+        if (_apiCharacters >= limit) return SessionLimitLevel.Exhausted;
+        return _apiCharacters >= limit * LimitWarningFraction ? SessionLimitLevel.Near : SessionLimitLevel.None;
     }
 
     /// <summary>
@@ -133,6 +183,7 @@ public sealed class UsageTracker
         {
             _apiRequests = 0;
             _apiCharacters = 0;
+            _limitWarningTaken = false;
             Interlocked.Exchange(ref _cacheHits, 0);
             Interlocked.Exchange(ref _glossaryHits, 0);
             Interlocked.Exchange(ref _failedRequests, 0);

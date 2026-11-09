@@ -80,7 +80,9 @@ public static class TranslationProviderCatalog
         "anthropic-api-key",
         KeyOptional: false,
         "Klucz z console.anthropic.com. Claude tłumaczy z kontekstem całego ekranu, nazwą gry " +
-        "i terminami ze słownika; odmowa filtra bezpieczeństwa jest ponawiana na modelu zastępczym.",
+        "i terminami ze słownika; odmowa filtra bezpieczeństwa jest ponawiana na modelu zastępczym. " +
+        "Model claude-opus-5-5 daje najlepszą jakość, ale jest najwolniejszy i najdroższy; do napisów w grze " +
+        "zwykle wystarcza szybszy i tańszy claude-sonnet-5-5 albo claude-haiku-5-5.",
         [ProviderSetting.ClaudeModel, ProviderSetting.StreamResponses]);
 
     public static TranslationProviderInfo Mock { get; } = new(
@@ -99,7 +101,7 @@ public static class TranslationProviderCatalog
 
     /// <summary>Sugerowane modele Claude; pole pozostaje edytowalne.</summary>
     public static IReadOnlyList<string> SuggestedClaudeModels { get; } =
-        [ClaudeTranslationProvider.DefaultModel, "claude-sonnet-5-5", "claude-haiku-4-5"];
+        [ClaudeTranslationProvider.DefaultModel, "claude-sonnet-5-5", "claude-haiku-5-5"];
 
     /// <summary>Gotowe adresy popularnych serwerów zgodnych z OpenAI.</summary>
     public static IReadOnlyList<LlmServerPreset> LlmPresets { get; } =
@@ -110,13 +112,16 @@ public static class TranslationProviderCatalog
             Model = "deepseek-flash",
             ServerOptions = new LlmServerOptions { Thinking = "disabled" },
         },
-        new("Ollama", "http://localhost:11434/v1")
+        new("Ollama", "http://127.0.0.1:11434/v1")
         {
             ServerOptions = new LlmServerOptions { ReasoningEffort = "none" },
         },
-        new("LM Studio", "http://localhost:1234/v1"),
+        new("LM Studio", "http://127.0.0.1:1234/v1"),
     ];
 
     public static LlmServerPreset? FindLlmPreset(Uri endpoint) =>
-        LlmPresets.FirstOrDefault(preset => string.Equals(preset.Host, endpoint.Authority, StringComparison.OrdinalIgnoreCase));
+        LlmPresets.FirstOrDefault(preset => string.Equals(CanonicalLoopback(preset.Host), CanonicalLoopback(endpoint.Authority), StringComparison.OrdinalIgnoreCase));
+
+    private static string? CanonicalLoopback(string? authority) =>
+        authority?.Replace("localhost", "127.0.0.1", StringComparison.OrdinalIgnoreCase);
 }

@@ -62,7 +62,7 @@ internal static class OcrTimingReplay
             window = await TestWindow.CreateAsync();
             await window.AfterRenderingAsync();
             session = new LiveTranslationSession(orchestrator, ocr, window.Handle,
-                new LiveSessionOptions { OcrUpscale = 1, EnableDiagnostics = true, StaticRescanInterval = TimeSpan.FromMilliseconds(500) },
+                new LiveSessionOptions { RequireGameVisible = false, OcrUpscale = 1, EnableDiagnostics = true, StaticRescanInterval = TimeSpan.FromMilliseconds(500) },
                 report.Update, logging.CreateLogger("OcrTimingReplay"));
             session.Start();
             await report.WarmedUp.Task.WaitAsync(TimeSpan.FromSeconds(20));

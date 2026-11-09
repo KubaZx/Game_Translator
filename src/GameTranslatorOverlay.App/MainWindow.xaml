@@ -569,8 +569,13 @@
                       <Ellipse Style="{StaticResource Live.Halo}" Fill="{Binding Fill, ElementName=LiveIndicator}" />
                       <Ellipse x:Name="LiveIndicator" Fill="#FF5F6880" Tag="Idle" />
                     </Grid>
-                    <TextBlock x:Name="TxtLiveStatus" Grid.Column="1" TextWrapping="Wrap" Foreground="#FFC3C9D6" LineHeight="19"
-                               Text="Kliknij Start live — nowy tekst w oknie gry będzie tłumaczony automatycznie." />
+                    <StackPanel Grid.Column="1">
+                      <TextBlock x:Name="TxtLiveStatus" TextWrapping="Wrap" Foreground="#FFC3C9D6" LineHeight="19"
+                                 Text="Kliknij Start live — nowy tekst w oknie gry będzie tłumaczony automatycznie." />
+                      <TextBlock x:Name="TxtLiveScreenWarning" Visibility="Collapsed" TextWrapping="Wrap" Foreground="#FFFCD34D"
+                                 LineHeight="19" Margin="0,6,0,0" FontWeight="SemiBold"
+                                 Text="⚠ Czytam zrzut ekranu: tłumaczone mogą być także inne okna leżące nad grą. Zamknij je albo zatrzymaj live." />
+                    </StackPanel>
                   </Grid>
                 </Border>
               </Grid>
@@ -1243,8 +1248,13 @@
                       <TextBlock Text="&#xEA18;" Style="{StaticResource Text.Icon}" FontSize="14" Foreground="{StaticResource Brush.TextFaint}" VerticalAlignment="Top" Margin="0,2,10,0" />
                       <TextBlock x:Name="TxtProviderHint" Grid.Column="1" Style="{StaticResource Text.Hint}" FontSize="12" />
                     </Grid>
+                    <TextBlock x:Name="TxtProviderState" Style="{StaticResource Text.Hint}" Foreground="{StaticResource Brush.Warning}" FontSize="12"
+                               Margin="0,8,0,0" Visibility="Collapsed" />
                   </StackPanel>
                 </Border>
+                <TextBlock Text="Limit znaków na sesję" Style="{StaticResource Text.Label}" Margin="0,16,0,7" />
+                <TextBox x:Name="TxtSessionLimit" MaxWidth="200" HorizontalAlignment="Left" Width="200" LostFocus="OnSettingChanged" />
+                <TextBlock Text="Po przekroczeniu aplikacja przestaje wysyłać teksty do dostawcy; puste = bez limitu. Nie dotyczy serwera LLM na tym komputerze." Style="{StaticResource Field.Hint}" />
               </StackPanel>
             </GroupBox>
 
@@ -1603,6 +1613,8 @@
                   </StackPanel>
                   <TextBlock Text="Windows OCR czyta tekst z okna gry, słownik i cache tłumaczą znane frazy lokalnie, a nowy tekst trafia do wybranego dostawcy. Wynik pokazuje zewnętrzna nakładka nad grą."
                              Style="{StaticResource Text.Hint}" FontSize="13" LineHeight="20" Margin="0,12,0,0" />
+                  <TextBlock Text="Program na licencji MIT. Licencje użytych bibliotek są w folderze licenses obok programu."
+                             Style="{StaticResource Text.Hint}" FontSize="12" Margin="0,8,0,0" />
                 </StackPanel>
               </Grid>
             </Grid>

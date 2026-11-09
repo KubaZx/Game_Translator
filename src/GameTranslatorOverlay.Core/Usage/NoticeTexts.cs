@@ -15,12 +15,27 @@ public static class NoticeTexts
     private const int MaxProviderNameLength = 16;
 
     public const string CacheDegraded = "⚠ Cache niedostępny — tłumaczenia nie są zapisywane";
-    public const string SessionLimit = "⚠ Limit znaków tej sesji wyczerpany";
+    public const string SessionLimit = "⚠ Limit znaków sesji wyczerpany — zmień w Tłumaczeniu";
+    public const string SessionLimitNear = "⚠ Zużyto 80% limitu znaków tej sesji";
+    public const string CounterSkipped = "ℹ Licznik na ekranie zmienia się — tłumaczę go rzadziej";
     public const string LiveStarted = "▶ Tłumaczenie na żywo włączone";
     public const string LiveStopped = "■ Tłumaczenie na żywo zatrzymane";
     public const string NoTextFound = "ℹ Nie rozpoznano tekstu w zaznaczeniu";
     public const string TranslationFailed = "⚠ Tłumaczenie nie powiodło się";
-    public const string ExclusiveFullscreen = "⚠ Pełny ekran utrudnia nakładkę — przełącz na okno bez ramki";
+    public const string ExclusiveFullscreen = "⚠ Pełny ekran: czytam zrzut — przełącz na okno bez ramki";
+    public const string ReadingScreen = "⚠ Czytam zrzut ekranu — okna nad grą mogą być tłumaczone";
+
+    public static string LiveStoppedBecause(LiveStopReason reason, string? detail = null) => Fit(reason switch
+    {
+        LiveStopReason.WindowClosed => "■ Live zatrzymany: okno gry zostało zamknięte",
+        LiveStopReason.CaptureError => "■ Live zatrzymany: nie da się przechwycić obrazu gry",
+        LiveStopReason.MissingOcrPack => string.IsNullOrWhiteSpace(detail)
+            ? "■ Live zatrzymany: brak pakietu OCR"
+            : $"■ Live zatrzymany: brak pakietu OCR ({detail.Trim()})",
+        LiveStopReason.ErrorSeries => "■ Live zatrzymany: seria błędów — szczegóły w logu",
+        LiveStopReason.UnexpectedError => "■ Live zatrzymany: nieoczekiwany błąd programu",
+        _ => LiveStopped,
+    });
 
     /// <summary>Komunikat dla rodzaju błędu dostawcy (pełny opis zostaje w oknie aplikacji).</summary>
     public static string For(TranslationFailureKind kind, string? providerName)
@@ -113,6 +128,12 @@ public static class OverlayNotices
     public static OverlayNotice SessionLimit() =>
         new("issue:session-limit", NoticeSeverity.Error, NoticeTexts.SessionLimit, ErrorDuration) { IsCritical = true };
 
+    public static OverlayNotice SessionLimitNear() =>
+        new("issue:session-limit-near", NoticeSeverity.Warning, NoticeTexts.SessionLimitNear, WarningDuration);
+
+    public static OverlayNotice CounterSkipped() =>
+        new("issue:counter-skipped", NoticeSeverity.Info, NoticeTexts.CounterSkipped, WarningDuration);
+
     public static OverlayNotice EmptyResult(string? providerName) =>
         new("issue:empty-result", NoticeSeverity.Warning, NoticeTexts.EmptyResult(providerName), WarningDuration);
 
@@ -136,6 +157,19 @@ public static class OverlayNotices
 
     public static OverlayNotice ExclusiveFullscreen() =>
         new("capture:fullscreen", NoticeSeverity.Warning, NoticeTexts.ExclusiveFullscreen, TimeSpan.FromSeconds(8));
+
+    public static OverlayNotice ReadingScreen() =>
+        new("capture:reading-screen", NoticeSeverity.Warning, NoticeTexts.ReadingScreen, TimeSpan.FromSeconds(8));
+
+    public static readonly TimeSpan StoppedByErrorDuration = TimeSpan.FromSeconds(9);
+
+    public static OverlayNotice LiveStoppedBecause(LiveStopReason reason, string? detail = null) =>
+        reason == LiveStopReason.UserStop
+            ? LiveStopped()
+            : new("live-state", NoticeSeverity.Error, NoticeTexts.LiveStoppedBecause(reason, detail), StoppedByErrorDuration)
+            {
+                IsStateChange = true, IsCritical = true, ShowsWhenNoticesDisabled = true,
+            };
 
     public static bool CoversWholeMonitor(GameTranslatorOverlay.Core.Ocr.RectPx window, GameTranslatorOverlay.Core.Ocr.RectPx monitor) =>
         !window.IsEmpty && !monitor.IsEmpty
@@ -193,7 +227,7 @@ public static class OverlayNotices
         if (FromOutcomes(outcomes, providerName) is { } failure) return failure;
         var misses = CacheOnlyMissTexts(outcomes).Distinct(StringComparer.Ordinal).Count();
         if (misses > 0) return CacheOnlyMisses(misses);
-        return outcomes.Any(static o => !o.IsTranslated) ? TranslationFailed() : null;
+        return outcomes.Any(static o => !o.IsTranslated && o.Issue != OutcomeIssue.Skipped) ? TranslationFailed() : null;
     }
 
     /// <summary>Znormalizowane teksty bez tłumaczenia w trybie Cache-only.</summary>

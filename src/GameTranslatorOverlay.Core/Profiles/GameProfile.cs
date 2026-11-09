@@ -120,6 +120,11 @@ public static class ProfileValidator
             errors.Add($"Pole „basedOn” („{profile.BasedOn}”) musi być identyfikatorem profilu (litery, cyfry, myślniki).");
         }
 
+        if (!string.IsNullOrEmpty(profile.Glossary) && !ProfileTuningRules.IsContentId(profile.Glossary))
+        {
+            errors.Add("Pole „glossary” musi być nazwą folderu słownika (litery, cyfry, myślniki), a nie ścieżką ani adresem.");
+        }
+
         if (string.IsNullOrWhiteSpace(profile.Name))
         {
             errors.Add("Profil musi mieć nazwę (pole „name”).");

@@ -56,7 +56,23 @@ Zawartość:
   (ten sam `source` → różne `target`).
 - **Priorytet źródeł tłumaczenia**: ręczna korekta > słownik > cache > API.
 - **Kontrola kosztów**: deduplikacja zapytań in-flight, debounce niestabilnego tekstu,
-  limity (miesięczny, znaków na sesję), tryb Cache-only.
+  limit znaków na sesję (domyślnie wyłączony, ostrzeżenie przy 80%), tryb Cache-only, a od 0.10.0
+  bramka przed wysyłką w `TranslationPipeline` (`ScreenBeforeSend`): tekst bez liter → pamięć
+  nieudanych tekstów (`FailedTextMemory`) → liczniki (`VolatileCounterGate`) → wyłącznik
+  dostawcy (`ProviderCircuit`). Wszystkie trzy klasy biorą czas z `TimeProvider`, więc testy
+  sterują zegarem.
+- **Decyzje trybu live poza sesją** (od 0.10.0, czyste klasy z testami): `Vision/CaptureRoute`
+  (czy klatka z PrintWindow jest obrazem gry, kiedy przejść na źródło zastępcze i kiedy wrócić),
+  `Vision/GraphicsFrameTrust` (czy jednolitej ramce WGC wolno zastąpić obraz gry),
+  `Vision/LiveFailureBackoff` (przerwy po błędach i zatrzymanie po 10 s),
+  `Windows/GameVisibility` i `GamePauseGate` (gra zasłonięta przez okno innego procesu → pauza),
+  `Windows/LiveStartConfirmation` (drugie wciśnięcie skrótu na nieznanym oknie),
+  `Usage/LiveErrorTally` (liczniki pominiętych wyjątków). `LiveTranslationSession` tylko je
+  wywołuje i wykonuje wynik.
+- **Ochrona danych gracza** (od 0.10.0): `JsonSettingsStore` czyta `settings.json` pole po polu,
+  przy nieczytelnym pliku oddaje ustawienia bezpieczne (tryb prywatny i Cache-only) i blokuje
+  zapis; `SqliteTranslationCache` pilnuje wersji schematu (`user_version`) i odkłada uszkodzoną
+  bazę; `UserGlossaryStore.LoadChecked` odróżnia pusty słownik od nieczytelnego.
 - **Jakość i kontekst tłumaczeń** (`Translation/`): `TranslationQualityGate` (pusty wynik,
   liczby, brak tłumaczenia, „rozgadany” wynik), `TranslationCacheContext` (znacznik wpisu cache:
   `reflow-1`, `qa=…`, `qa-final`, `pg=f/m`, `src=corpus`), `DialogMemory` (ostatnie linie i pary

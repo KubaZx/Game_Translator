@@ -7,10 +7,22 @@ i wyświetla tłumaczenie nad grą — **nie dotykając plików ani procesu gry*
 `CorpusTool`, które uruchamiasz sam — patrz [Spolszczenie z wyprzedzeniem](#spolszczenie-z-wyprzedzeniem-korpus-gry).
 
 Projekt jest przeznaczony do różnych gier; nie wymaga profilu konkretnego tytułu.
-Instrukcja opisuje wydanie 0.9.0 — szczegóły w
+Instrukcja opisuje wydanie 0.10.0 — szczegóły w
 [historii zmian](https://github.com/KubaZx/Game_Translator/blob/main/CHANGELOG.md).
 
-**Nowe w 0.9.0** (w skrócie):
+**Nowe w 0.10.0** (w skrócie):
+
+- **gra w tle = pauza**: po przejściu do innego okna live wstrzymuje czytanie i chowa napisy,
+  a czarny ekran gry nie powoduje już czytania innych okien ([opis](#tryb-live-automatyczny)),
+- **błąd dostawcy wstrzymuje zapytania** zamiast je powtarzać, a **limit znaków na sesję**
+  ustawiasz w oknie ([opis](#hamulce-kosztów)),
+- **skrót live na nieznanym oknie** wymaga drugiego wciśnięcia
+  ([opis](#start-i-stop-live-skrótem-ctrlshiftl)),
+- **uszkodzone ustawienia, słownik i baza tłumaczeń** nie przepadają po cichu
+  ([opis](#słownik-i-dane)),
+- program ma **licencję MIT**.
+
+**W 0.9.0**:
 
 - **„Popraw” od razu** — poprawka z panelu wyniku albo z listy ostrzeżeń zmienia napis nad grą
   w trakcie live bez czekania ([opis](#kontrola-jakości-tłumaczeń)),
@@ -35,7 +47,7 @@ Instrukcja opisuje wydanie 0.9.0 — szczegóły w
 Poprzednie wydanie (0.7.0) przyniosło nowe okno aplikacji, ikony klawiszy w polskim zdaniu,
 imię mówiącego w kroju gry i śledzenie napisów w ruchu kamery we wszystkich trybach.
 
-Wydanie 0.7 autor sprawdził ręcznie w grze — da się wygodnie grać. Zmian z 0.8.0 i 0.9.0 w grze
+Wydanie 0.7 autor sprawdził ręcznie w grze — da się wygodnie grać. Zmian z 0.8.0, 0.9.0 i 0.10.0 w grze
 na żywo jeszcze nie oglądano: nakładkę sprawdzono na klatkach 4K i nagraniach z Escape Academy
 (narzędzia OverlayPreview i MotionLab), zachowanie w powtórkach syntetycznych (SceneReplay), a okno
 aplikacji na renderach (UiPreview). Uwagi z gry zgłaszaj
@@ -152,7 +164,7 @@ Takie opcje obowiązują tylko dla serwera, dla którego je zapisano; widać je 
 ### Claude
 
 Domyślnym modelem jest `claude-opus-5-5`; w polu **Model** możesz wybrać tańszy
-i szybszy model (np. `claude-haiku-4-5`) albo wpisać inny identyfikator. Gdy filtr
+i szybszy model (`claude-sonnet-5-5` albo `claude-haiku-5-5`) albo wpisać inny identyfikator. Gdy filtr
 bezpieczeństwa odrzuci fragment (zdarza się rzadko, np. przy brutalnych opisach),
 Claude sam ponawia zapytanie na modelu zastępczym wskazanym przez Anthropic; dotyczy to
 modeli `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5-5` i `claude-fable-5-1`.
@@ -239,6 +251,24 @@ W panelu wyniku możesz:
    ([opis niżej](#tryb-na-oryginale-zakrywa--napis-jak-w-grze)).
 4. **Stop live** (albo ponownie **Ctrl+Shift+L**) kończy tryb live. Minimalizacja gry chowa
    nakładkę automatycznie.
+
+**Gra w tle.** Gdy na pierwszy plan wyjdzie okno innego programu i zasłoni co najmniej 15% okna
+gry (Alt+Tab do przeglądarki, komunikator, także okno samego tłumacza), live po chwili
+wstrzymuje czytanie, chowa napisy i pokazuje „Live wstrzymany — gra w tle”. Po powrocie do gry
+wznawia się sam i od razu czyta ekran od nowa. Okno na drugim monitorze niczego nie wstrzymuje.
+Żeby oglądać zmiany wyglądu nakładki na żywo, trzymaj okno tłumacza obok gry, nie na niej.
+
+**Czarny ekran i zrzut ekranu.** Ciemny albo jednolity kadr (ekran ładowania, przejście sceny)
+to dla programu obraz gry — napisy znikają i wracają razem z treścią. Jeśli okna gry naprawdę
+nie da się przechwycić (część gier na wyłącznym pełnym ekranie), program czyta zrzut ekranu
+w miejscu okna gry. Mówi o tym żółty znacznik „⚠ Czytam zrzut ekranu…” pod statusem live
+i komunikat nad grą: w zrzucie widać też okna leżące nad grą, więc mogą zostać przetłumaczone.
+Zrzutu program nie robi, gdy gra jest zasłonięta, i co 10 s sprawdza, czy zwykłe przechwytywanie
+wróciło.
+
+**Błędy.** Pojedynczy błąd pomija klatkę. Live zatrzymuje się dopiero po 10 s nieprzerwanych
+błędów i podaje powód nad grą i w zasobniku (zamknięte okno gry, brak obrazu, brak pakietu
+OCR, seria błędów).
 
 W ruchu kamery tłumaczenie jedzie razem z napisem. Gdy śledzenie na chwilę zgubi napis (np.
 przysłonięty przez postać albo rozmyty przy szybkim obrocie), aplikacja czyta lokalnie mały
@@ -328,7 +358,10 @@ Skrót działa bez przełączania się do okna tłumacza. Gdy live działa, skr�
 (jak **Stop live**). Gdy nie działa, tłumacz wybiera okno w tej kolejności:
 
 1. **aktywne okno** — to, w którym jesteś w chwili wciśnięcia skrótu, chyba że to pulpit,
-   pasek zadań, menu Start, wyszukiwarka, klawiatura ekranowa albo sam tłumacz;
+   pasek zadań, menu Start, wyszukiwarka, klawiatura ekranowa albo sam tłumacz. Jeśli program
+   nie zna tego okna (nie jest ostatnio tłumaczoną grą, grą z profilem ani oknem wybranym
+   w sekcji **Gra**), live nie rusza od razu: zobaczysz „Nowe okno — wciśnij skrót jeszcze raz
+   w ciągu 6 s, żeby zacząć tłumaczyć.” Drugie wciśnięcie na tym samym oknie startuje live;
 2. **ostatnio tłumaczona gra** (najpierw okno o tym samym tytule, potem największe okno
    tego procesu);
 3. **gra z profilem**, jeśli jest uruchomiona;
@@ -349,8 +382,8 @@ a reszta aplikacji działa.
 
 Ograniczenia:
 
-- Skrót tłumaczy dokładnie aktywne okno — jeśli na pierwszym planie jest przeglądarka,
-  live uruchomi się na przeglądarce. Zatrzymasz je tym samym skrótem.
+- Skrót tłumaczy dokładnie aktywne okno — po potwierdzeniu drugim wciśnięciem live uruchomi
+  się także na przeglądarce. Zatrzymasz je tym samym skrótem.
 - Gry UWP / Microsoft Store / Game Pass (okno `ApplicationFrameHost`) nie są wybierane jako
   aktywne okno. Wybierz grę raz w sekcji **Gra** i kliknij **Start live**; później skrót znajdzie
   ją jako ostatnią grę.
@@ -359,7 +392,7 @@ Ograniczenia:
 
 W trakcie gry okno aplikacji jest zwykle schowane, więc ważne zdarzenia pokazują się jako
 krótki, półprzezroczysty pasek wyśrodkowany przy górnej krawędzi okna gry. Pasek znika po
-3–5 s (komunikat o pełnym ekranie po 8 s) i nie przyjmuje kliknięć. W tabeli „DeepL”
+3–5 s (komunikaty o zrzucie ekranu po 8 s, zatrzymanie live z powodu błędu po 9 s) i nie przyjmuje kliknięć. W tabeli „DeepL”
 i „Claude” stoją za nazwą wybranego dostawcy; pełny opis błędu jest w oknie aplikacji.
 
 | Komunikat w nakładce | Co znaczy | Co zrobić |
@@ -375,10 +408,14 @@ i „Claude” stoją za nazwą wybranego dostawcy; pełny opis błędu jest w o
 | „⚠ Tekst za długi dla DeepL”, „⚠ DeepL odrzucił zapytanie” | dostawca nie przyjął tekstu | zaznacz mniejszy fragment (**Ctrl+Shift+T**); szczegóły w logu |
 | „⚠ DeepL zwrócił pusty wynik” | pusty wynik dostawcy (zostaje oryginał) | [Kontrola jakości](#kontrola-jakości-tłumaczeń) |
 | „⚠ Błąd tłumaczenia (DeepL)” | inny, nierozpoznany błąd dostawcy | opis w oknie aplikacji; gdy się powtarza, zajrzyj do logów |
-| „⚠ Limit znaków tej sesji wyczerpany” | osiągnięty limit `sessionCharacterLimit` z `settings.json` | zwiększ albo usuń limit w `settings.json` |
+| „⚠ Zużyto 80% limitu znaków tej sesji” | zbliżasz się do limitu znaków na sesję (raz na sesję) | zwiększ limit w sekcji **Tłumaczenie** albo graj dalej |
+| „⚠ Limit znaków sesji wyczerpany — zmień w Tłumaczeniu” | osiągnięty **Limit znaków na sesję** | zwiększ limit albo wyczyść pole w sekcji **Tłumaczenie**; licznik zeruje ponowne uruchomienie programu |
+| „ℹ Licznik na ekranie zmienia się — tłumaczę go rzadziej” | tekst zmienia się tylko cyframi (zegar, punkty) — program podstawia cyfry bez zapytań | — ([Hamulce kosztów](#hamulce-kosztów)) |
+| „■ Live zatrzymany: okno gry zostało zamknięte”, „…nie da się przechwycić obrazu gry”, „…brak pakietu OCR (en)”, „…seria błędów — szczegóły w logu”, „…nieoczekiwany błąd programu” | live zatrzymał się sam; pokazuje się także przy wyłączonych komunikatach i w zasobniku | uruchom live ponownie; przy serii błędów zajrzyj do logów |
+| „⚠ Czytam zrzut ekranu — okna nad grą mogą być tłumaczone” | okna gry nie da się przechwycić, program czyta ekran w miejscu gry | zamknij okna leżące nad grą albo zatrzymaj live |
 | „Cache-only: 5 tekstów bez tłumaczenia” | tych tekstów nie ma w lokalnych wynikach | celowe — Cache-only nie pyta dostawcy |
 | „⚠ Cache niedostępny — tłumaczenia nie są zapisywane” | baza tłumaczeń nie działa | [Gdy baza tłumaczeń nie działa](#słownik-i-dane) |
-| „⚠ Pełny ekran utrudnia nakładkę — przełącz na okno bez ramki” | okna gry nie da się przechwycić, a gra zajmuje cały monitor | przełącz grę na okno bez ramki ([wyżej](#tłumaczenie-ręczne-podstawowy-tryb)) |
+| „⚠ Pełny ekran: czytam zrzut — przełącz na okno bez ramki” | okna gry nie da się przechwycić, a gra zajmuje cały monitor | przełącz grę na okno bez ramki ([wyżej](#tłumaczenie-ręczne-podstawowy-tryb)) |
 | „ℹ Nie rozpoznano tekstu w zaznaczeniu” | ręczne tłumaczenie nie znalazło tekstu | zaznacz większy fragment |
 | „⚠ Tłumaczenie nie powiodło się” | ręczne tłumaczenie skończyło się błędem | zajrzyj do logów (folder danych → `logs\`) |
 
@@ -685,6 +722,28 @@ Opcja dla zaawansowanych: `"paragraphCacheKeys": true` w `settings.json` zapisuj
 po akapitach także bez korpusu (każda gra) — ten sam akapit w innym bloku nie jest płacony drugi
 raz (np. statystyki przedmiotów w PoE2). Domyślnie wyłączone.
 
+## Hamulce kosztów
+
+Program pilnuje, żeby płatny dostawca nie dostawał zbędnych zapytań:
+
+- **Limit znaków na sesję** (sekcja **Tłumaczenie**) — domyślnie pole jest puste, czyli bez
+  limitu. Wpisz liczbę znaków liczoną od uruchomienia programu (np. 100000), żeby program
+  pilnował wydatków: przy 80% zobaczysz jedno ostrzeżenie, po wyczerpaniu program przestaje
+  wysyłać nowy tekst (cache, słownik i korpus działają dalej). Zmiana liczby działa od razu.
+  Limit nie dotyczy serwera LLM na tym komputerze.
+- **Wstrzymanie po błędzie dostawcy.** Brak albo zły klucz, wyczerpany limit konta, nieznany
+  model i zła konfiguracja wstrzymują zapytania do chwili, gdy zapiszesz klucz, zmienisz
+  ustawienia, zrobisz udany **Test** albo uruchomisz live ponownie. Kłopoty chwilowe (sieć,
+  przeciążenie, limit tempa) dają przerwy 5, 15 i 60 s. Stan widać pod statusem klucza.
+- **Liczniki i zegary.** Tekst, w którym zmieniają się tylko cyfry, nie jest wysyłany za każdym
+  razem. Zegar, ułamek („3/10”) i procent po trzecim wariancie w pół minuty dostają ostatnie
+  tłumaczenie z nowymi cyframi. Liczba przy słowach („Score 15200”) — dopiero po ósmym
+  wariancie w pół minuty i na 10 minut; podstawione cyfry nie zmieniają odmiany słów. Kilka
+  podpowiedzi przedmiotów z różnymi liczbami tłumaczy się zwyczajnie. Tekst bez żadnej litery
+  („+25%”, „12:30”) nie jest wysyłany wcale.
+- **Tekst, którego dostawca nie umie przetłumaczyć** (odmowa, pusty wynik), po dwóch porażkach
+  z rzędu czeka 5 minut.
+
 ## Szybkość
 
 Panel **Szybkość** pokazuje medianę czasów z bieżącej sesji (p90 = 9 na 10 przypadków
@@ -749,7 +808,12 @@ Częsty fałszywy alarm „zmienione liczby” to zmiana zapisu godziny (np. 10:
 Wszystko poniżej jest w sekcji **Dane i słownik**:
 
 - **Słownik…** — edytor prywatnego słownika: dodawanie, edycja, priorytety,
-  import/eksport JSON, wykrywanie konfliktów.
+  import/eksport JSON, wykrywanie konfliktów. Zamknięcie okna z niezapisanymi zmianami pyta
+  „Zapisać zmiany?”, **Anuluj** porzuca zmiany, a wiersz z terminem bez tłumaczenia blokuje
+  zapis. Przed każdym zapisem poprzednia wersja zostaje w pliku
+  `user-glossary.en-pl.json.bak`. Jeśli pliku słownika nie da się odczytać (uszkodzony, zajęty,
+  inna para języków), edytor otwiera się tylko do odczytu i niczego nie nadpisuje, a program
+  mówi o pominiętym słowniku w pasku statusu. W trybie prywatnym edytor jest tylko do odczytu.
 - **Wyczyść** (karta **Cache tłumaczeń**) — usuwa automatyczne tłumaczenia (ręczne poprawki
   zostają).
 - **Eksport…** / **Import…** — kopia zapasowa tłumaczeń (w tym poprawek) do pliku JSON.
@@ -758,7 +822,20 @@ Wszystko poniżej jest w sekcji **Dane i słownik**:
 - Eksport/import zachowuje znacznik formatu i jakości wpisu (pole `context`); starsze pliki
   bez tego pola nadal się importują.
 
-**Gdy baza tłumaczeń nie działa** (uszkodzony plik, blokada przez inny program, pełny dysk,
+**Gdy plik ustawień jest uszkodzony** (na przykład po ręcznej edycji) albo zajęty przez inny
+program: program robi kopię `settings.json.corrupt-RRRRMMDD-GGMMSS.bak`, startuje w trybie
+prywatnym i Cache-only — czyli nic nie wysyła i nic nie zapisuje — i pyta, co dalej. **Zacznij
+od ustawień domyślnych** zapisze nowy plik; tryb prywatny i Cache-only zostają włączone, dopóki
+sam ich nie wyłączysz. **Zostaw plik — poprawię go sam** niczego nie zapisuje do końca sesji.
+Gdy złą wartość ma tylko pojedyncze pole, wraca ono do wartości domyślnej, a reszta ustawień
+zostaje. Ustawień zapisanych przez nowszą wersję programu starsza wersja nie nadpisuje.
+
+**Gdy baza tłumaczeń jest uszkodzona**, program odkłada ją pod nazwą
+`cache.corrupt-RRRRMMDD-GGMMSS.db` i zakłada nową, pustą. Odłożony plik to zwykła baza SQLite —
+zapamiętane tłumaczenia i ręczne poprawki da się z niej odzyskać. Bazy z nowszej wersji programu
+starsza wersja nie zapisuje.
+
+**Gdy baza tłumaczeń nie działa** (blokada przez inny program, pełny dysk,
 plik tylko do odczytu): tłumaczenie działa dalej, a w grze raz na sesję live pojawia się
 „⚠ Cache niedostępny — tłumaczenia nie są zapisywane”. Wyniki są wtedy pamiętane tylko
 w pamięci programu (do 2000 tekstów, do zmiany dostawcy lub ustawień), więc ten sam tekst
@@ -772,7 +849,8 @@ W Cache-only przy niedziałającej bazie nic nie jest wysyłane.
   wybranego dostawcy tłumaczeń. Modele językowe dostają dodatkowo nazwę gry z profilu
   i pasujące terminy słownika, a DeepL glosariusz ze słownika (zapisany na Twoim koncie
   DeepL). Lokalny serwer LLM (`localhost`) nie wysyła niczego.
-- **Tryb prywatny**: nic nie zapisuje się na dysku — cache działa tylko w pamięci,
+- **Tryb prywatny**: nic nie zapisuje się na dysku — cache działa tylko w pamięci, wybór
+  profilu gry działa do wyłączenia trybu (w pliku zostaje profil zapisany wcześniej),
   a termin dodany przyciskiem **Słownik** w panelu wyniku obowiązuje do końca sesji. Glosariusz DeepL nie jest wtedy tworzony, a terminy
   dodane w tym trybie nigdy do niego nie trafiają. Ostatnia gra nie jest zapisywana
   w `settings.json`, a tworzenie, przemianowywanie i kopiowanie własnych profili gier oraz zapis

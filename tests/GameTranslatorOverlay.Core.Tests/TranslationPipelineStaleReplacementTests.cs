@@ -251,7 +251,7 @@ public class TranslationPipelineStaleReplacementTests
     {
         var cache = new InMemoryTranslationCache();
         await cache.StoreAsync(new NewCacheEntry(MultiLine, MultiLine, "en", "pl", "Porozmawiaj z\nkowalem.", "DeepL"));
-        var provider = new ScriptedProvider((_, _) => throw new TranslationException(TranslationFailureKind.NetworkError, "offline"));
+        var provider = new ScriptedProvider((_, _) => throw new TranslationException(TranslationFailureKind.Unknown, "bad"));
         var pipeline = Create(cache, provider);
 
         for (var i = 0; i < 2; i++) await pipeline.TranslateAsync([MultiLine], "en", "pl");

@@ -2,6 +2,129 @@
 
 Wersjonowanie: SemVer. Daty w formacie RRRR-MM-DD.
 
+## [0.10.0] — 2026-11-09
+
+Wydanie „bezpieczne granie”: pierwsza runda po audycie gotowości do 1.0. Program nie czyta już
+cudzych okien, gdy gra pokaże czarny ekran, wstrzymuje się i chowa napisy, gdy gra schodzi na
+drugi plan, przestaje wysyłać zapytania po błędzie dostawcy, ma limit znaków w oknie, chroni
+ustawienia, słownik i bazę tłumaczeń przed utratą i ma licencję MIT. Testy: 2549 xUnit
+(1883 Core + 499 Infrastructure + 167 CorpusTool), build bez ostrzeżeń.
+**W grze na żywo tego jeszcze nie oglądano** — zachowanie sprawdzone testami i w powtórkach
+(SceneReplay). Okna pokazywane przy uszkodzonych ustawieniach i zmieniony edytor słownika są
+sprawdzone tylko kompilacją i testami logiki. Wydanie 0.7 autor sprawdził ręcznie w grze.
+
+### Nowe w 0.10.0
+
+**Prywatność w trybie live**
+
+- **Czarny ekran gry nie odsłania innych okien.** Ciemny albo jednolity kadr (ekran ładowania,
+  przejście sceny) jest traktowany jak obraz gry. Wcześniej program uznawał wtedy, że okno gry
+  „nie daje się przechwycić”, i do końca sesji czytał zrzut ekranu — razem z oknami leżącymi nad
+  grą. Teraz przejście na źródło zastępcze wymaga 3 kolejnych klatek, w których przechwycenie
+  okna zawodzi, a na ekranie w miejscu gry widać treść, i jest odwracalne: co 10 s program
+  próbuje wrócić, a 2 udane klatki przywracają zwykłe przechwytywanie.
+- **Gra w tle = pauza.** Gdy okno innego programu na pierwszym planie zasłania co najmniej 15%
+  okna gry (Alt+Tab do przeglądarki, komunikatora), tryb live po 2 cyklach wstrzymuje czytanie,
+  czyści i chowa nakładkę i pokazuje „Live wstrzymany — gra w tle”. Po powrocie do gry wznawia
+  od razu pełnym odczytem. Okno na drugim monitorze niczego nie wstrzymuje.
+- **Zrzut ekranu nigdy przy zasłoniętej grze** i z widocznym ostrzeżeniem: w oknie programu
+  żółty znacznik „⚠ Czytam zrzut ekranu: tłumaczone mogą być także inne okna leżące nad grą…”
+  (znika, gdy zwykłe przechwytywanie wraca), nad grą „⚠ Czytam zrzut ekranu — okna nad grą mogą
+  być tłumaczone”, a dla gry na pełnym ekranie „⚠ Pełny ekran: czytam zrzut — przełącz na okno
+  bez ramki”.
+- **Skrót live na nieznanym oknie wymaga potwierdzenia.** Jeśli aktywne okno nie jest
+  zapamiętaną grą, procesem z profilu ani oknem wybranym ręcznie, pierwsze wciśnięcie skrótu
+  pokazuje „Nowe okno — wciśnij skrót jeszcze raz w ciągu 6 s, żeby zacząć tłumaczyć.” Odruchowy
+  skrót w arkuszu czy przeglądarce nie wyśle treści okna do dostawcy.
+- **Tryb prywatny nie zapisuje wyboru profilu.** Profil wybrany w trybie prywatnym działa do
+  wyłączenia trybu; w pliku zostaje profil zapisany wcześniej. Log w trybie prywatnym nie podaje
+  identyfikatora profilu.
+
+**Koszty**
+
+- **Wyłącznik po błędzie dostawcy.** Błąd trwały (brak albo zły klucz, wyczerpany limit konta,
+  nieznany model, zła konfiguracja) wstrzymuje zapytania do zapisania klucza, zmiany ustawień,
+  udanego testu połączenia albo ponownego startu live. Błąd chwilowy (sieć, przeciążenie, limit
+  tempa) daje przerwy 5, 15 i 60 s z jedną próbą po każdej. Wcześniej każdy odczyt ekranu
+  ponawiał zapytanie — do kilkuset na godzinę przy złym kluczu. Stan widać w sekcji
+  **Tłumaczenie** pod statusem klucza.
+- **Limit znaków na sesję w oknie programu** (sekcja **Tłumaczenie**). Domyślnie pole jest
+  puste, czyli bez limitu, jak dotąd; wcześniej limit dało się ustawić tylko w pliku. Nie
+  dotyczy serwera LLM na tym komputerze. Przy 80% jedno ostrzeżenie „⚠ Zużyto 80% limitu znaków
+  tej sesji”, po wyczerpaniu „⚠ Limit znaków sesji wyczerpany — zmień w Tłumaczeniu”.
+- **Liczniki i zegary nie generują zapytań.** Tekst zmieniający się tylko cyframi: zegar,
+  ułamek („3/10”) i procent po trzecim wariancie w 30 s dostają ostatnie tłumaczenie z nowymi
+  cyframi, bez zapytania; liczba przy słowach („Score 15200”) — po ósmym wariancie w 30 s, na
+  10 minut. Kilka podpowiedzi przedmiotów z różnymi liczbami tłumaczy się jak dotąd. Tekst bez
+  żadnej litery („+25%”, „12:30”) nie jest wysyłany wcale.
+- **Tekst, którego dostawca nie umie przetłumaczyć**, po dwóch porażkach z rzędu czeka 5 minut
+  zamiast być wysyłanym przy każdym odczycie.
+- Podpowiedź przy Claude mówi wprost, że `claude-opus-5-5` jest najdroższy i najwolniejszy,
+  a do napisów zwykle wystarcza `claude-sonnet-5-5` albo `claude-haiku-5-5` (lista podpowiedzi
+  ma teraz `claude-haiku-5-5` zamiast `claude-haiku-4-5`; model domyślny bez zmian).
+
+**Dane gracza**
+
+- **Uszkodzony `settings.json` nie włącza po cichu wysyłania.** Nieczytelny albo zajęty plik:
+  program robi kopię z datą (`settings.json.corrupt-RRRRMMDD-GGMMSS.bak`), startuje w trybie
+  prywatnym i Cache-only, niczego nie zapisuje i pyta, czy zacząć od ustawień domyślnych, czy
+  zostawić plik do ręcznej naprawy. Pojedyncze pole ze złą wartością wraca do domyślnej,
+  a reszta ustawień zostaje. Wcześniej uszkodzony plik oznaczał ciche ustawienia domyślne —
+  także wyłączony tryb prywatny.
+- Ustawienia mają numer wersji (`settingsVersion`), a pola, których ta wersja programu nie zna,
+  wracają do pliku przy zapisie. Plik z nowszej wersji programu nie jest nadpisywany.
+- **Baza tłumaczeń (`cache.db`)**: uszkodzona baza jest odkładana pod nazwą z datą
+  (`cache.corrupt-RRRRMMDD-GGMMSS.db`) zamiast blokować zapamiętywanie; baza z nowszej wersji
+  programu nie jest zapisywana. Tłumaczenia i ręczne poprawki z odłożonej bazy da się odzyskać.
+- **Edytor słownika**: nie otwiera do edycji pliku, którego nie umie odczytać (wcześniej pokazywał
+  pustą listę i zapis kasował słownik), przed każdym zapisem zostawia kopię `.bak`, pyta
+  o niezapisane zmiany przy zamykaniu, ma przycisk **Anuluj**, nie zapisuje terminu bez
+  tłumaczenia, a w trybie prywatnym jest tylko do odczytu. Nieczytelny słownik użytkownika
+  program zgłasza w pasku statusu, zamiast pomijać go po cichu.
+- Profil gry nie może wskazać słownika spoza folderu słowników (pole `glossary` to nazwa, nie
+  ścieżka). Nazwa gry trafia do zapytania LLM oczyszczona ze znaków sterujących i skrócona do
+  80 znaków.
+- Błąd zapisu ustawień nie wyrzuca okna błędu: zmiana działa do zamknięcia programu, a pasek
+  statusu mówi, co się stało.
+
+**Stabilność**
+
+- Tryb live zatrzymuje się dopiero po 10 s nieprzerwanych błędów (wcześniej po 5 błędach, czyli
+  po niecałej sekundzie), z rosnącą przerwą między próbami, i mówi dlaczego — nad grą
+  i w zasobniku: „■ Live zatrzymany: okno gry zostało zamknięte”, „…nie da się przechwycić
+  obrazu gry”, „…brak pakietu OCR (en)”, „…seria błędów — szczegóły w logu”, „…nieoczekiwany
+  błąd programu”. Ten komunikat pokazuje się także przy wyłączonych komunikatach nakładki.
+- Błąd przy jednym napisie nie przerywa odczytu całej klatki, a błąd rysowania nakładki nie
+  zatrzymuje sesji. Pominięte wyjątki są liczone i trafiają do logu jako ostrzeżenia.
+- Log zaczyna się wpisem z wersją programu, Windows, .NET, monitorami (rozdzielczość i skala)
+  i językami OCR; zapisuje start i zatrzymanie trybu live z powodem. Nieoczekiwany błąd w trakcie
+  live nie otwiera okna nad grą, a okno błędu pojawia się najwyżej raz na 60 s.
+
+**Licencja i wydanie**
+
+- **Licencja MIT** (plik `LICENSE`). Teksty licencji użytych bibliotek są w folderze `licenses`
+  w paczce, a ich lista w `THIRD-PARTY-NOTICES.md`.
+- Pliki programu nie zawierają już ścieżek z komputera, na którym powstały (mapowanie ścieżek
+  źródeł w buildzie Release).
+- CI odrzuca wydanie, w którym tag nie zgadza się z wersją programu.
+- Gotowe adresy Ollama i LM Studio używają `127.0.0.1` zamiast `localhost`. „Profil uniwersalny
+  (szablon)” zniknął z listy profili (to wzór do kopiowania, nie profil gry). Tekst przy kluczu
+  API mówi, że klucz jest wysyłany wyłącznie do wybranego dostawcy.
+- Aktualizacje: Microsoft.NET.Test.Sdk 18.11.0, System.Security.Cryptography.ProtectedData
+  10.0.14, ReportGenerator 5.5.12.
+- Narzędzia (dla deweloperów): SceneReplay — scenariusze `black-frame` i `provider-failure`.
+
+### Znane ograniczenia 0.10.0
+
+- Pauza „gra w tle” obejmuje także okno samego tłumacza leżące nad grą: podgląd zmian wyglądu
+  na żywo wymaga, żeby okno programu nie zasłaniało gry (drugi monitor albo mniejsze okno).
+- Kliknięcie pustego pulpitu przy grze w oknie wstrzymuje live, choć gra jest widoczna.
+- Gdy gra w trakcie sesji przestanie dawać się przechwytywać i zacznie oddawać jednolity obraz
+  (na przykład po zmianie trybu wyświetlania), napisy znikną do ponownego startu live.
+- Podstawione cyfry w liczniku nie zmieniają odmiany słów („22 obrażeń”).
+- Uszkodzenie w głębi pliku bazy tłumaczeń (nie w nagłówku) nie jest wykrywane przy starcie:
+  baza nie jest wtedy odkładana, a błąd pojawia się w logu przy odczycie.
+
 ## [0.9.0] — 2026-10-17
 
 Wydanie „płynność bez udziału gracza”: poprawka ręczna widoczna od razu, szybszy powrót napisów
